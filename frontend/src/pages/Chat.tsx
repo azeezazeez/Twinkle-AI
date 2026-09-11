@@ -9,8 +9,8 @@ import ConfirmationModal from '../components/ConfirmationModal';
 
 import {
   ArrowDown, ArrowUp,
-  Copy, Check, Edit2,
-  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, SquarePen,
+  Copy, Check, Edit2, Sun, Moon,
+  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, MessageCircle, SquarePen, MoreHorizontal,
 } from 'lucide-react';
 
 import ReactMarkdown from 'react-markdown';
@@ -80,6 +80,13 @@ const readPersistedSessionId = (): number | null => {
   } catch {
     return null;
   }
+};
+
+const getInitialTheme = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const stored = localStorage.getItem('theme');
+  if (stored) return stored === 'dark';
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
 };
 
 const formatFileSize = (bytes: number): string => {
@@ -158,6 +165,8 @@ const fileToDataUrl = (file: File): Promise<string> =>
         reject(new Error(`Failed to read ${file.name}`));
         return;
       }
+      // Keep the exact browser-generated data URL. Do not add filename
+      // parameters: PDF/image viewers can reject non-standard data URLs.
       resolve(result);
     };
     reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
@@ -167,6 +176,8 @@ const fileToDataUrl = (file: File): Promise<string> =>
 const attachmentNameStorageKey = 'nexus-ai-attachment-names';
 
 const getAttachmentStorageId = (value: string): string => {
+  // Small deterministic hash so localStorage keys never contain the entire
+  // (potentially huge) base64 data URL.
   let hash = 2166136261;
   for (let i = 0; i < value.length; i++) {
     hash ^= value.charCodeAt(i);
@@ -200,10 +211,12 @@ const rememberAttachmentNames = (files: File[], dataUrls: string[]) => {
       }
     });
 
+    // Prevent the small metadata store from growing forever.
     const entries = Object.entries(map);
     const limited = Object.fromEntries(entries.slice(-100));
     localStorage.setItem(attachmentNameStorageKey, JSON.stringify(limited));
   } catch {
+    // Filename persistence is best-effort and must never block sending.
   }
 };
 
@@ -211,6 +224,7 @@ const getAttachmentNameFromDataUrl = (
   dataUrl: string,
   index: number
 ): string => {
+  // Read legacy filename parameters only for backwards compatibility.
   const nameMatch = dataUrl.match(/(?:^|;)name=([^;,]+)/i);
 
   if (nameMatch?.[1]) {
@@ -247,6 +261,8 @@ const getAttachmentNameFromDataUrl = (
   return getStoredAttachmentName(dataUrl) || `attachment-${index + 1}.${extension}`;
 };
 
+// Rebuild any persisted data URL as a File. This is used for
+// previewing and retrying attachments after the chat has been reloaded.
 const isValidAttachmentDataUrl = (dataUrl: unknown): dataUrl is string => {
   if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) return false;
   return /^data:[^;,]+(?:;[^,]*)?;base64,[A-Za-z0-9+/=\s]+$/i.test(dataUrl);
@@ -310,6 +326,7 @@ const dataUrlToFile = async (
 interface ModelOption {
   id: string;
   name: string;
+  provider: 'Groq';
   description: string;
   icon: React.ElementType;
   vision?: boolean;
@@ -317,19 +334,12 @@ interface ModelOption {
 }
 
 const MODEL_OPTIONS: ModelOption[] = [
-  { id: 'openai/gpt-oss-120b', name: 'Twinkle Pro', description: 'Advanced reasoning and coding', icon: Brain },
-  { id: 'openai/gpt-oss-20b', name: 'Twinkle', description: 'Fast everyday conversations', icon: Zap },
-  { id: 'qwen/qwen3.8-27b', name: 'Twinkle Qwen', description: 'Enhanced vision and reasoning', icon: Eye, vision: true },
+  { id: 'openai/gpt-oss-120b', name: 'TWINKLE PRO', provider: 'Groq', description: 'Advanced reasoning and coding', icon: Brain },
+  { id: 'openai/gpt-oss-20b', name: 'TWINKLE', provider: 'Groq', description: 'Fast everyday conversations', icon: Zap },
+  { id: 'qwen/qwen3.8-27b', name: 'TWINKLE QWEN', provider: 'Groq', description: 'Enhanced vision and reasoning', icon: Eye, vision: true },
 ];
 
 const MODEL_STORAGE_KEY = 'nexus_selected_model';
-
-const RESPONSE_STATUS_MESSAGES = [
-  'Preparing your response…',
-  'Reviewing your request…',
-  'Working through the details…',
-  'Putting everything together…',
-];
 
 const EMPTY_CHAT_PROMPTS = [
   "What's on your mind today?",
@@ -356,33 +366,15 @@ export default function Chat({ user, onLogout }: Props) {
   const [loading, setLoading] = useState(true);
   const [justFinished, setJustFinished] = useState(false);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
-  const [responseStatus, setResponseStatus] = useState('Preparing your response…');
-
   const [copiedId, setCopiedId] = useState<number | string | null>(null);
   const [editingMessage, setEditingMessage] = useState<{ id: string | number; content: string } | null>(null);
   const [editInput, setEditInput] = useState('');
   const [modalType, setModalType] = useState<'none' | 'delete-all' | 'delete-single'>('none');
   const [sessionIdToDelete, setSessionIdToDelete] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (!isTyping) {
-      setResponseStatus('Preparing your response…');
-      return;
-    }
-
-    let index = 0;
-    setResponseStatus(RESPONSE_STATUS_MESSAGES[0]);
-
-    const interval = window.setInterval(() => {
-      index = (index + 1) % RESPONSE_STATUS_MESSAGES.length;
-      setResponseStatus(RESPONSE_STATUS_MESSAGES[index]);
-    }, 2200);
-
-    return () => window.clearInterval(interval);
-  }, [isTyping]);
   const sessionToDelete = sessions.find(session => session.id === sessionIdToDelete);
   const [serverWaking, setServerWaking] = useState(false);
   const [requestHasFiles, setRequestHasFiles] = useState(false);
+  // Keep the chat interface clean on login; the sidebar opens only when requested.
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const [selectedModel, setSelectedModel] = useState<string>(() => {
@@ -400,6 +392,40 @@ export default function Chat({ user, onLogout }: Props) {
     EMPTY_CHAT_PROMPTS[Math.floor(Math.random() * EMPTY_CHAT_PROMPTS.length)]
   );
   const modelPickerRef = useRef<HTMLDivElement>(null);
+
+  // File upload
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [filePreviews, setFilePreviews] = useState<{ id: string; file: File; preview?: string }[]>([]);
+  const [isProcessingFiles, setIsProcessingFiles] = useState(false);
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewText, setPreviewText] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [messageAttachments, setMessageAttachments] = useState<Record<string | number, string[]>>({});
+
+  // Speech recognition (UI removed)
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const speechBaseRef = useRef('');
+
+  // Theme
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    const dark = getInitialTheme();
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.toggle('dark', dark);
+    }
+    return dark;
+  });
+
+  const toggleTheme = useCallback(() => {
+    setIsDark(prev => {
+      const next = !prev;
+      document.documentElement.classList.toggle('dark', next);
+      localStorage.setItem('theme', next ? 'dark' : 'light');
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
@@ -425,18 +451,91 @@ export default function Chat({ user, onLogout }: Props) {
   const isSendingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Stores the specific session ID that should skip one message load
+  // (the newly created session after first send), so switching to any
+  // OTHER existing session always loads its messages correctly.
   const skipMessageLoadRef = useRef<number | null>(null);
 
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [filePreviews, setFilePreviews] = useState<{ id: string; file: File; preview?: string }[]>([]);
-  const [isProcessingFiles, setIsProcessingFiles] = useState(false);
-  const [previewFile, setPreviewFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewText, setPreviewText] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Auto-resize textarea
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+      inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 180)}px`;
+    }
+  }, [input]);
 
-  const [messageAttachments, setMessageAttachments] = useState<Record<string | number, string[]>>({});
+  // Clean up object URLs
+  const filePreviewsRef = useRef(filePreviews);
+  useEffect(() => { filePreviewsRef.current = filePreviews; }, [filePreviews]);
+  useEffect(() => {
+    return () => {
+      filePreviewsRef.current.forEach(fp => {
+        if (fp.preview) URL.revokeObjectURL(fp.preview);
+      });
+    };
+  }, []);
 
+  // Speech recognition handlers (kept but never called from UI)
+  const startListening = useCallback(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      alert('Your browser does not support speech recognition. Please use Chrome, Edge, or Safari.');
+      return;
+    }
+    if (recognitionRef.current) recognitionRef.current.stop();
+    speechBaseRef.current = inputRef.current?.value || '';
+
+    const recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onstart = () => setIsListening(true);
+    recognition.onresult = (event: any) => {
+      let finalSegment = '';
+      let interimSegment = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) finalSegment += event.results[i][0].transcript;
+        else interimSegment += event.results[i][0].transcript;
+      }
+      if (finalSegment) {
+        speechBaseRef.current = speechBaseRef.current
+          ? `${speechBaseRef.current} ${finalSegment}`.trim()
+          : finalSegment.trim();
+      }
+      const display = interimSegment
+        ? `${speechBaseRef.current} ${interimSegment}`.trim()
+        : speechBaseRef.current;
+      setInput(display);
+    };
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+    recognition.onerror = (event: any) => {
+      console.error('Speech error:', event.error);
+      setIsListening(false);
+      recognitionRef.current = null;
+      if (event.error === 'not-allowed') alert('Microphone access denied.');
+      else if (event.error === 'network') alert('Network error occurred.');
+    };
+    recognitionRef.current = recognition;
+    recognition.start();
+    inputRef.current?.focus();
+  }, []);
+
+  const stopListening = useCallback(() => {
+    recognitionRef.current?.stop();
+    setIsListening(false);
+  }, []);
+
+  const toggleListening = useCallback(() => {
+    if (isListening) stopListening();
+    else startListening();
+  }, [isListening, startListening, stopListening]);
+
+  // Load sessions & messages
   const loadSessions = useCallback(async () => {
     try {
       wakeUpServer();
@@ -496,9 +595,14 @@ export default function Chat({ user, onLogout }: Props) {
     }
   }, [sessions, loading]);
 
+  // Only skip loading messages if the currentSessionId exactly matches the
+  // ID we marked to skip (the newly created session). Any other session --
+  // including ones selected on mobile -- always loads.
   useEffect(() => {
     if (currentSessionId) {
       if (skipMessageLoadRef.current === currentSessionId) {
+        // This is the new session we just created inline — messages are
+        // already in state from the sendMessage flow, so skip the fetch.
         skipMessageLoadRef.current = null;
         return;
       }
@@ -508,6 +612,12 @@ export default function Chat({ user, onLogout }: Props) {
     }
   }, [currentSessionId, loadMessages]);
 
+  // Keep scrolling inside the message panel only so the floating composer
+  // remains stable while the conversation scrolls.
+  //
+  // On mobile, the first message of a newly started chat is positioned near
+  // the top of the conversation so the sent message is immediately visible.
+  // Later messages keep the existing bottom-scrolling behavior.
   useEffect(() => {
     const container = messagesContainerRef.current;
     if (!container) return;
@@ -523,7 +633,6 @@ export default function Chat({ user, onLogout }: Props) {
 
         if (firstMessage) {
           const targetTop = Math.max(0, firstMessage.offsetTop - 24);
-          setShowScrollBottom(false);
           container.scrollTo({
             top: targetTop,
             behavior: 'smooth',
@@ -533,7 +642,6 @@ export default function Chat({ user, onLogout }: Props) {
         }
       }
 
-      setShowScrollBottom(false);
       container.scrollTo({
         top: container.scrollHeight,
         behavior: 'smooth',
@@ -545,9 +653,7 @@ export default function Chat({ user, onLogout }: Props) {
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
-    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-
-    setShowScrollBottom(messages.length > 0 && distanceFromBottom > 100);
+    setShowScrollBottom(scrollHeight - scrollTop - clientHeight > 100);
   };
 
   const extractZipEntry = async (file: File, entryName: string): Promise<string | null> => {
@@ -644,29 +750,6 @@ export default function Chat({ user, onLogout }: Props) {
     }
   };
 
-  const openPersistedAttachmentPreview = async (
-    dataUrl: string,
-    index: number
-  ) => {
-    if (!isValidAttachmentDataUrl(dataUrl)) {
-      console.error('Invalid persisted attachment preview data.');
-      return;
-    }
-
-    try {
-      const file = await dataUrlToFile(
-        dataUrl,
-        index,
-        getStoredAttachmentName(dataUrl) || undefined
-      );
-
-      const objectUrl = URL.createObjectURL(file);
-      await openFilePreview(file, objectUrl);
-    } catch (error) {
-      console.error('Failed to open attachment preview:', error);
-    }
-  };
-
   const closeFilePreview = () => {
     if (previewUrl && previewFile) {
       const isSelectedPreview = filePreviews.some(fp => fp.file === previewFile && fp.preview === previewUrl);
@@ -677,6 +760,7 @@ export default function Chat({ user, onLogout }: Props) {
     setPreviewText(null);
   };
 
+  // File handlers (kept but no UI to trigger them)
   const handleFileSelection = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
 
@@ -758,6 +842,8 @@ export default function Chat({ user, onLogout }: Props) {
   ) => {
     if ((!messageText.trim() && (!filesToSend || filesToSend.length === 0))) return;
     if (isSendingRef.current) return;
+    if (isListening) stopListening();
+
     isSendingRef.current = true;
     setIsTyping(true);
     setJustFinished(false);
@@ -771,6 +857,8 @@ export default function Chat({ user, onLogout }: Props) {
 
     const tempId = `temp-${Date.now()}`;
 
+    // Remember that this is the first message in a new chat so mobile can
+    // move the sent message into view near the top of the conversation.
     const existingMessageCount = messagesSnapshot?.length ?? messages.length;
     if (existingMessageCount === 0) {
       firstMessageScrollPendingRef.current = true;
@@ -831,6 +919,9 @@ export default function Chat({ user, onLogout }: Props) {
       const activeSessionId = response.sessionId || currentSessionId;
 
       if (isNewSession && activeSessionId) {
+        // Store the new session's ID (not just `true`) so the
+        // message-load effect skips ONLY this specific session's fetch.
+        // Switching to any other session will still trigger a full load.
         skipMessageLoadRef.current = activeSessionId;
         setCurrentSessionId(activeSessionId);
         persistSessionId(activeSessionId);
@@ -859,6 +950,9 @@ export default function Chat({ user, onLogout }: Props) {
         return [...prev, aiMsg];
       });
 
+      // Generate a fresh adaptive chat title for a new chat, and also when
+      // an existing user message is edited and re-submitted. This keeps the
+      // sidebar/chat header aligned with the latest direction of the chat.
       if ((isNewSession || regenerateTitle) && activeSessionId) {
         try {
           const titleSource = finalMessage || 'File analysis';
@@ -868,6 +962,9 @@ export default function Chat({ user, onLogout }: Props) {
 
             await chatApi.renameSession(activeSessionId, newTitle);
 
+            // Update local state immediately so the mobile drawer and the
+            // desktop sidebar/header show the generated title without waiting
+            // for another render or a remount of the mobile drawer.
             setSessions(prev =>
               prev.map(session =>
                 session.id === activeSessionId
@@ -876,6 +973,7 @@ export default function Chat({ user, onLogout }: Props) {
               )
             );
 
+            // Confirm the server state after the immediate UI update.
             await loadSessions();
           }
         } catch (renameErr) { console.error('Adaptive title rename failed:', renameErr); }
@@ -964,6 +1062,8 @@ export default function Chat({ user, onLogout }: Props) {
 
     const text = typeof directMessage === 'string' ? directMessage : (input || '');
 
+    // Defensive normalization prevents stale browser/HMR state from causing
+    // "Cannot read properties of undefined (reading 'length')" during upload.
     const currentSelectedFiles = Array.isArray(selectedFiles)
       ? selectedFiles.filter((file): file is File => file instanceof File)
       : [];
@@ -978,6 +1078,8 @@ export default function Chat({ user, onLogout }: Props) {
 
     try {
       if (filesToSend && filesToSend.length > 0) {
+        // Keep a data URL for EVERY attachment so the sent message can
+        // render the same attachment after it has been sent or reloaded.
         previewUrls = await Promise.all(
           filesToSend.map(fileToDataUrl)
         );
@@ -1008,6 +1110,9 @@ export default function Chat({ user, onLogout }: Props) {
     }
   };
 
+  // Retry a user message using the conversation state before that message.
+  // Persisted attachments are reconstructed so images and documents are
+  // actually sent again instead of being reduced to placeholder text.
   const handleRetryMessage = async (msg: Message) => {
     if (isTyping) return;
 
@@ -1104,6 +1209,8 @@ export default function Chat({ user, onLogout }: Props) {
     try {
       await chatApi.renameSession(sid, trimmedName);
 
+      // Update the parent source of truth immediately. Both desktop and
+      // mobile SessionList instances receive this same sessions array.
       setSessions(prev =>
         prev.map(session =>
           session.id === sid
@@ -1112,9 +1219,12 @@ export default function Chat({ user, onLogout }: Props) {
         )
       );
 
+      // Confirm the persisted server state after the optimistic UI update.
       await loadSessions();
     } catch (err) {
       console.error('Rename failed:', err);
+      // Re-sync with the server if the rename request failed after a partial
+      // UI update or if the backend returned an unexpected result.
       try { await loadSessions(); } catch (syncErr) { console.error('Session sync failed:', syncErr); }
     }
   };
@@ -1139,18 +1249,17 @@ export default function Chat({ user, onLogout }: Props) {
     }
   };
 
-
+  
 const normalizeTwinkleIdentity = (content: string): string => {
   const normalized = content.trim();
 
+  // Replace the old default identity response with a clearer Twinkle AI
+  // introduction. Keep this narrowly scoped so documents mentioning Nexus
+  // are not rewritten accidentally.
   if (
     /^I['’]m\s+Nexus\s+AI,\s+a\s+helpful\s+assistant\s+designed\s+to\s+help\s+you\s+with\s+information,\s+analysis,\s+and\s+more\.?$/i.test(normalized)
   ) {
-    return `Hi! I’m Twinkle AI, a professional AI assistant designed to help you understand information, solve problems, work with files, write and analyze content, develop software, and accomplish tasks efficiently.
-
-I adapt my responses to what you’re actually asking. I aim to provide clear, accurate, practical, and meaningful answers rather than following a rigid response template.
-
-You can ask me questions, give me a file or image to analyze, ask for help with coding or technical problems, request writing or explanations, or simply tell me what you’re trying to accomplish — I’ll help you figure out the best way forward.`;
+    return 'I’m Twinkle AI, an AI assistant designed to help you with information, explanations, analysis, coding, writing, documents, and everyday problem-solving. I can help you understand ideas, work through tasks, and create useful content.';
   }
 
   return content;
@@ -1160,34 +1269,55 @@ const cleanMessageContent = (content: unknown): string => {
     if (typeof content !== 'string') return '';
 
     let cleaned = normalizeTwinkleIdentity(content)
+      // NEVER strip Markdown links here. Keeping the original [label](url)
+      // structure lets ReactMarkdown preserve clickability while the
+      // renderer below displays the complete URL as the visible text.
+      //
+      // Contact/project links are normalized onto separate lines so each
+      // link is easy to read in the document-style output.
       .replace(/^([ \t]*(?:\[[^\]]+\]\((?:https?|mailto|tel):[^)]+\)[ \t]*\|[ \t]*)+\[[^\]]+\]\((?:https?|mailto|tel):[^)]+\)[ \t]*)$/gim, (line) =>
         line.split(/\s*\|\s*/).join('\n')
       )
       .replace(/\s*\|\s*(?=(?:Email|Phone|Github|GitHub|LinkedIn|Portfolio)\s*:)/gi, '\n')
+      // Make document labels use the same heavy weight as **Technologies**.
       .replace(/(^|\n)(\s*[-*]?\s*)(Github|GitHub|Live Link|Live link|Email|Phone|Technologies)\s*:/gim, '$1$2**$3:**')
+      // Keep project GitHub and Live Link entries on their own lines.
       .replace(/\s+(\*\*(?:Github|GitHub):\*\*)\s*(https?:\/\/[^\s]+)/g, '\n$1 $2\n')
       .replace(/\s+(\*\*(?:Live Link|Live link):\*\*)\s*(https?:\/\/[^\s]+)/g, '\n$1 $2')
+      // The resume subtitle should have the same heavy visual weight as
+      // labels such as Email/Technologies.
       .replace(/^(Java Developer\s*[—-]\s*Java Backend Developer)\s*$/gim, '**$1**')
+      // Remove the internal attachment marker from persisted/live messages.
       .replace(/\n?\n?\[Attached Files:.*?\]/g, '')
       .trim();
 
+    // The upload flow can persist the internal "no question/instruction"
+    // formatting prompt as the user's message. It is an implementation
+    // detail and must never be rendered as chat content, including after
+    // the conversation is refreshed and messages are loaded from the API.
     if (/^The user uploaded document\(s\) but did not provide a question or instruction\./i.test(cleaned)) {
       return '';
     }
 
+    // Remove generated helper sections that are not part of the document
+    // itself. This is intentionally done on the client too so old persisted
+    // messages are cleaned when they are loaded after refresh.
     cleaned = cleaned
       .replace(/\n?\s*#{1,6}\s*Additional Links\s*(?:\(Repeated in Source\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
       .replace(/\n?\s*#{1,6}\s*Document Structure\s*(?:\(as extracted\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
-      .replace(/\n?\s*#{1,6}\s*Additional Section\s*(?:\(as in original document\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s*Links\s*&\s*Contact\b|$)/gi, '\n')
-      .replace(/\n?\s*#{1,6}\s*Links\s*&\s*Contact\s*\n[\s\S]*$/gi, '\n')
       .trim();
 
+    // Remove the dedicated Architecture section/bullet requested by the UI
+    // formatting rules, without removing legitimate architecture mentions
+    // inside normal project/experience descriptions.
     cleaned = cleaned
       .replace(/\n?\s*#{1,6}\s*Architecture\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
       .replace(/^\s*[-*]\s*\*\*Architecture:\*\*.*(?:\n|$)/gim, '')
-      .replace(/\n?\s*#{1,6}\s*Document\s+Navigation\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
       .trim();
 
+    // Extracted PDF text can contain the same standalone URLs twice (often a
+    // duplicate block at the end). Keep the first occurrence so links near
+    // the top of the document remain intact, and drop later duplicates.
     const seenStandaloneLinks = new Set<string>();
     cleaned = cleaned
       .split('\n')
@@ -1267,6 +1397,7 @@ const cleanMessageContent = (content: unknown): string => {
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
       />
+      {/* Mobile header: reference-style compact navigation. Desktop is unchanged. */}
       <div className="twinkle-mobile-header lg:hidden">
         <button
           type="button"
@@ -1298,6 +1429,7 @@ const cleanMessageContent = (content: unknown): string => {
       </div>
 
       <main className="relative flex h-full min-h-0 min-w-0 w-full max-w-full flex-1 flex-col overflow-hidden bg-transparent">
+        {/* Messages */}
         <div
           className="min-h-0 min-w-0 flex-1 w-full max-w-full overflow-x-hidden overflow-y-auto overscroll-contain scroll-hide pb-32 pt-0 md:pb-36"
           ref={messagesContainerRef}
@@ -1423,6 +1555,7 @@ const cleanMessageContent = (content: unknown): string => {
                         <div className={`flex flex-col gap-1 min-w-0 max-w-full ${
                           msg.role === 'user' ? 'items-end w-full' : 'flex-1'
                         }`}>
+                          {/* Message card: do not render an empty bubble for attachment-only messages. */}
                           {((isEditing || displayContent.trim().length > 0)) && (
                           <div
                             className={`min-w-0 max-w-full ${
@@ -1519,6 +1652,10 @@ const cleanMessageContent = (content: unknown): string => {
                                       );
                                     },
                                     a({ children, href, ...props }: any) {
+                                      // Always show the complete destination instead
+                                      // of a shortened Markdown label such as
+                                      // [Cartify Repo](https://github.com/...).
+                                      // This keeps every URL visible AND clickable.
                                       const visibleHref = href
                                         ?.replace(/^mailto:/i, '')
                                         .replace(/^tel:/i, '');
@@ -1529,7 +1666,7 @@ const cleanMessageContent = (content: unknown): string => {
                                           href={href}
                                           target={isExternal ? '_blank' : undefined}
                                           rel={isExternal ? 'noopener noreferrer' : undefined}
-                                          className="!underline underline-offset-2 decoration-1 !text-blue-600 dark:!text-blue-400 hover:!text-blue-700 dark:hover:!text-blue-300 font-medium break-all"
+                                          className="!underline underline-offset-2 decoration-1 text-black dark:text-white hover:text-black dark:hover:text-white font-medium break-all"
                                           style={{ textDecoration: 'underline' }}
                                           {...props}
                                         >
@@ -1577,6 +1714,8 @@ const cleanMessageContent = (content: unknown): string => {
                           </div>
                           )}
 
+                          {/* Message action buttons.
+                              Always visible so touch devices do not depend on hover. */}
                           <div
                             className={`flex flex-wrap items-center gap-1 mt-1 px-1 ${
                               msg.role === 'user' ? 'justify-end' : 'justify-start'
@@ -1598,6 +1737,7 @@ const cleanMessageContent = (content: unknown): string => {
                             </span>
 
                             <div className="flex items-center gap-0.5">
+                              {/* User: Re-send + Edit + Copy */}
                               {msg.role === 'user' && !isEditing && !isTyping && (
                                 <>
                                   <button
@@ -1622,6 +1762,7 @@ const cleanMessageContent = (content: unknown): string => {
                                 </>
                               )}
 
+                              {/* Copy is available for EVERY message */}
                               <button
                                 type="button"
                                 onClick={() => {
@@ -1698,70 +1839,23 @@ const cleanMessageContent = (content: unknown): string => {
           </div>
         </div>
 
+        {/* Input bar */}
         <div className="fixed bottom-0 left-0 right-0 z-[9000] w-full max-w-full overflow-visible bg-transparent px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-4 sm:pt-3 sm:pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-6 md:pt-4 md:pb-[calc(1rem+env(safe-area-inset-bottom))] lg:pl-[4.5rem]">
           <div className="mx-auto w-full max-w-[920px] min-w-0 relative">
             <AnimatePresence>
-              {showScrollBottom && messages.length > 0 && (
-                isTyping ? (
-                  <motion.div
-                    initial={{ opacity: 0, y: 8, scale: 0.96 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 8, scale: 0.96 }}
-                    transition={{ type: 'spring', stiffness: 380, damping: 28 }}
-                    className="absolute -top-14 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2.5 rounded-full border border-white/75 bg-white/65 px-3.5 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 backdrop-blur-2xl dark:border-white/10 dark:bg-zinc-900/55 dark:ring-white/10"
-                    aria-live="polite"
-                    aria-label={responseStatus}
-                  >
-                    <span className="flex shrink-0 items-center gap-1" aria-hidden="true">
-                      <motion.span
-                        animate={{ y: [0, -1.5, 0], opacity: [0.35, 1, 0.35] }}
-                        transition={{ repeat: Infinity, duration: 1.15, ease: 'easeInOut' }}
-                        className="h-1.5 w-1.5 rounded-full bg-zinc-700 dark:bg-zinc-200"
-                      />
-                      <motion.span
-                        animate={{ y: [0, -1.5, 0], opacity: [0.35, 1, 0.35] }}
-                        transition={{ repeat: Infinity, duration: 1.15, ease: 'easeInOut', delay: 0.16 }}
-                        className="h-1.5 w-1.5 rounded-full bg-zinc-700 dark:bg-zinc-200"
-                      />
-                      <motion.span
-                        animate={{ y: [0, -1.5, 0], opacity: [0.35, 1, 0.35] }}
-                        transition={{ repeat: Infinity, duration: 1.15, ease: 'easeInOut', delay: 0.32 }}
-                        className="h-1.5 w-1.5 rounded-full bg-zinc-700 dark:bg-zinc-200"
-                      />
-                    </span>
-
-                    <motion.span
-                      key={responseStatus}
-                      initial={{ opacity: 0, y: 3 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.22, ease: 'easeOut' }}
-                      className="whitespace-nowrap text-[11px] font-medium tracking-tight text-zinc-700 dark:text-zinc-200"
-                    >
-                      {responseStatus}
-                    </motion.span>
-                  </motion.div>
-                ) : (
-                  <motion.button
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 10 }}
-                    onClick={() =>
-                      messagesContainerRef.current?.scrollTo({
-                        top: messagesContainerRef.current.scrollHeight,
-                        behavior: 'smooth',
-                      })
-                    }
-                    className="absolute -top-14 left-1/2 z-10 -translate-x-1/2 rounded-full border border-white/70 bg-white/60 p-2.5 text-black shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 backdrop-blur-xl transition-all hover:scale-110 hover:bg-white/75 dark:border-white/15 dark:bg-zinc-900/50 dark:ring-white/10 dark:hover:bg-zinc-900/65"
-                    aria-label="Scroll to latest message"
-                    title="Scroll to latest message"
-                  >
-                    <ArrowDown className="h-4 w-4 md:h-5 md:w-5" />
-                  </motion.button>
-                )
+              {showScrollBottom && (
+                <motion.button
+                  initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
+                  onClick={() => messagesContainerRef.current?.scrollTo({ top: messagesContainerRef.current.scrollHeight, behavior: 'smooth' })}
+                  className="absolute -top-14 right-2 p-2.5 bg-black text-white rounded-full shadow-xl shadow-zinc-500/30 hover:bg-zinc-700 transition-all z-10 hover:scale-110"
+                >
+                  <ArrowDown className="w-4 h-4 md:w-5 md:h-5" />
+                </motion.button>
               )}
             </AnimatePresence>
 
             <div className={`relative z-[60] flex w-full min-w-0 flex-col overflow-visible rounded-[24px] border border-zinc-200/90 bg-white shadow-[0_2px_18px_rgba(0,0,0,0.08)] transition-all dark:border-zinc-700/90 dark:bg-zinc-900 dark:shadow-black/20 ${justFinished ? 'animate-blink' : ''}`}>
+              {/* File preview strip (kept for consistency but never shown without UI trigger) */}
               <AnimatePresence>
                 {filePreviews.length > 0 && (
                   <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="flex flex-wrap gap-3 px-3 pt-3 pb-2.5 border-b border-zinc-100 dark:border-zinc-800/70">
@@ -1804,6 +1898,7 @@ const cleanMessageContent = (content: unknown): string => {
                 ref={modelPickerRef}
                 className="twinkle-composer-row relative z-[200] flex min-w-0 items-end gap-1 px-2.5 py-2 sm:gap-2 sm:px-3 sm:py-2.5 md:px-4"
               >
+                {/* Hidden file input */}
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -1816,6 +1911,7 @@ const cleanMessageContent = (content: unknown): string => {
                   }}
                 />
 
+                {/* + attachment button */}
                 <motion.button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
@@ -1857,12 +1953,14 @@ const cleanMessageContent = (content: unknown): string => {
                   </motion.span>
                 </motion.button>
 
+                {/* Ask Anything */}
                 <div className="relative min-w-0 flex-1">
                   <textarea
                     ref={inputRef}
                     value={input}
                     onChange={(e) => {
                       setInput(e.target.value);
+                      if (isListening) speechBaseRef.current = e.target.value;
                     }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey && !isTyping) {
@@ -1870,7 +1968,7 @@ const cleanMessageContent = (content: unknown): string => {
                         handleSendMessage();
                       }
                     }}
-                    placeholder="Ask Anything"
+                    placeholder={isListening ? 'Listening…' : 'Ask Anything'}
                     rows={1}
                     className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent px-1 py-2 text-[15px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:min-h-[46px] sm:py-2.5"
                     onInput={(e) => {
@@ -1881,6 +1979,7 @@ const cleanMessageContent = (content: unknown): string => {
                   />
                 </div>
 
+                {/* Think / model selector */}
                 <div className="relative shrink-0">
                   <motion.button
                     type="button"
@@ -1893,10 +1992,19 @@ const cleanMessageContent = (content: unknown): string => {
                     transition={{ type: 'spring', stiffness: 400, damping: 25 }}
                     className="group relative inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-zinc-300 bg-white px-2.5 text-black shadow-sm transition-all hover:border-black hover:shadow-md dark:border-zinc-700 dark:bg-zinc-900 dark:text-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-400 dark:from-zinc-950/60 dark:via-zinc-900 dark:to-zinc-900/40 dark:text-zinc-300 sm:px-3"
                   >
-                    <span className="max-w-[190px] truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:text-sm">
-                      {activeModel.name}
+                    <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-black to-zinc-700 text-white shadow-sm shadow-zinc-500/30">
+                      {(() => {
+                        const ActiveIcon = activeModel.icon;
+                        return <ActiveIcon className="h-3.5 w-3.5" strokeWidth={2} />;
+                      })()}
                     </span>
-                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
+                    <span className="text-xs font-bold sm:text-sm">
+                      Twinkle
+                    </span>
+                    <span className="hidden sm:inline rounded-md border border-zinc-300 bg-white/70 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider text-zinc-600 dark:border-zinc-400 dark:bg-zinc-950/40 dark:text-zinc-300">
+                      
+                    </span>
+                    <ChevronDown className="h-3.5 w-3.5 text-zinc-600 dark:text-zinc-300" />
                   </motion.button>
 
                   <AnimatePresence>
@@ -1937,6 +2045,7 @@ const cleanMessageContent = (content: unknown): string => {
                                 <span className="min-w-0 flex-1">
                                   <span className="flex items-center gap-2">
                                     <span className="truncate text-xs font-medium text-zinc-800 dark:text-zinc-100">{option.name}</span>
+                                    <span className="shrink-0 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500">GROQ</span>
                                   </span>
                                   <span className="mt-0.5 block truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
                                     {option.description}{option.vision ? ' · Vision' : ''}
@@ -1951,6 +2060,7 @@ const cleanMessageContent = (content: unknown): string => {
                     )}
                   </AnimatePresence>
                 </div>
+                {/* Send / Stop */}
                 <motion.button
                   type="button"
                   onClick={isTyping ? handleStopResponse : () => handleSendMessage()}
