@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Session, User } from '../types';
 import {
-  Plus, LogOut, Trash2, X, Search, SquarePen,
+  LogOut, Trash2, X, Search, SquarePen,
   MoreHorizontal, Pin, PinOff, Edit3,
   MessageCircle, Sun, Moon, Sparkles,
 } from 'lucide-react';
@@ -344,13 +344,13 @@ function SessionList({
       {/* Top controls */}
       <div className="p-4 shrink-0">
         <button
+          type="button"
           onClick={() => { onNewSession(); onClose(); }}
-          className="w-full py-2.5 px-4 bg-zinc-600 text-white rounded-2xl flex items-center gap-3 font-bold hover:opacity-90 transition-all active:scale-[0.98] group shadow-lg mb-3"
+          aria-label="New chat"
+          className="w-full h-12 px-2.5 bg-transparent text-zinc-900 dark:text-zinc-100 rounded-xl flex items-center gap-3 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors active:bg-zinc-100 dark:active:bg-zinc-800"
         >
-          <div className="w-5 h-5 rounded-md bg-white/20 flex items-center justify-center group-hover:scale-110 transition-transform shrink-0">
-            <Plus className="w-3.5 h-3.5" />
-          </div>
-          <span className="uppercase tracking-widest text-xs">New Chat</span>
+          <SquarePen className="w-[22px] h-[22px] shrink-0 text-zinc-900 dark:text-zinc-100" strokeWidth={1.7} />
+          <span className="text-[17px] font-normal tracking-tight">New chat</span>
         </button>
 
         <div className="relative group">
