@@ -9,8 +9,8 @@ import ConfirmationModal from '../components/ConfirmationModal';
 
 import {
   ArrowDown, ArrowUp,
-  Copy, Check, Edit2, Sun, Moon,
-  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, MessageCircle, SquarePen, MoreHorizontal,
+  Copy, Check, Edit2,
+  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, SquarePen,
 } from 'lucide-react';
 
 import ReactMarkdown from 'react-markdown';
@@ -1916,11 +1916,11 @@ const cleanMessageContent = (content: unknown): string => {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 8, scale: 0.96 }}
                     transition={{ type: 'spring', stiffness: 380, damping: 28 }}
-                    className="absolute -top-14 left-1/2 -translate-x-1/2 inline-flex items-center gap-2.5 rounded-full border border-white/75 bg-white/65 px-3.5 py-2 backdrop-blur-2xl shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 dark:border-white/10 dark:bg-zinc-900/55 dark:ring-white/10 z-10"
+                    className="absolute -top-14 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2.5 rounded-full border border-white/75 bg-white/65 px-3.5 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 backdrop-blur-2xl dark:border-white/10 dark:bg-zinc-900/55 dark:ring-white/10"
                     aria-live="polite"
                     aria-label={responseStatus}
                   >
-                    <span className="flex items-center gap-1 shrink-0" aria-hidden="true">
+                    <span className="flex shrink-0 items-center gap-1" aria-hidden="true">
                       <motion.span
                         animate={{ y: [0, -1.5, 0], opacity: [0.35, 1, 0.35] }}
                         transition={{ repeat: Infinity, duration: 1.15, ease: 'easeInOut' }}
@@ -1937,28 +1937,33 @@ const cleanMessageContent = (content: unknown): string => {
                         className="h-1.5 w-1.5 rounded-full bg-zinc-700 dark:bg-zinc-200"
                       />
                     </span>
-                    <AnimatePresence mode="wait">
-                      <motion.span
-                        key={responseStatus}
-                        initial={{ opacity: 0, y: 3 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -3 }}
-                        transition={{ duration: 0.18 }}
-                        className="whitespace-nowrap text-[11px] font-medium tracking-tight text-zinc-700 dark:text-zinc-200"
-                      >
-                        {responseStatus}
-                      </motion.span>
-                    </AnimatePresence>
+
+                    <motion.span
+                      key={responseStatus}
+                      initial={{ opacity: 0, y: 3 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.22, ease: 'easeOut' }}
+                      className="whitespace-nowrap text-[11px] font-medium tracking-tight text-zinc-700 dark:text-zinc-200"
+                    >
+                      {responseStatus}
+                    </motion.span>
                   </motion.div>
                 ) : (
                   <motion.button
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 10 }}
-                    onClick={() => messagesContainerRef.current?.scrollTo({ top: messagesContainerRef.current.scrollHeight, behavior: 'smooth' })}
-                    className="absolute -top-14 left-1/2 -translate-x-1/2 p-2.5 bg-white/60 dark:bg-zinc-900/50 backdrop-blur-xl text-black border border-white/70 dark:border-white/15 rounded-full shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 dark:ring-white/10 hover:bg-white/75 dark:hover:bg-zinc-900/65 transition-all z-10 hover:scale-110"
+                    onClick={() =>
+                      messagesContainerRef.current?.scrollTo({
+                        top: messagesContainerRef.current.scrollHeight,
+                        behavior: 'smooth',
+                      })
+                    }
+                    className="absolute -top-14 left-1/2 z-10 -translate-x-1/2 rounded-full border border-white/70 bg-white/60 p-2.5 text-black shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 backdrop-blur-xl transition-all hover:scale-110 hover:bg-white/75 dark:border-white/15 dark:bg-zinc-900/50 dark:ring-white/10 dark:hover:bg-zinc-900/65"
+                    aria-label="Scroll to latest message"
+                    title="Scroll to latest message"
                   >
-                    <ArrowDown className="w-4 h-4 md:w-5 md:h-5" />
+                    <ArrowDown className="h-4 w-4 md:h-5 md:w-5" />
                   </motion.button>
                 )
               )}
