@@ -1,5 +1,5 @@
 const API_BASE =
-'https://nexus-ai-chatbot-pfl3.onrender.com/api';
+'https://twinkle-ai-w2gg.onrender.com/api';
 
 const CHAT_RETRIES = 6;
 const RETRY_DELAY_MS = 5_000;
