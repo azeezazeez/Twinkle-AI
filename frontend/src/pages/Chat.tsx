@@ -633,6 +633,7 @@ export default function Chat({ user, onLogout }: Props) {
 
         if (firstMessage) {
           const targetTop = Math.max(0, firstMessage.offsetTop - 24);
+          setShowScrollBottom(false);
           container.scrollTo({
             top: targetTop,
             behavior: 'smooth',
@@ -642,6 +643,7 @@ export default function Chat({ user, onLogout }: Props) {
         }
       }
 
+      setShowScrollBottom(false);
       container.scrollTo({
         top: container.scrollHeight,
         behavior: 'smooth',
@@ -653,7 +655,11 @@ export default function Chat({ user, onLogout }: Props) {
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
-    setShowScrollBottom(scrollHeight - scrollTop - clientHeight > 100);
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+
+    // The scroll-to-bottom control is meaningful only when a conversation
+    // exists and the user is actually away from the latest messages.
+    setShowScrollBottom(messages.length > 0 && distanceFromBottom > 100);
   };
 
   const extractZipEntry = async (file: File, entryName: string): Promise<string | null> => {
@@ -1876,11 +1882,11 @@ const cleanMessageContent = (content: unknown): string => {
         <div className="fixed bottom-0 left-0 right-0 z-[9000] w-full max-w-full overflow-visible bg-transparent px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-4 sm:pt-3 sm:pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-6 md:pt-4 md:pb-[calc(1rem+env(safe-area-inset-bottom))] lg:pl-[4.5rem]">
           <div className="mx-auto w-full max-w-[920px] min-w-0 relative">
             <AnimatePresence>
-              {showScrollBottom && (
+              {showScrollBottom && messages.length > 0 && (
                 <motion.button
                   initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
                   onClick={() => messagesContainerRef.current?.scrollTo({ top: messagesContainerRef.current.scrollHeight, behavior: 'smooth' })}
-                  className="absolute -top-14 left-1/2 -translate-x-1/2 p-2.5 bg-white text-black border border-zinc-200 rounded-full shadow-xl shadow-zinc-500/20 hover:bg-zinc-50 transition-all z-10 hover:scale-110"
+                  className="absolute -top-14 left-1/2 -translate-x-1/2 p-2.5 bg-white/60 dark:bg-zinc-900/50 backdrop-blur-xl text-black border border-white/70 dark:border-white/15 rounded-full shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 dark:ring-white/10 hover:bg-white/75 dark:hover:bg-zinc-900/65 transition-all z-10 hover:scale-110"
                 >
                   <ArrowDown className="w-4 h-4 md:w-5 md:h-5" />
                 </motion.button>
