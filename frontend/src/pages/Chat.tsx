@@ -750,6 +750,31 @@ export default function Chat({ user, onLogout }: Props) {
     }
   };
 
+  const openPersistedAttachmentPreview = async (
+    dataUrl: string,
+    index: number
+  ) => {
+    if (!isValidAttachmentDataUrl(dataUrl)) {
+      console.error('Invalid persisted attachment preview data.');
+      return;
+    }
+
+    try {
+      const file = await dataUrlToFile(
+        dataUrl,
+        index,
+        getStoredAttachmentName(dataUrl) || undefined
+      );
+
+      // Use a Blob URL for persisted attachments. This is more reliable for
+      // PDF/browser previewing than loading a large base64 data URL directly.
+      const objectUrl = URL.createObjectURL(file);
+      await openFilePreview(file, objectUrl);
+    } catch (error) {
+      console.error('Failed to open attachment preview:', error);
+    }
+  };
+
   const closeFilePreview = () => {
     if (previewUrl && previewFile) {
       const isSelectedPreview = filePreviews.some(fp => fp.file === previewFile && fp.preview === previewUrl);
