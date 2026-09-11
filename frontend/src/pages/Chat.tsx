@@ -1352,6 +1352,8 @@ const cleanMessageContent = (content: unknown): string => {
     cleaned = cleaned
       .replace(/\n?\s*#{1,6}\s*Architecture\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
       .replace(/^\s*[-*]\s*\*\*Architecture:\*\*.*(?:\n|$)/gim, '')
+      // Remove only the generated Document Navigation section.
+      .replace(/\n?\s*#{1,6}\s*Document\s+Navigation\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
       .trim();
 
     // Extracted PDF text can contain the same standalone URLs twice (often a
@@ -1883,13 +1885,42 @@ const cleanMessageContent = (content: unknown): string => {
           <div className="mx-auto w-full max-w-[920px] min-w-0 relative">
             <AnimatePresence>
               {showScrollBottom && messages.length > 0 && (
-                <motion.button
-                  initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
-                  onClick={() => messagesContainerRef.current?.scrollTo({ top: messagesContainerRef.current.scrollHeight, behavior: 'smooth' })}
-                  className="absolute -top-14 left-1/2 -translate-x-1/2 p-2.5 bg-white/60 dark:bg-zinc-900/50 backdrop-blur-xl text-black border border-white/70 dark:border-white/15 rounded-full shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 dark:ring-white/10 hover:bg-white/75 dark:hover:bg-zinc-900/65 transition-all z-10 hover:scale-110"
-                >
-                  <ArrowDown className="w-4 h-4 md:w-5 md:h-5" />
-                </motion.button>
+                isTyping ? (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.92 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.92 }}
+                    className="absolute -top-14 left-1/2 -translate-x-1/2 flex items-center justify-center p-2.5 bg-white/60 dark:bg-zinc-900/50 backdrop-blur-xl border border-white/70 dark:border-white/15 rounded-full shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 dark:ring-white/10 z-10"
+                    aria-label="Twinkle is responding"
+                    title="Twinkle is responding"
+                  >
+                    <div className="flex items-center gap-1 px-0.5">
+                      <motion.span
+                        animate={{ y: [0, -2, 0], opacity: [0.35, 1, 0.35] }}
+                        transition={{ repeat: Infinity, duration: 0.9, ease: 'easeInOut' }}
+                        className="block h-1.5 w-1.5 rounded-full bg-black dark:bg-white"
+                      />
+                      <motion.span
+                        animate={{ y: [0, -2, 0], opacity: [0.35, 1, 0.35] }}
+                        transition={{ repeat: Infinity, duration: 0.9, ease: 'easeInOut', delay: 0.15 }}
+                        className="block h-1.5 w-1.5 rounded-full bg-black dark:bg-white"
+                      />
+                      <motion.span
+                        animate={{ y: [0, -2, 0], opacity: [0.35, 1, 0.35] }}
+                        transition={{ repeat: Infinity, duration: 0.9, ease: 'easeInOut', delay: 0.3 }}
+                        className="block h-1.5 w-1.5 rounded-full bg-black dark:bg-white"
+                      />
+                    </div>
+                  </motion.div>
+                ) : (
+                  <motion.button
+                    initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
+                    onClick={() => messagesContainerRef.current?.scrollTo({ top: messagesContainerRef.current.scrollHeight, behavior: 'smooth' })}
+                    className="absolute -top-14 left-1/2 -translate-x-1/2 p-2.5 bg-white/60 dark:bg-zinc-900/50 backdrop-blur-xl text-black border border-white/70 dark:border-white/15 rounded-full shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 dark:ring-white/10 hover:bg-white/75 dark:hover:bg-zinc-900/65 transition-all z-10 hover:scale-110"
+                  >
+                    <ArrowDown className="w-4 h-4 md:w-5 md:h-5" />
+                  </motion.button>
+                )
               )}
             </AnimatePresence>
 
