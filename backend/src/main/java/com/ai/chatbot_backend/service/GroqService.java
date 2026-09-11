@@ -1,0 +1,284 @@
+package com.ai.chatbot_backend.service;
+
+import com.ai.chatbot_backend.exception.AIServiceException;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.*;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+
+import java.util.*;
+
+@Service
+@Slf4j
+public class GroqService {
+
+    @Value("${groq.api.key}")
+    private String apiKey;
+
+    @Value("${groq.api.url}")
+    private String apiUrl;
+
+    @Value("${groq.model}")
+    private String defaultModel;
+
+    @Value("${groq.models:${groq.model}}")
+    private String configuredModels;
+
+    @Value("${groq.vision.models:}")
+    private String configuredVisionModels;
+
+    private final RestTemplate restTemplate;
+
+    public GroqService(RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
+    }
+
+    public List<String> getAvailableModels() {
+        LinkedHashSet<String> models = new LinkedHashSet<>();
+        for (String model : configuredModels.split(",")) {
+            String value = model.trim();
+            if (!value.isEmpty()) {
+                models.add(value);
+            }
+        }
+        if (models.isEmpty()) {
+            models.add(defaultModel);
+        }
+        return new ArrayList<>(models);
+    }
+
+    private String resolveModel(String requestedModel) {
+        String requested = requestedModel == null ? "" : requestedModel.trim();
+        if (requested.isEmpty()) {
+            return defaultModel;
+        }
+
+        if (!getAvailableModels().contains(requested)) {
+            throw new IllegalArgumentException("Unsupported AI model: " + requested);
+        }
+        return requested;
+    }
+
+    public String generateResponse(
+            String userMessage,
+            List<Map<String, String>> conversationHistory) {
+        return generateResponse(userMessage, conversationHistory, null);
+    }
+
+    public String generateResponse(
+            String userMessage,
+            List<Map<String, String>> conversationHistory,
+            String requestedModel) {
+        List<Map<String, Object>> messages = buildHistory(conversationHistory);
+        messages.add(Map.of(
+                "role", "user",
+                "content", userMessage));
+        return callGroq(messages, resolveModel(requestedModel));
+    }
+
+    public String generateResponseWithImages(
+            String userMessage,
+            List<Map<String, String>> conversationHistory,
+            List<String> base64Images,
+            List<String> mimeTypes,
+            String requestedModel) {
+        if (base64Images == null || base64Images.isEmpty()) {
+            return generateResponse(userMessage, conversationHistory, requestedModel);
+        }
+
+        if (base64Images.size() > 3) {
+            throw new IllegalArgumentException(
+                    "You can attach a maximum of 3 images per message.");
+        }
+
+        String resolvedModel = resolveModel(requestedModel);
+        if (!isVisionModel(resolvedModel)) {
+            throw new IllegalArgumentException(
+                    "The selected AI model does not support image attachments. "
+                            + "Configure GROQ_VISION_MODELS with a vision-capable model and select it.");
+        }
+
+        if (mimeTypes == null || mimeTypes.size() < base64Images.size()) {
+            throw new IllegalArgumentException("Image MIME type information is missing.");
+        }
+
+        List<Map<String, Object>> messages = buildHistory(conversationHistory);
+        List<Map<String, Object>> contentParts = new ArrayList<>();
+
+        for (int i = 0; i < base64Images.size(); i++) {
+            String mime = mimeTypes.get(i);
+            if (mime == null || !mime.startsWith("image/")) {
+                throw new IllegalArgumentException("Unsupported image MIME type.");
+            }
+
+            String dataUrl = "data:" + mime + ";base64," + base64Images.get(i);
+            contentParts.add(Map.of(
+                    "type", "image_url",
+                    "image_url", Map.of("url", dataUrl)));
+        }
+
+        String text = (userMessage == null || userMessage.isBlank())
+                ? "Please analyse the attached image(s) carefully and answer in English."
+                : userMessage;
+
+        contentParts.add(Map.of(
+                "type", "text",
+                "text", text));
+
+        messages.add(Map.of(
+                "role", "user",
+                "content", contentParts));
+
+        return callGroq(messages, resolvedModel);
+    }
+
+    private boolean isVisionModel(String model) {
+        if (configuredVisionModels == null || configuredVisionModels.isBlank()) {
+            return false;
+        }
+
+        for (String value : configuredVisionModels.split(",")) {
+            if (model.equals(value.trim())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<Map<String, Object>> buildHistory(
+            List<Map<String, String>> history) {
+        List<Map<String, Object>> messages = new ArrayList<>();
+
+        messages.add(Map.of(
+                "role", "system",
+                "content",
+                "You are Twinkle AI, a helpful AI assistant. "
+                        + "Always respond in English unless the user explicitly asks you to respond in another language. "
+                        + "If the user writes in another language, understand it but answer in English by default. "
+                        + "Analyse provided text and images carefully and answer accurately. "
+                        + "When multiple images are attached, analyse all of them together when relevant. "
+                        + "When document content is provided, use that content when answering questions about the uploaded files. "
+                        + "If the user uploads a document without a question or instruction, format and return the document content "
+                        + "instead of summarizing or analyzing it. Preserve the source wording, section order, headings, bullets, "
+                        + "numbering, dates, names, and factual details. Use clean Markdown formatting and put a horizontal rule (---) "
+                        + "between every major section. Gather all unique URLs, email addresses, phone links, and other clickable links "
+                        + "into one clearly labeled 'Links & Contact' section. Render them as clickable Markdown links. "
+                        + "Do not scatter duplicate links through the document. If PDF extraction creates a duplicate URL-only block at "
+                        + "the end, omit that duplicate block because its links belong in 'Links & Contact'. "
+                        + "Do not add an introduction, conclusion, summary, analysis, or commentary in this mode."));
+
+        if (history != null) {
+            for (Map<String, String> h : history) {
+                if (h == null) {
+                    continue;
+                }
+
+                String role = h.get("role");
+                String content = h.get("content");
+
+                if (role == null || content == null || content.isBlank()) {
+                    continue;
+                }
+
+                messages.add(Map.of(
+                        "role", role,
+                        "content", content));
+            }
+        }
+
+        return messages;
+    }
+
+    private String callGroq(
+            List<Map<String, Object>> messages,
+            String model) {
+        try {
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("model", model);
+            requestBody.put("messages", messages);
+            requestBody.put("temperature", 0.7);
+            requestBody.put("max_tokens", 6000);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setBearerAuth(apiKey);
+
+            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
+
+            ResponseEntity<Map> response = restTemplate.postForEntity(
+                    apiUrl + "/chat/completions",
+                    entity,
+                    Map.class);
+
+            Map<String, Object> body = response.getBody();
+
+            if (body != null && body.containsKey("choices")) {
+                List<Map<String, Object>> choices = (List<Map<String, Object>>) body.get("choices");
+
+                if (!choices.isEmpty()) {
+                    Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
+
+                    if (message != null) {
+                        Object content = message.get("content");
+                        if (content != null && !content.toString().isBlank()) {
+                            return content.toString();
+                        }
+                    }
+                }
+            }
+
+            throw new AIServiceException(
+                    "Groq returned an invalid or empty response.");
+
+        } catch (org.springframework.web.client.HttpClientErrorException e) {
+            String responseBody = e.getResponseBodyAsString();
+            log.error(
+                    "Groq client error. model={}, status={}, response={}",
+                    model,
+                    e.getStatusCode().value(),
+                    responseBody);
+
+            throw new AIServiceException(
+                    "Groq API error " + e.getStatusCode().value() + ": " + responseBody,
+                    e);
+
+        } catch (org.springframework.web.client.HttpServerErrorException e) {
+            String responseBody = e.getResponseBodyAsString();
+            log.error(
+                    "Groq server error. model={}, status={}, response={}",
+                    model,
+                    e.getStatusCode().value(),
+                    responseBody);
+
+            throw new AIServiceException(
+                    "Groq API error " + e.getStatusCode().value() + ": " + responseBody,
+                    e);
+
+        } catch (org.springframework.web.client.ResourceAccessException e) {
+            log.error(
+                    "Unable to reach Groq. model={}, error={}",
+                    model,
+                    e.getMessage(),
+                    e);
+
+            throw new AIServiceException(
+                    "Unable to connect to Groq AI service.",
+                    e);
+
+        } catch (AIServiceException e) {
+            throw e;
+
+        } catch (Exception e) {
+            log.error(
+                    "Unexpected Groq error. model={}, error={}",
+                    model,
+                    e.getMessage(),
+                    e);
+
+            throw new AIServiceException(
+                    "Unexpected error while communicating with the AI service.",
+                    e);
+        }
+    }
+}
