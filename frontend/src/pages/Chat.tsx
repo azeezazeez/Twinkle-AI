@@ -1284,7 +1284,11 @@ const normalizeTwinkleIdentity = (content: string): string => {
   if (
     /^I['’]m\s+Nexus\s+AI,\s+a\s+helpful\s+assistant\s+designed\s+to\s+help\s+you\s+with\s+information,\s+analysis,\s+and\s+more\.?$/i.test(normalized)
   ) {
-    return 'I’m Twinkle AI, an AI assistant designed to help you with information, explanations, analysis, coding, writing, documents, and everyday problem-solving. I can help you understand ideas, work through tasks, and create useful content.';
+    return `Hi! I’m Twinkle AI, a professional AI assistant designed to help you understand information, solve problems, work with files, write and analyze content, develop software, and accomplish tasks efficiently.
+
+I adapt my responses to what you’re actually asking. I aim to provide clear, accurate, practical, and meaningful answers rather than following a rigid response template.
+
+You can ask me questions, give me a file or image to analyze, ask for help with coding or technical problems, request writing or explanations, or simply tell me what you’re trying to accomplish — I’ll help you figure out the best way forward.`;
   }
 
   return content;
