@@ -9,8 +9,8 @@ import ConfirmationModal from '../components/ConfirmationModal';
 
 import {
   ArrowDown, ArrowUp,
-  Copy, Check, Edit2,
-  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, SquarePen,
+  Copy, Check, Edit2, Sun, Moon,
+  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, MessageCircle, SquarePen, MoreHorizontal,
 } from 'lucide-react';
 
 import ReactMarkdown from 'react-markdown';
@@ -326,6 +326,7 @@ const dataUrlToFile = async (
 interface ModelOption {
   id: string;
   name: string;
+  provider: 'Groq';
   description: string;
   icon: React.ElementType;
   vision?: boolean;
@@ -333,19 +334,12 @@ interface ModelOption {
 }
 
 const MODEL_OPTIONS: ModelOption[] = [
-  { id: 'openai/gpt-oss-120b', name: 'Twinkle Pro', description: 'Advanced reasoning and coding', icon: Brain },
-  { id: 'openai/gpt-oss-20b', name: 'Twinkle', description: 'Fast everyday conversations', icon: Zap },
-  { id: 'qwen/qwen3.8-27b', name: 'Twinkle Qwen', description: 'Enhanced vision and reasoning', icon: Eye, vision: true },
+  { id: 'openai/gpt-oss-120b', name: 'TWINKLE PRO', provider: 'Groq', description: 'Advanced reasoning and coding', icon: Brain },
+  { id: 'openai/gpt-oss-20b', name: 'TWINKLE', provider: 'Groq', description: 'Fast everyday conversations', icon: Zap },
+  { id: 'qwen/qwen3.8-27b', name: 'TWINKLE QWEN', provider: 'Groq', description: 'Enhanced vision and reasoning', icon: Eye, vision: true },
 ];
 
 const MODEL_STORAGE_KEY = 'nexus_selected_model';
-
-const RESPONSE_STATUS_MESSAGES = [
-  'Preparing your response…',
-  'Reviewing your request…',
-  'Working through the details…',
-  'Putting everything together…',
-];
 
 const EMPTY_CHAT_PROMPTS = [
   "What's on your mind today?",
@@ -372,30 +366,11 @@ export default function Chat({ user, onLogout }: Props) {
   const [loading, setLoading] = useState(true);
   const [justFinished, setJustFinished] = useState(false);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
-  const [responseStatus, setResponseStatus] = useState('Preparing your response…');
-
   const [copiedId, setCopiedId] = useState<number | string | null>(null);
   const [editingMessage, setEditingMessage] = useState<{ id: string | number; content: string } | null>(null);
   const [editInput, setEditInput] = useState('');
   const [modalType, setModalType] = useState<'none' | 'delete-all' | 'delete-single'>('none');
   const [sessionIdToDelete, setSessionIdToDelete] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (!isTyping) {
-      setResponseStatus('Preparing your response…');
-      return;
-    }
-
-    let index = 0;
-    setResponseStatus(RESPONSE_STATUS_MESSAGES[0]);
-
-    const interval = window.setInterval(() => {
-      index = (index + 1) % RESPONSE_STATUS_MESSAGES.length;
-      setResponseStatus(RESPONSE_STATUS_MESSAGES[index]);
-    }, 2200);
-
-    return () => window.clearInterval(interval);
-  }, [isTyping]);
   const sessionToDelete = sessions.find(session => session.id === sessionIdToDelete);
   const [serverWaking, setServerWaking] = useState(false);
   const [requestHasFiles, setRequestHasFiles] = useState(false);
@@ -472,7 +447,8 @@ export default function Chat({ user, onLogout }: Props) {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const firstMessageScrollPendingRef = useRef(false);
+  // Follow new content only while the user is near the bottom.
+  const shouldAutoScrollRef = useRef(true);
   const isSendingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -637,41 +613,17 @@ export default function Chat({ user, onLogout }: Props) {
     }
   }, [currentSessionId, loadMessages]);
 
-  // Keep scrolling inside the message panel only so the floating composer
-  // remains stable while the conversation scrolls.
-  //
-  // On mobile, the first message of a newly started chat is positioned near
-  // the top of the conversation so the sent message is immediately visible.
-  // Later messages keep the existing bottom-scrolling behavior.
+  // Keep scrolling inside the message panel only. Follow new content while the
+  // user is near the bottom, but never steal the scroll position after the user
+  // deliberately drags upward on mobile.
   useEffect(() => {
     const container = messagesContainerRef.current;
-    if (!container) return;
+    if (!container || !shouldAutoScrollRef.current) return;
 
     const frame = requestAnimationFrame(() => {
-      if (
-        firstMessageScrollPendingRef.current &&
-        window.matchMedia('(max-width: 767px)').matches
-      ) {
-        const firstMessage = container.querySelector<HTMLElement>(
-          '[data-twinkle-message]'
-        );
-
-        if (firstMessage) {
-          const targetTop = Math.max(0, firstMessage.offsetTop - 88);
-          setShowScrollBottom(false);
-          container.scrollTo({
-            top: targetTop,
-            behavior: 'smooth',
-          });
-          firstMessageScrollPendingRef.current = false;
-          return;
-        }
-      }
-
-      setShowScrollBottom(false);
       container.scrollTo({
         top: container.scrollHeight,
-        behavior: 'smooth',
+        behavior: 'auto',
       });
     });
 
@@ -681,10 +633,8 @@ export default function Chat({ user, onLogout }: Props) {
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-
-    // The scroll-to-bottom control is meaningful only when a conversation
-    // exists and the user is actually away from the latest messages.
-    setShowScrollBottom(messages.length > 0 && distanceFromBottom > 100);
+    shouldAutoScrollRef.current = distanceFromBottom <= 120;
+    setShowScrollBottom(distanceFromBottom > 100);
   };
 
   const extractZipEntry = async (file: File, entryName: string): Promise<string | null> => {
@@ -778,31 +728,6 @@ export default function Chat({ user, onLogout }: Props) {
       } catch {
         setPreviewText('Unable to read this document in the browser.');
       }
-    }
-  };
-
-  const openPersistedAttachmentPreview = async (
-    dataUrl: string,
-    index: number
-  ) => {
-    if (!isValidAttachmentDataUrl(dataUrl)) {
-      console.error('Invalid persisted attachment preview data.');
-      return;
-    }
-
-    try {
-      const file = await dataUrlToFile(
-        dataUrl,
-        index,
-        getStoredAttachmentName(dataUrl) || undefined
-      );
-
-      // Use a Blob URL for persisted attachments. This is more reliable for
-      // PDF/browser previewing than loading a large base64 data URL directly.
-      const objectUrl = URL.createObjectURL(file);
-      await openFilePreview(file, objectUrl);
-    } catch (error) {
-      console.error('Failed to open attachment preview:', error);
     }
   };
 
@@ -912,14 +837,6 @@ export default function Chat({ user, onLogout }: Props) {
     abortControllerRef.current = controller;
 
     const tempId = `temp-${Date.now()}`;
-
-    // Remember that this is the first message in a new chat so mobile can
-    // move the sent message into view near the top of the conversation.
-    const existingMessageCount = messagesSnapshot?.length ?? messages.length;
-    if (existingMessageCount === 0) {
-      firstMessageScrollPendingRef.current = true;
-    }
-
     const tempUserMsg: Message = {
       id: tempId,
       sessionId: currentSessionId || 0,
@@ -1226,6 +1143,8 @@ export default function Chat({ user, onLogout }: Props) {
   };
 
   const createNewSession = () => {
+    shouldAutoScrollRef.current = true;
+    setShowScrollBottom(false);
     setEmptyChatPrompt(current => getNextEmptyChatPrompt(current));
     setCurrentSessionId(null);
     persistSessionId(null);
@@ -1234,6 +1153,12 @@ export default function Chat({ user, onLogout }: Props) {
     setEditingMessage(null);
     setSelectedFiles([]);
     setFilePreviews([]);
+  };
+
+  const handleMobileNewChat = () => {
+    createNewSession();
+    setMobileOpen(false);
+    requestAnimationFrame(() => inputRef.current?.focus());
   };
 
   const deleteSession = (sid: number) => {
@@ -1315,11 +1240,7 @@ const normalizeTwinkleIdentity = (content: string): string => {
   if (
     /^I['’]m\s+Nexus\s+AI,\s+a\s+helpful\s+assistant\s+designed\s+to\s+help\s+you\s+with\s+information,\s+analysis,\s+and\s+more\.?$/i.test(normalized)
   ) {
-    return `Hi! I’m Twinkle AI, a professional AI assistant designed to help you understand information, solve problems, work with files, write and analyze content, develop software, and accomplish tasks efficiently.
-
-I adapt my responses to what you’re actually asking. I aim to provide clear, accurate, practical, and meaningful answers rather than following a rigid response template.
-
-You can ask me questions, give me a file or image to analyze, ask for help with coding or technical problems, request writing or explanations, or simply tell me what you’re trying to accomplish — I’ll help you figure out the best way forward.`;
+    return 'I’m Twinkle AI, an AI assistant designed to help you with information, explanations, analysis, coding, writing, documents, and everyday problem-solving. I can help you understand ideas, work through tasks, and create useful content.';
   }
 
   return content;
@@ -1365,10 +1286,6 @@ const cleanMessageContent = (content: unknown): string => {
     cleaned = cleaned
       .replace(/\n?\s*#{1,6}\s*Additional Links\s*(?:\(Repeated in Source\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
       .replace(/\n?\s*#{1,6}\s*Document Structure\s*(?:\(as extracted\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
-      // Remove only the extracted "Additional Section" and "Links & Contact"
-      // sections. Keep hyperlinks that belong to the actual document content.
-      .replace(/\n?\s*#{1,6}\s*Additional Section\s*(?:\(as in original document\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s*Links\s*&\s*Contact\b|$)/gi, '\n')
-      .replace(/\n?\s*#{1,6}\s*Links\s*&\s*Contact\s*\n[\s\S]*$/gi, '\n')
       .trim();
 
     // Remove the dedicated Architecture section/bullet requested by the UI
@@ -1377,8 +1294,6 @@ const cleanMessageContent = (content: unknown): string => {
     cleaned = cleaned
       .replace(/\n?\s*#{1,6}\s*Architecture\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
       .replace(/^\s*[-*]\s*\*\*Architecture:\*\*.*(?:\n|$)/gim, '')
-      // Remove only the generated Document Navigation section.
-      .replace(/\n?\s*#{1,6}\s*Document\s+Navigation\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
       .trim();
 
     // Extracted PDF text can contain the same standalone URLs twice (often a
@@ -1485,9 +1400,10 @@ const cleanMessageContent = (content: unknown): string => {
         <div className="twinkle-mobile-header-actions">
           <button
             type="button"
-            onClick={() => setMobileOpen(true)}
-            aria-label="Open chat options"
-            className="twinkle-mobile-header-icon twinkle-mobile-header-more"
+            onClick={handleMobileNewChat}
+            aria-label="New chat"
+            title="New chat"
+            className="twinkle-mobile-header-icon"
           >
             <SquarePen className="h-[21px] w-[21px]" strokeWidth={1.7} />
           </button>
@@ -1497,11 +1413,11 @@ const cleanMessageContent = (content: unknown): string => {
       <main className="relative flex h-full min-h-0 min-w-0 w-full max-w-full flex-1 flex-col overflow-hidden bg-transparent">
         {/* Messages */}
         <div
-          className="min-h-0 min-w-0 flex-1 w-full max-w-full overflow-x-hidden overflow-y-auto overscroll-contain scroll-hide pb-32 pt-16 md:pb-36 md:pt-0"
+          className="min-h-0 min-w-0 flex-1 w-full max-w-full overflow-x-hidden overflow-y-auto overscroll-contain scroll-hide scroll-pt-[76px] pb-32 pt-0 md:scroll-pt-0 md:pb-36"
           ref={messagesContainerRef}
           onScroll={handleScroll}
         >
-          <div className="w-full max-w-4xl mx-auto px-3 sm:px-5 md:px-7 lg:px-8 pt-5 md:pt-8 pb-8 md:pb-10">
+          <div className="w-full max-w-4xl mx-auto px-3 sm:px-5 md:px-7 lg:px-8 pt-[76px] sm:pt-[80px] md:pt-8 pb-8 md:pb-10">
             {messages.length === 0 && !isTyping ? (
               <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-2 max-w-3xl mx-auto">
                 <motion.div
@@ -1530,7 +1446,6 @@ const cleanMessageContent = (content: unknown): string => {
                   return (
                     <div
                       key={msg.id || `msg-${index}`}
-                      data-twinkle-message
                       className={`flex w-full min-w-0 ${
                         msg.role === 'user' ? 'justify-end' : 'justify-start'
                       }`}
@@ -1732,7 +1647,7 @@ const cleanMessageContent = (content: unknown): string => {
                                           href={href}
                                           target={isExternal ? '_blank' : undefined}
                                           rel={isExternal ? 'noopener noreferrer' : undefined}
-                                          className="!underline underline-offset-2 decoration-1 !text-blue-600 dark:!text-blue-400 hover:!text-blue-700 dark:hover:!text-blue-300 font-medium break-all"
+                                          className="!underline underline-offset-2 decoration-1 text-black dark:text-white hover:text-black dark:hover:text-white font-medium break-all"
                                           style={{ textDecoration: 'underline' }}
                                           {...props}
                                         >
@@ -1909,63 +1824,14 @@ const cleanMessageContent = (content: unknown): string => {
         <div className="fixed bottom-0 left-0 right-0 z-[9000] w-full max-w-full overflow-visible bg-transparent px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-4 sm:pt-3 sm:pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-6 md:pt-4 md:pb-[calc(1rem+env(safe-area-inset-bottom))] lg:pl-[4.5rem]">
           <div className="mx-auto w-full max-w-[920px] min-w-0 relative">
             <AnimatePresence>
-              {showScrollBottom && messages.length > 0 && (
-                isTyping ? (
-                  <motion.div
-                    initial={{ opacity: 0, y: 8, scale: 0.96 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 8, scale: 0.96 }}
-                    transition={{ type: 'spring', stiffness: 380, damping: 28 }}
-                    className="absolute -top-14 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2.5 rounded-full border border-white/75 bg-white/65 px-3.5 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 backdrop-blur-2xl dark:border-white/10 dark:bg-zinc-900/55 dark:ring-white/10"
-                    aria-live="polite"
-                    aria-label={responseStatus}
-                  >
-                    <span className="flex shrink-0 items-center gap-1" aria-hidden="true">
-                      <motion.span
-                        animate={{ y: [0, -1.5, 0], opacity: [0.35, 1, 0.35] }}
-                        transition={{ repeat: Infinity, duration: 1.15, ease: 'easeInOut' }}
-                        className="h-1.5 w-1.5 rounded-full bg-zinc-700 dark:bg-zinc-200"
-                      />
-                      <motion.span
-                        animate={{ y: [0, -1.5, 0], opacity: [0.35, 1, 0.35] }}
-                        transition={{ repeat: Infinity, duration: 1.15, ease: 'easeInOut', delay: 0.16 }}
-                        className="h-1.5 w-1.5 rounded-full bg-zinc-700 dark:bg-zinc-200"
-                      />
-                      <motion.span
-                        animate={{ y: [0, -1.5, 0], opacity: [0.35, 1, 0.35] }}
-                        transition={{ repeat: Infinity, duration: 1.15, ease: 'easeInOut', delay: 0.32 }}
-                        className="h-1.5 w-1.5 rounded-full bg-zinc-700 dark:bg-zinc-200"
-                      />
-                    </span>
-
-                    <motion.span
-                      key={responseStatus}
-                      initial={{ opacity: 0, y: 3 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.22, ease: 'easeOut' }}
-                      className="whitespace-nowrap text-[11px] font-medium tracking-tight text-zinc-700 dark:text-zinc-200"
-                    >
-                      {responseStatus}
-                    </motion.span>
-                  </motion.div>
-                ) : (
-                  <motion.button
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 10 }}
-                    onClick={() =>
-                      messagesContainerRef.current?.scrollTo({
-                        top: messagesContainerRef.current.scrollHeight,
-                        behavior: 'smooth',
-                      })
-                    }
-                    className="absolute -top-14 left-1/2 z-10 -translate-x-1/2 rounded-full border border-white/70 bg-white/60 p-2.5 text-black shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 backdrop-blur-xl transition-all hover:scale-110 hover:bg-white/75 dark:border-white/15 dark:bg-zinc-900/50 dark:ring-white/10 dark:hover:bg-zinc-900/65"
-                    aria-label="Scroll to latest message"
-                    title="Scroll to latest message"
-                  >
-                    <ArrowDown className="h-4 w-4 md:h-5 md:w-5" />
-                  </motion.button>
-                )
+              {showScrollBottom && (
+                <motion.button
+                  initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
+                  onClick={() => messagesContainerRef.current?.scrollTo({ top: messagesContainerRef.current.scrollHeight, behavior: 'smooth' })}
+                  className="absolute -top-14 right-2 p-2.5 bg-black text-white rounded-full shadow-xl shadow-zinc-500/30 hover:bg-zinc-700 transition-all z-10 hover:scale-110"
+                >
+                  <ArrowDown className="w-4 h-4 md:w-5 md:h-5" />
+                </motion.button>
               )}
             </AnimatePresence>
 
@@ -2052,8 +1918,8 @@ const cleanMessageContent = (content: unknown): string => {
                   <motion.span
                     className="relative z-10 flex items-center justify-center"
                     animate={isProcessingFiles ? { rotate: 90 } : { rotate: 0 }}
-                    whileHover={{ scale: 1.12, rotate: 180 }}
-                    whileTap={{ scale: 0.9, rotate: 180 }}
+                    whileHover={{ scale: 1.12 }}
+                    whileTap={{ scale: 0.9 }}
                     transition={{
                       type: 'spring',
                       stiffness: 500,
@@ -2107,11 +1973,19 @@ const cleanMessageContent = (content: unknown): string => {
                     transition={{ type: 'spring', stiffness: 400, damping: 25 }}
                     className="group relative inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-zinc-300 bg-white px-2.5 text-black shadow-sm transition-all hover:border-black hover:shadow-md dark:border-zinc-700 dark:bg-zinc-900 dark:text-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-400 dark:from-zinc-950/60 dark:via-zinc-900 dark:to-zinc-900/40 dark:text-zinc-300 sm:px-3"
                   >
-                    <span className="max-w-[190px] truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:text-sm">
-                      {activeModel.name}
+                    <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-black to-zinc-700 text-white shadow-sm shadow-zinc-500/30">
+                      {(() => {
+                        const ActiveIcon = activeModel.icon;
+                        return <ActiveIcon className="h-3.5 w-3.5" strokeWidth={2} />;
+                      })()}
                     </span>
-                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
-                  
+                    <span className="text-xs font-bold sm:text-sm">
+                      Twinkle
+                    </span>
+                    <span className="hidden sm:inline rounded-md border border-zinc-300 bg-white/70 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider text-zinc-600 dark:border-zinc-400 dark:bg-zinc-950/40 dark:text-zinc-300">
+                      
+                    </span>
+                    <ChevronDown className="h-3.5 w-3.5 text-zinc-600 dark:text-zinc-300" />
                   </motion.button>
 
                   <AnimatePresence>
@@ -2152,6 +2026,7 @@ const cleanMessageContent = (content: unknown): string => {
                                 <span className="min-w-0 flex-1">
                                   <span className="flex items-center gap-2">
                                     <span className="truncate text-xs font-medium text-zinc-800 dark:text-zinc-100">{option.name}</span>
+                                    <span className="shrink-0 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500">GROQ</span>
                                   </span>
                                   <span className="mt-0.5 block truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
                                     {option.description}{option.vision ? ' · Vision' : ''}
