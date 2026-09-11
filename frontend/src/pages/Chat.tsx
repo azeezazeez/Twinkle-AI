@@ -1305,6 +1305,10 @@ const cleanMessageContent = (content: unknown): string => {
     cleaned = cleaned
       .replace(/\n?\s*#{1,6}\s*Additional Links\s*(?:\(Repeated in Source\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
       .replace(/\n?\s*#{1,6}\s*Document Structure\s*(?:\(as extracted\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
+      // Remove only the extracted "Additional Section" and "Links & Contact"
+      // sections. Keep hyperlinks that belong to the actual document content.
+      .replace(/\n?\s*#{1,6}\s*Additional Section\s*(?:\(as in original document\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s*Links\s*&\s*Contact\b|$)/gi, '\n')
+      .replace(/\n?\s*#{1,6}\s*Links\s*&\s*Contact\s*\n[\s\S]*$/gi, '\n')
       .trim();
 
     // Remove the dedicated Architecture section/bullet requested by the UI
