@@ -258,7 +258,7 @@
 
 .chat-messages a,
 .messages-container a {
-  color: #000000 !important;
+  color: #2563eb !important;
   text-decoration: underline !important;
   text-decoration-thickness: 1px;
   text-underline-offset: 2px;
@@ -266,7 +266,7 @@
 
 .dark .chat-messages a,
 .dark .messages-container a {
-  color: #ffffff !important;
+  color: #60a5fa !important;
 }
 
 .twinkle-chat-logo {
