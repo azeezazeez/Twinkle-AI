@@ -326,7 +326,6 @@ const dataUrlToFile = async (
 interface ModelOption {
   id: string;
   name: string;
-  provider: 'Groq';
   description: string;
   icon: React.ElementType;
   vision?: boolean;
@@ -334,9 +333,9 @@ interface ModelOption {
 }
 
 const MODEL_OPTIONS: ModelOption[] = [
-  { id: 'openai/gpt-oss-120b', name: 'TWINKLE PRO', provider: 'Groq', description: 'Advanced reasoning and coding', icon: Brain },
-  { id: 'openai/gpt-oss-20b', name: 'TWINKLE', provider: 'Groq', description: 'Fast everyday conversations', icon: Zap },
-  { id: 'qwen/qwen3.8-27b', name: 'TWINKLE QWEN', provider: 'Groq', description: 'Enhanced vision and reasoning', icon: Eye, vision: true },
+  { id: 'openai/gpt-oss-120b', name: 'Twinkle Pro', description: 'Advanced reasoning and coding', icon: Brain },
+  { id: 'openai/gpt-oss-20b', name: 'Twinkle', description: 'Fast everyday conversations', icon: Zap },
+  { id: 'qwen/qwen3.8-27b', name: 'Twinkle Qwen', description: 'Enhanced vision and reasoning', icon: Eye, vision: true },
 ];
 
 const MODEL_STORAGE_KEY = 'nexus_selected_model';
@@ -366,11 +365,36 @@ export default function Chat({ user, onLogout }: Props) {
   const [loading, setLoading] = useState(true);
   const [justFinished, setJustFinished] = useState(false);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const [responseStatus, setResponseStatus] = useState('Preparing your response…');
+
+  const responseStatusMessages = [
+    'Preparing your response…',
+    'Reviewing your request…',
+    'Working through the details…',
+    'Putting everything together…',
+  ];
   const [copiedId, setCopiedId] = useState<number | string | null>(null);
   const [editingMessage, setEditingMessage] = useState<{ id: string | number; content: string } | null>(null);
   const [editInput, setEditInput] = useState('');
   const [modalType, setModalType] = useState<'none' | 'delete-all' | 'delete-single'>('none');
   const [sessionIdToDelete, setSessionIdToDelete] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!isTyping) {
+      setResponseStatus('Preparing your response…');
+      return;
+    }
+
+    let index = 0;
+    setResponseStatus(responseStatusMessages[0]);
+
+    const interval = window.setInterval(() => {
+      index = (index + 1) % responseStatusMessages.length;
+      setResponseStatus(responseStatusMessages[index]);
+    }, 2200);
+
+    return () => window.clearInterval(interval);
+  }, [isTyping]);
   const sessionToDelete = sessions.find(session => session.id === sessionIdToDelete);
   const [serverWaking, setServerWaking] = useState(false);
   const [requestHasFiles, setRequestHasFiles] = useState(false);
@@ -1913,6 +1937,47 @@ const cleanMessageContent = (content: unknown): string => {
                     </div>
                   </motion.div>
                 ) : (
+                  {isTyping ? (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                    transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+                    className="absolute -top-14 left-1/2 -translate-x-1/2 inline-flex items-center gap-2.5 rounded-full border border-white/75 bg-white/65 px-3.5 py-2 backdrop-blur-2xl shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 dark:border-white/10 dark:bg-zinc-900/55 dark:ring-white/10 z-10"
+                    aria-live="polite"
+                    aria-label={responseStatus}
+                  >
+                    <span className="flex items-center gap-1 shrink-0" aria-hidden="true">
+                      <motion.span
+                        animate={{ y: [0, -1.5, 0], opacity: [0.35, 1, 0.35] }}
+                        transition={{ repeat: Infinity, duration: 1.15, ease: 'easeInOut' }}
+                        className="h-1.5 w-1.5 rounded-full bg-zinc-700 dark:bg-zinc-200"
+                      />
+                      <motion.span
+                        animate={{ y: [0, -1.5, 0], opacity: [0.35, 1, 0.35] }}
+                        transition={{ repeat: Infinity, duration: 1.15, ease: 'easeInOut', delay: 0.16 }}
+                        className="h-1.5 w-1.5 rounded-full bg-zinc-700 dark:bg-zinc-200"
+                      />
+                      <motion.span
+                        animate={{ y: [0, -1.5, 0], opacity: [0.35, 1, 0.35] }}
+                        transition={{ repeat: Infinity, duration: 1.15, ease: 'easeInOut', delay: 0.32 }}
+                        className="h-1.5 w-1.5 rounded-full bg-zinc-700 dark:bg-zinc-200"
+                      />
+                    </span>
+                    <AnimatePresence mode="wait">
+                      <motion.span
+                        key={responseStatus}
+                        initial={{ opacity: 0, y: 3 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -3 }}
+                        transition={{ duration: 0.18 }}
+                        className="whitespace-nowrap text-[11px] font-medium tracking-tight text-zinc-700 dark:text-zinc-200"
+                      >
+                        {responseStatus}
+                      </motion.span>
+                    </AnimatePresence>
+                  </motion.div>
+                ) : (
                   <motion.button
                     initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
                     onClick={() => messagesContainerRef.current?.scrollTo({ top: messagesContainerRef.current.scrollHeight, behavior: 'smooth' })}
@@ -1920,6 +1985,7 @@ const cleanMessageContent = (content: unknown): string => {
                   >
                     <ArrowDown className="w-4 h-4 md:w-5 md:h-5" />
                   </motion.button>
+                )}
                 )
               )}
             </AnimatePresence>
@@ -2063,7 +2129,7 @@ const cleanMessageContent = (content: unknown): string => {
                     className="group relative inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-zinc-300 bg-white px-2.5 text-black shadow-sm transition-all hover:border-black hover:shadow-md dark:border-zinc-700 dark:bg-zinc-900 dark:text-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-400 dark:from-zinc-950/60 dark:via-zinc-900 dark:to-zinc-900/40 dark:text-zinc-300 sm:px-3"
                   >
                     <span className="max-w-[190px] truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:text-sm">
-                      {activeModel.id}
+                      {activeModel.name}
                     </span>
                     <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
                   
@@ -2107,7 +2173,6 @@ const cleanMessageContent = (content: unknown): string => {
                                 <span className="min-w-0 flex-1">
                                   <span className="flex items-center gap-2">
                                     <span className="truncate text-xs font-medium text-zinc-800 dark:text-zinc-100">{option.name}</span>
-                                    <span className="shrink-0 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500">GROQ</span>
                                   </span>
                                   <span className="mt-0.5 block truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
                                     {option.description}{option.vision ? ' · Vision' : ''}
