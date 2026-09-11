@@ -256,6 +256,23 @@
   --tw-gradient-to: #ffffff !important;
 }
 
+/* Auth feedback colors: keep error messages red and success messages green. */
+[role="alert"][class*="text-red-"] {
+  color: #dc2626 !important;
+}
+
+.dark [role="alert"][class*="text-red-"] {
+  color: #f87171 !important;
+}
+
+[role="status"][class*="text-emerald-"] {
+  color: #16a34a !important;
+}
+
+.dark [role="status"][class*="text-emerald-"] {
+  color: #4ade80 !important;
+}
+
 .chat-messages a,
 .messages-container a {
   color: #2563eb !important;
