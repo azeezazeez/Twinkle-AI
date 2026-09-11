@@ -399,21 +399,14 @@ public class ChatController {
 
                     userMessage =
                             "The user uploaded document(s) but did not provide a question or instruction. "
-                            + "Format the uploaded document cleanly for display while preserving its actual content. "
-                            + "Do NOT summarize, analyze, review, rewrite, or add new information. "
-                            + "Preserve the document's wording, section order, headings, bullets, numbering, dates, "
-                            + "names, technologies, project details, and other factual content. "
-                            + "Create a clean Markdown layout. Put a horizontal line (---) between every major section. "
-                            + "Create one clearly labeled 'Links & Contact' section near the top or bottom and collect ALL "
-                            + "unique URLs, email addresses, phone links, and other clickable links from the document there. "
-                            + "Do not scatter links throughout the document unless a link is necessary to understand a specific item. "
-                            + "Render every collected link as a clickable Markdown link, for example "
-                            + "[GitHub](https://github.com/example), [Email](mailto:name@example.com), "
-                            + "or [Phone](tel:+123456789). "
-                            + "If the extracted PDF text contains a duplicated block of URLs at the end, do not repeat that "
-                            + "duplicate block; use those links only in the single 'Links & Contact' section. "
-                            + "Do not include an introduction, conclusion, analysis, summary, or commentary. "
-                            + "Output only the cleanly formatted document content.\n\n"
+                            + "Return the COMPLETE document content in a clean, readable Markdown format. "
+                            + "Preserve the source content faithfully: include ALL sections, headings, bullets, numbering, "
+                            + "dates, names, technologies, project details, contact information, links, and other factual content. "
+                            + "Do not summarize, shorten, review, rewrite, or omit sections. "
+                            + "Do not stop after the title, name, subtitle, or first section. Continue through the entire extracted document. "
+                            + "You may improve Markdown formatting only; do not change the actual information. "
+                            + "Do not add an introduction, conclusion, analysis, or commentary. "
+                            + "Output only the complete formatted document content.\n\n"
                             + extractedText;
 
                 } else {
