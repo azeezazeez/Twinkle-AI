@@ -1880,7 +1880,7 @@ const cleanMessageContent = (content: unknown): string => {
                 <motion.button
                   initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
                   onClick={() => messagesContainerRef.current?.scrollTo({ top: messagesContainerRef.current.scrollHeight, behavior: 'smooth' })}
-                  className="absolute -top-14 right-2 p-2.5 bg-black text-white rounded-full shadow-xl shadow-zinc-500/30 hover:bg-zinc-700 transition-all z-10 hover:scale-110"
+                  className="absolute -top-14 left-1/2 -translate-x-1/2 p-2.5 bg-white text-black border border-zinc-200 rounded-full shadow-xl shadow-zinc-500/20 hover:bg-zinc-50 transition-all z-10 hover:scale-110"
                 >
                   <ArrowDown className="w-4 h-4 md:w-5 md:h-5" />
                 </motion.button>
