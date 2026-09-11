@@ -616,3 +616,34 @@
     background-color: #0a0a0a;
   }
 }
+
+/* Auth feedback alignment and explicit colors. */
+.auth-feedback {
+  width: 100%;
+  text-align: center;
+  display: block;
+}
+
+.auth-error-feedback,
+[role="alert"][class*="text-red-"] {
+  color: #dc2626 !important;
+  text-align: center !important;
+}
+
+.dark .auth-error-feedback,
+.dark [role="alert"][class*="text-red-"] {
+  color: #f87171 !important;
+  text-align: center !important;
+}
+
+.auth-success-feedback,
+[role="status"][class*="text-emerald-"] {
+  color: #16a34a !important;
+  text-align: center !important;
+}
+
+.dark .auth-success-feedback,
+.dark [role="status"][class*="text-emerald-"] {
+  color: #4ade80 !important;
+  text-align: center !important;
+}
