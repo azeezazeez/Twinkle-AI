@@ -3,7 +3,7 @@ import { Session, User } from '../types';
 import {
   Plus, LogOut, Trash2, X, Search, SquarePen,
   MoreHorizontal, Pin, PinOff, Edit3,
-  MessageSquare, Sun, Moon, Sparkles,
+  MessageCircle, Sun, Moon, Sparkles,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import UserAvatar from './UserAvatar';
@@ -702,7 +702,7 @@ export default function Sidebar({
                 aria-label="Chats"
                 className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-all"
               >
-                <MessageSquare className="w-[19px] h-[19px]" strokeWidth={1.7} />
+                <MessageCircle className="w-[19px] h-[19px]" strokeWidth={1.7} />
               </button>
             </IconTooltip>
           </div>
