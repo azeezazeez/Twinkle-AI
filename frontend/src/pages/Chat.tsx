@@ -340,6 +340,13 @@ const MODEL_OPTIONS: ModelOption[] = [
 
 const MODEL_STORAGE_KEY = 'nexus_selected_model';
 
+const RESPONSE_STATUS_MESSAGES = [
+  'Preparing your response…',
+  'Reviewing your request…',
+  'Working through the details…',
+  'Putting everything together…',
+];
+
 const EMPTY_CHAT_PROMPTS = [
   "What's on your mind today?",
   "What would you like to explore?",
@@ -367,12 +374,6 @@ export default function Chat({ user, onLogout }: Props) {
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [responseStatus, setResponseStatus] = useState('Preparing your response…');
 
-  const responseStatusMessages = [
-    'Preparing your response…',
-    'Reviewing your request…',
-    'Working through the details…',
-    'Putting everything together…',
-  ];
   const [copiedId, setCopiedId] = useState<number | string | null>(null);
   const [editingMessage, setEditingMessage] = useState<{ id: string | number; content: string } | null>(null);
   const [editInput, setEditInput] = useState('');
@@ -386,11 +387,11 @@ export default function Chat({ user, onLogout }: Props) {
     }
 
     let index = 0;
-    setResponseStatus(responseStatusMessages[0]);
+    setResponseStatus(RESPONSE_STATUS_MESSAGES[0]);
 
     const interval = window.setInterval(() => {
-      index = (index + 1) % responseStatusMessages.length;
-      setResponseStatus(responseStatusMessages[index]);
+      index = (index + 1) % RESPONSE_STATUS_MESSAGES.length;
+      setResponseStatus(RESPONSE_STATUS_MESSAGES[index]);
     }, 2200);
 
     return () => window.clearInterval(interval);
@@ -1911,34 +1912,6 @@ const cleanMessageContent = (content: unknown): string => {
               {showScrollBottom && messages.length > 0 && (
                 isTyping ? (
                   <motion.div
-                    initial={{ opacity: 0, y: 10, scale: 0.92 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 10, scale: 0.92 }}
-                    className="absolute -top-14 left-1/2 -translate-x-1/2 flex items-center justify-center p-2.5 bg-white/60 dark:bg-zinc-900/50 backdrop-blur-xl border border-white/70 dark:border-white/15 rounded-full shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 dark:ring-white/10 z-10"
-                    aria-label="Twinkle is responding"
-                    title="Twinkle is responding"
-                  >
-                    <div className="flex items-center gap-1 px-0.5">
-                      <motion.span
-                        animate={{ y: [0, -2, 0], opacity: [0.35, 1, 0.35] }}
-                        transition={{ repeat: Infinity, duration: 0.9, ease: 'easeInOut' }}
-                        className="block h-1.5 w-1.5 rounded-full bg-black dark:bg-white"
-                      />
-                      <motion.span
-                        animate={{ y: [0, -2, 0], opacity: [0.35, 1, 0.35] }}
-                        transition={{ repeat: Infinity, duration: 0.9, ease: 'easeInOut', delay: 0.15 }}
-                        className="block h-1.5 w-1.5 rounded-full bg-black dark:bg-white"
-                      />
-                      <motion.span
-                        animate={{ y: [0, -2, 0], opacity: [0.35, 1, 0.35] }}
-                        transition={{ repeat: Infinity, duration: 0.9, ease: 'easeInOut', delay: 0.3 }}
-                        className="block h-1.5 w-1.5 rounded-full bg-black dark:bg-white"
-                      />
-                    </div>
-                  </motion.div>
-                ) : (
-                  {isTyping ? (
-                  <motion.div
                     initial={{ opacity: 0, y: 8, scale: 0.96 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 8, scale: 0.96 }}
@@ -1979,13 +1952,14 @@ const cleanMessageContent = (content: unknown): string => {
                   </motion.div>
                 ) : (
                   <motion.button
-                    initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
                     onClick={() => messagesContainerRef.current?.scrollTo({ top: messagesContainerRef.current.scrollHeight, behavior: 'smooth' })}
                     className="absolute -top-14 left-1/2 -translate-x-1/2 p-2.5 bg-white/60 dark:bg-zinc-900/50 backdrop-blur-xl text-black border border-white/70 dark:border-white/15 rounded-full shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 dark:ring-white/10 hover:bg-white/75 dark:hover:bg-zinc-900/65 transition-all z-10 hover:scale-110"
                   >
                     <ArrowDown className="w-4 h-4 md:w-5 md:h-5" />
                   </motion.button>
-                )}
                 )
               )}
             </AnimatePresence>
