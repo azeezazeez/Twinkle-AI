@@ -2062,19 +2062,11 @@ const cleanMessageContent = (content: unknown): string => {
                     transition={{ type: 'spring', stiffness: 400, damping: 25 }}
                     className="group relative inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-zinc-300 bg-white px-2.5 text-black shadow-sm transition-all hover:border-black hover:shadow-md dark:border-zinc-700 dark:bg-zinc-900 dark:text-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-400 dark:from-zinc-950/60 dark:via-zinc-900 dark:to-zinc-900/40 dark:text-zinc-300 sm:px-3"
                   >
-                    <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-black to-zinc-700 text-white shadow-sm shadow-zinc-500/30">
-                      {(() => {
-                        const ActiveIcon = activeModel.icon;
-                        return <ActiveIcon className="h-3.5 w-3.5" strokeWidth={2} />;
-                      })()}
+                    <span className="max-w-[190px] truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:text-sm">
+                      {activeModel.id}
                     </span>
-                    <span className="text-xs font-bold sm:text-sm">
-                      Twinkle
-                    </span>
-                    <span className="hidden sm:inline rounded-md border border-zinc-300 bg-white/70 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider text-zinc-600 dark:border-zinc-400 dark:bg-zinc-950/40 dark:text-zinc-300">
-                      
-                    </span>
-                    <ChevronDown className="h-3.5 w-3.5 text-zinc-600 dark:text-zinc-300" />
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
+                  
                   </motion.button>
 
                   <AnimatePresence>
