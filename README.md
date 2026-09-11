@@ -8,7 +8,7 @@ Nexus AI is a full-stack AI chatbot web application built using **React (Fronten
 
 🌐 Live Demo: https://twinkleai.vercel.app   
 
-💻 GitHub: https://github.com/azeezazeez/Nexus-AI-Chatbot
+💻 GitHub: https://github.com/azeezazeez/Twinkle-AI
 
 ---
 
