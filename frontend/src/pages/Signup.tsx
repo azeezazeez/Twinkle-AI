@@ -189,7 +189,7 @@ export default function Signup({ onSignup }: Props) {
             <motion.div
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
-              className="px-1 text-red-600 dark:text-red-400 text-[9px] md:text-xs font-bold uppercase tracking-widest leading-relaxed"
+              className="auth-feedback auth-error-feedback w-full text-center !text-red-600 dark:!text-red-400 text-[9px] md:text-xs font-bold uppercase tracking-widest leading-relaxed"
               role="alert"
               aria-live="assertive"
             >
