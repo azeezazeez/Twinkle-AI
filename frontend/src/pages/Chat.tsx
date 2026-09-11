@@ -1305,6 +1305,10 @@ const cleanMessageContent = (content: unknown): string => {
     cleaned = cleaned
       .replace(/\n?\s*#{1,6}\s*Additional Links\s*(?:\(Repeated in Source\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
       .replace(/\n?\s*#{1,6}\s*Document Structure\s*(?:\(as extracted\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
+      // Remove the extracted-document "Additional Section" block and
+      // everything in the dedicated "Links & Contact" section.
+      .replace(/\n?\s*#{1,6}\s*Additional Section\s*(?:\(as in original document\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s*Links\s*&\s*Contact\b|$)/gi, '\n')
+      .replace(/\n?\s*#{1,6}\s*Links\s*&\s*Contact\s*\n[\s\S]*$/gi, '\n')
       .trim();
 
     // Remove the dedicated Architecture section/bullet requested by the UI
@@ -1666,7 +1670,7 @@ const cleanMessageContent = (content: unknown): string => {
                                           href={href}
                                           target={isExternal ? '_blank' : undefined}
                                           rel={isExternal ? 'noopener noreferrer' : undefined}
-                                          className="!underline underline-offset-2 decoration-1 text-black dark:text-white hover:text-black dark:hover:text-white font-medium break-all"
+                                          className="!underline underline-offset-2 decoration-1 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium break-all"
                                           style={{ textDecoration: 'underline' }}
                                           {...props}
                                         >
