@@ -399,11 +399,19 @@ public class ChatController {
 
                     userMessage =
                             "The user uploaded document(s) but did not provide a question or instruction. "
-                            + "Return the COMPLETE document content in a clean, readable Markdown format. "
-                            + "Preserve the source content faithfully: include ALL sections, headings, bullets, numbering, "
-                            + "dates, names, technologies, project details, contact information, links, and other factual content. "
-                            + "Do not summarize, shorten, review, rewrite, or omit sections. "
-                            + "Do not stop after the title, name, subtitle, or first section. Continue through the entire extracted document. "
+                            + "Return the COMPLETE actual document content in a clean, readable Markdown format. "
+                            + "Preserve every real section and every factual item from the source, including headings, bullets, numbering, "
+                            + "dates, names, technologies, project details, education, certifications, links, and contact information. "
+                            + "Do not summarize, shorten, review, rewrite, or intentionally omit real document content. "
+                            + "Do not stop after the title, name, subtitle, or first section; continue through the entire document. "
+                            + "PDF/text extraction can create duplicated artifacts at the end of the extracted text. "
+                            + "Treat a trailing URL-only block, duplicated contact links, repeated section-heading list, table-of-contents-style heading list, "
+                            + "or other clearly duplicated extraction metadata as an artifact, not as document content. "
+                            + "Never attach such trailing duplicated artifacts to the preceding real section. "
+                            + "Keep each section limited to the content that actually belongs to that section in the source. "
+                            + "For example, the Certification section must contain only the certification entries under the Certification heading; "
+                            + "do not place GitHub/LinkedIn/portfolio URLs, mailto/tel links, or repeated section names inside Certification. "
+                            + "Do not invent missing content to replace an artifact. "
                             + "You may improve Markdown formatting only; do not change the actual information. "
                             + "Do not add an introduction, conclusion, analysis, or commentary. "
                             + "Output only the complete formatted document content.\n\n"
@@ -1148,7 +1156,7 @@ log.warn(
             )) {
 
                 throw new IllegalArgumentException(
-                        "Image uploads are supported only by Qwen Vision Pro."
+                        "Image uploads are supported only by Twinkle vision."
                 );
             }
 
