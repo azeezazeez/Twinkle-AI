@@ -633,7 +633,6 @@ export default function Chat({ user, onLogout }: Props) {
 
         if (firstMessage) {
           const targetTop = Math.max(0, firstMessage.offsetTop - 24);
-          setShowScrollBottom(false);
           container.scrollTo({
             top: targetTop,
             behavior: 'smooth',
@@ -643,7 +642,6 @@ export default function Chat({ user, onLogout }: Props) {
         }
       }
 
-      setShowScrollBottom(false);
       container.scrollTo({
         top: container.scrollHeight,
         behavior: 'smooth',
@@ -655,11 +653,7 @@ export default function Chat({ user, onLogout }: Props) {
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
-    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-
-    // The scroll-to-bottom control is meaningful only when a conversation
-    // exists and the user is actually away from the latest messages.
-    setShowScrollBottom(messages.length > 0 && distanceFromBottom > 100);
+    setShowScrollBottom(scrollHeight - scrollTop - clientHeight > 100);
   };
 
   const extractZipEntry = async (file: File, entryName: string): Promise<string | null> => {
@@ -753,31 +747,6 @@ export default function Chat({ user, onLogout }: Props) {
       } catch {
         setPreviewText('Unable to read this document in the browser.');
       }
-    }
-  };
-
-  const openPersistedAttachmentPreview = async (
-    dataUrl: string,
-    index: number
-  ) => {
-    if (!isValidAttachmentDataUrl(dataUrl)) {
-      console.error('Invalid persisted attachment preview data.');
-      return;
-    }
-
-    try {
-      const file = await dataUrlToFile(
-        dataUrl,
-        index,
-        getStoredAttachmentName(dataUrl) || undefined
-      );
-
-      // Use a Blob URL for persisted attachments. This is more reliable for
-      // PDF/browser previewing than loading a large base64 data URL directly.
-      const objectUrl = URL.createObjectURL(file);
-      await openFilePreview(file, objectUrl);
-    } catch (error) {
-      console.error('Failed to open attachment preview:', error);
     }
   };
 
@@ -1290,11 +1259,7 @@ const normalizeTwinkleIdentity = (content: string): string => {
   if (
     /^I['’]m\s+Nexus\s+AI,\s+a\s+helpful\s+assistant\s+designed\s+to\s+help\s+you\s+with\s+information,\s+analysis,\s+and\s+more\.?$/i.test(normalized)
   ) {
-    return `Hi! I’m Twinkle AI, a professional AI assistant designed to help you understand information, solve problems, work with files, write and analyze content, develop software, and accomplish tasks efficiently.
-
-I adapt my responses to what you’re actually asking. I aim to provide clear, accurate, practical, and meaningful answers rather than following a rigid response template.
-
-You can ask me questions, give me a file or image to analyze, ask for help with coding or technical problems, request writing or explanations, or simply tell me what you’re trying to accomplish — I’ll help you figure out the best way forward.`;
+    return 'I’m Twinkle AI, an AI assistant designed to help you with information, explanations, analysis, coding, writing, documents, and everyday problem-solving. I can help you understand ideas, work through tasks, and create useful content.';
   }
 
   return content;
@@ -1340,10 +1305,6 @@ const cleanMessageContent = (content: unknown): string => {
     cleaned = cleaned
       .replace(/\n?\s*#{1,6}\s*Additional Links\s*(?:\(Repeated in Source\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
       .replace(/\n?\s*#{1,6}\s*Document Structure\s*(?:\(as extracted\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
-      // Remove only the extracted "Additional Section" and "Links & Contact"
-      // sections. Keep hyperlinks that belong to the actual document content.
-      .replace(/\n?\s*#{1,6}\s*Additional Section\s*(?:\(as in original document\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s*Links\s*&\s*Contact\b|$)/gi, '\n')
-      .replace(/\n?\s*#{1,6}\s*Links\s*&\s*Contact\s*\n[\s\S]*$/gi, '\n')
       .trim();
 
     // Remove the dedicated Architecture section/bullet requested by the UI
@@ -1352,8 +1313,6 @@ const cleanMessageContent = (content: unknown): string => {
     cleaned = cleaned
       .replace(/\n?\s*#{1,6}\s*Architecture\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
       .replace(/^\s*[-*]\s*\*\*Architecture:\*\*.*(?:\n|$)/gim, '')
-      // Remove only the generated Document Navigation section.
-      .replace(/\n?\s*#{1,6}\s*Document\s+Navigation\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
       .trim();
 
     // Extracted PDF text can contain the same standalone URLs twice (often a
@@ -1707,7 +1666,7 @@ const cleanMessageContent = (content: unknown): string => {
                                           href={href}
                                           target={isExternal ? '_blank' : undefined}
                                           rel={isExternal ? 'noopener noreferrer' : undefined}
-                                          className="!underline underline-offset-2 decoration-1 !text-blue-600 dark:!text-blue-400 hover:!text-blue-700 dark:hover:!text-blue-300 font-medium break-all"
+                                          className="!underline underline-offset-2 decoration-1 text-black dark:text-white hover:text-black dark:hover:text-white font-medium break-all"
                                           style={{ textDecoration: 'underline' }}
                                           {...props}
                                         >
@@ -1884,43 +1843,14 @@ const cleanMessageContent = (content: unknown): string => {
         <div className="fixed bottom-0 left-0 right-0 z-[9000] w-full max-w-full overflow-visible bg-transparent px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-4 sm:pt-3 sm:pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-6 md:pt-4 md:pb-[calc(1rem+env(safe-area-inset-bottom))] lg:pl-[4.5rem]">
           <div className="mx-auto w-full max-w-[920px] min-w-0 relative">
             <AnimatePresence>
-              {showScrollBottom && messages.length > 0 && (
-                isTyping ? (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10, scale: 0.92 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 10, scale: 0.92 }}
-                    className="absolute -top-14 left-1/2 -translate-x-1/2 flex items-center justify-center p-2.5 bg-white/60 dark:bg-zinc-900/50 backdrop-blur-xl border border-white/70 dark:border-white/15 rounded-full shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 dark:ring-white/10 z-10"
-                    aria-label="Twinkle is responding"
-                    title="Twinkle is responding"
-                  >
-                    <div className="flex items-center gap-1 px-0.5">
-                      <motion.span
-                        animate={{ y: [0, -2, 0], opacity: [0.35, 1, 0.35] }}
-                        transition={{ repeat: Infinity, duration: 0.9, ease: 'easeInOut' }}
-                        className="block h-1.5 w-1.5 rounded-full bg-black dark:bg-white"
-                      />
-                      <motion.span
-                        animate={{ y: [0, -2, 0], opacity: [0.35, 1, 0.35] }}
-                        transition={{ repeat: Infinity, duration: 0.9, ease: 'easeInOut', delay: 0.15 }}
-                        className="block h-1.5 w-1.5 rounded-full bg-black dark:bg-white"
-                      />
-                      <motion.span
-                        animate={{ y: [0, -2, 0], opacity: [0.35, 1, 0.35] }}
-                        transition={{ repeat: Infinity, duration: 0.9, ease: 'easeInOut', delay: 0.3 }}
-                        className="block h-1.5 w-1.5 rounded-full bg-black dark:bg-white"
-                      />
-                    </div>
-                  </motion.div>
-                ) : (
-                  <motion.button
-                    initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
-                    onClick={() => messagesContainerRef.current?.scrollTo({ top: messagesContainerRef.current.scrollHeight, behavior: 'smooth' })}
-                    className="absolute -top-14 left-1/2 -translate-x-1/2 p-2.5 bg-white/60 dark:bg-zinc-900/50 backdrop-blur-xl text-black border border-white/70 dark:border-white/15 rounded-full shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 dark:ring-white/10 hover:bg-white/75 dark:hover:bg-zinc-900/65 transition-all z-10 hover:scale-110"
-                  >
-                    <ArrowDown className="w-4 h-4 md:w-5 md:h-5" />
-                  </motion.button>
-                )
+              {showScrollBottom && (
+                <motion.button
+                  initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
+                  onClick={() => messagesContainerRef.current?.scrollTo({ top: messagesContainerRef.current.scrollHeight, behavior: 'smooth' })}
+                  className="absolute -top-14 right-2 p-2.5 bg-black text-white rounded-full shadow-xl shadow-zinc-500/30 hover:bg-zinc-700 transition-all z-10 hover:scale-110"
+                >
+                  <ArrowDown className="w-4 h-4 md:w-5 md:h-5" />
+                </motion.button>
               )}
             </AnimatePresence>
 
@@ -2062,11 +1992,19 @@ const cleanMessageContent = (content: unknown): string => {
                     transition={{ type: 'spring', stiffness: 400, damping: 25 }}
                     className="group relative inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-zinc-300 bg-white px-2.5 text-black shadow-sm transition-all hover:border-black hover:shadow-md dark:border-zinc-700 dark:bg-zinc-900 dark:text-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-400 dark:from-zinc-950/60 dark:via-zinc-900 dark:to-zinc-900/40 dark:text-zinc-300 sm:px-3"
                   >
-                    <span className="max-w-[190px] truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:text-sm">
-                      {activeModel.id}
+                    <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-black to-zinc-700 text-white shadow-sm shadow-zinc-500/30">
+                      {(() => {
+                        const ActiveIcon = activeModel.icon;
+                        return <ActiveIcon className="h-3.5 w-3.5" strokeWidth={2} />;
+                      })()}
                     </span>
-                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
-                  
+                    <span className="text-xs font-bold sm:text-sm">
+                      Twinkle
+                    </span>
+                    <span className="hidden sm:inline rounded-md border border-zinc-300 bg-white/70 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider text-zinc-600 dark:border-zinc-400 dark:bg-zinc-950/40 dark:text-zinc-300">
+                      
+                    </span>
+                    <ChevronDown className="h-3.5 w-3.5 text-zinc-600 dark:text-zinc-300" />
                   </motion.button>
 
                   <AnimatePresence>
