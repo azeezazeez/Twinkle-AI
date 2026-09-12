@@ -190,6 +190,10 @@ public class GroqService {
         return messages;
     }
 
+    private static final int MAX_RATE_LIMIT_RETRIES = 2;
+    private static final long DEFAULT_RETRY_DELAY_MS = 1_000L;
+    private static final long MAX_RETRY_DELAY_MS = 30_000L;
+
     private String callGroq(
             List<Map<String, Object>> messages,
             String model) {
@@ -204,56 +208,115 @@ public class GroqService {
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.setBearerAuth(apiKey);
 
-            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
+            HttpEntity<Map<String, Object>> entity =
+                    new HttpEntity<>(requestBody, headers);
 
-            ResponseEntity<Map> response = restTemplate.postForEntity(
-                    apiUrl + "/chat/completions",
-                    entity,
-                    Map.class);
+            for (int attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt++) {
+                try {
+                    ResponseEntity<Map> response = restTemplate.postForEntity(
+                            apiUrl + "/chat/completions",
+                            entity,
+                            Map.class);
 
-            Map<String, Object> body = response.getBody();
+                    Map<String, Object> body = response.getBody();
 
-            if (body != null && body.containsKey("choices")) {
-                List<Map<String, Object>> choices = (List<Map<String, Object>>) body.get("choices");
+                    if (body != null && body.containsKey("choices")) {
+                        List<Map<String, Object>> choices =
+                                (List<Map<String, Object>>) body.get("choices");
 
-                if (!choices.isEmpty()) {
-                    Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
+                        if (!choices.isEmpty()) {
+                            Map<String, Object> message =
+                                    (Map<String, Object>) choices.get(0).get("message");
 
-                    if (message != null) {
-                        Object content = message.get("content");
-                        if (content != null && !content.toString().isBlank()) {
-                            return content.toString();
+                            if (message != null) {
+                                Object content = message.get("content");
+
+                                if (content != null
+                                        && !content.toString().isBlank()) {
+                                    return content.toString();
+                                }
+                            }
                         }
                     }
+
+                    throw new AIServiceException(
+                            "Groq returned an invalid or empty response.");
+
+                } catch (org.springframework.web.client.HttpClientErrorException e) {
+                    int status = e.getStatusCode().value();
+
+                    /*
+                     * Groq returns HTTP 429 when the API rate limit has been
+                     * reached. Retry only this condition so normal client
+                     * errors (400/401/403/etc.) keep their existing behavior.
+                     */
+                    if (status == 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
+                        long delayMs =
+                                getRateLimitRetryDelayMillis(
+                                        e.getResponseHeaders(),
+                                        attempt);
+
+                        log.warn(
+                                "Groq rate limit reached. model={}, attempt={}/{}, retrying in {} ms, remainingRequests={}, resetRequests={}",
+                                model,
+                                attempt + 1,
+                                MAX_RATE_LIMIT_RETRIES + 1,
+                                delayMs,
+                                getHeader(
+                                        e.getResponseHeaders(),
+                                        "x-ratelimit-remaining-requests"),
+                                getHeader(
+                                        e.getResponseHeaders(),
+                                        "x-ratelimit-reset-requests"));
+
+                        sleepBeforeRetry(delayMs);
+                        continue;
+                    }
+
+                    String responseBody = e.getResponseBodyAsString();
+
+                    if (status == 429) {
+                        log.warn(
+                                "Groq rate limit still active after {} attempts. model={}, response={}",
+                                MAX_RATE_LIMIT_RETRIES + 1,
+                                model,
+                                responseBody);
+
+                        throw new AIServiceException(
+                                "The AI service is temporarily rate-limited. "
+                                        + "Please wait a few seconds and try again.",
+                                e);
+                    }
+
+                    log.error(
+                            "Groq client error. model={}, status={}, response={}",
+                            model,
+                            status,
+                            responseBody);
+
+                    throw new AIServiceException(
+                            "Groq API error " + status + ": " + responseBody,
+                            e);
+
+                } catch (org.springframework.web.client.HttpServerErrorException e) {
+                    String responseBody = e.getResponseBodyAsString();
+
+                    log.error(
+                            "Groq server error. model={}, status={}, response={}",
+                            model,
+                            e.getStatusCode().value(),
+                            responseBody);
+
+                    throw new AIServiceException(
+                            "Groq API error " + e.getStatusCode().value() + ": " + responseBody,
+                            e);
                 }
             }
 
+            // The loop can only reach here if all rate-limit attempts fail.
             throw new AIServiceException(
-                    "Groq returned an invalid or empty response.");
-
-        } catch (org.springframework.web.client.HttpClientErrorException e) {
-            String responseBody = e.getResponseBodyAsString();
-            log.error(
-                    "Groq client error. model={}, status={}, response={}",
-                    model,
-                    e.getStatusCode().value(),
-                    responseBody);
-
-            throw new AIServiceException(
-                    "Groq API error " + e.getStatusCode().value() + ": " + responseBody,
-                    e);
-
-        } catch (org.springframework.web.client.HttpServerErrorException e) {
-            String responseBody = e.getResponseBodyAsString();
-            log.error(
-                    "Groq server error. model={}, status={}, response={}",
-                    model,
-                    e.getStatusCode().value(),
-                    responseBody);
-
-            throw new AIServiceException(
-                    "Groq API error " + e.getStatusCode().value() + ": " + responseBody,
-                    e);
+                    "The AI service is temporarily rate-limited. "
+                            + "Please wait a few seconds and try again.");
 
         } catch (org.springframework.web.client.ResourceAccessException e) {
             log.error(
@@ -278,6 +341,128 @@ public class GroqService {
 
             throw new AIServiceException(
                     "Unexpected error while communicating with the AI service.",
+                    e);
+        }
+    }
+
+    private long getRateLimitRetryDelayMillis(
+            HttpHeaders responseHeaders,
+            int retryIndex) {
+
+        if (responseHeaders != null) {
+            String retryAfter =
+                    responseHeaders.getFirst("Retry-After");
+
+            Long retryAfterMillis =
+                    parseRetryDelayMillis(retryAfter);
+
+            if (retryAfterMillis != null) {
+                return Math.min(
+                        Math.max(retryAfterMillis, 250L),
+                        MAX_RETRY_DELAY_MS);
+            }
+
+            String resetRequests =
+                    responseHeaders.getFirst(
+                            "x-ratelimit-reset-requests");
+
+            Long resetMillis =
+                    parseRetryDelayMillis(resetRequests);
+
+            if (resetMillis != null) {
+                return Math.min(
+                        Math.max(resetMillis, 250L),
+                        MAX_RETRY_DELAY_MS);
+            }
+        }
+
+        // Fallback: 1s, then 2s, using exponential backoff.
+        long delay =
+                DEFAULT_RETRY_DELAY_MS
+                        * (1L << Math.min(retryIndex, 3));
+
+        return Math.min(delay, MAX_RETRY_DELAY_MS);
+    }
+
+    private Long parseRetryDelayMillis(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+
+        try {
+            // Retry-After is normally expressed as seconds.
+            if (normalized.matches("\\d+")) {
+                return Long.parseLong(normalized) * 1_000L;
+            }
+
+            // Also support reset values such as "2s", "1m", "1m2.5s".
+            java.util.regex.Matcher matcher =
+                    java.util.regex.Pattern
+                            .compile("(?:(\\d+(?:\\.\\d+)?)h)?"
+                                    + "(?:(\\d+(?:\\.\\d+)?)m)?"
+                                    + "(?:(\\d+(?:\\.\\d+)?)s)?"
+                                    + "(?:(\\d+(?:\\.\\d+)?)ms)?")
+                            .matcher(normalized);
+
+            if (!matcher.matches()) {
+                return null;
+            }
+
+            double millis = 0.0;
+
+            if (matcher.group(1) != null) {
+                millis += Double.parseDouble(matcher.group(1))
+                        * 3_600_000.0;
+            }
+
+            if (matcher.group(2) != null) {
+                millis += Double.parseDouble(matcher.group(2))
+                        * 60_000.0;
+            }
+
+            if (matcher.group(3) != null) {
+                millis += Double.parseDouble(matcher.group(3))
+                        * 1_000.0;
+            }
+
+            if (matcher.group(4) != null) {
+                millis += Double.parseDouble(matcher.group(4));
+            }
+
+            return millis > 0
+                    ? Math.round(millis)
+                    : null;
+
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private String getHeader(
+            HttpHeaders headers,
+            String name) {
+
+        if (headers == null) {
+            return "-";
+        }
+
+        String value = headers.getFirst(name);
+
+        return value == null || value.isBlank()
+                ? "-"
+                : value;
+    }
+
+    private void sleepBeforeRetry(long delayMs) {
+        try {
+            Thread.sleep(delayMs);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+
+            throw new AIServiceException(
+                    "The AI service retry was interrupted.",
                     e);
         }
     }
