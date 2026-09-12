@@ -5,13 +5,24 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
 
 @Service
 @Slf4j
 public class GroqService {
+
+    private static final int MAX_RATE_LIMIT_RETRIES = 2;
+    private static final long DEFAULT_BACKOFF_MS = 1000L;
+    private static final long MAX_BACKOFF_MS = 30000L;
 
     @Value("${groq.api.key}")
     private String apiKey;
@@ -25,9 +36,6 @@ public class GroqService {
     @Value("${groq.models:${groq.model}}")
     private String configuredModels;
 
-    @Value("${groq.vision.models:}")
-    private String configuredVisionModels;
-
     private final RestTemplate restTemplate;
 
     public GroqService(RestTemplate restTemplate) {
@@ -36,28 +44,19 @@ public class GroqService {
 
     public List<String> getAvailableModels() {
         LinkedHashSet<String> models = new LinkedHashSet<>();
+
         for (String model : configuredModels.split(",")) {
             String value = model.trim();
             if (!value.isEmpty()) {
                 models.add(value);
             }
         }
+
         if (models.isEmpty()) {
             models.add(defaultModel);
         }
+
         return new ArrayList<>(models);
-    }
-
-    private String resolveModel(String requestedModel) {
-        String requested = requestedModel == null ? "" : requestedModel.trim();
-        if (requested.isEmpty()) {
-            return defaultModel;
-        }
-
-        if (!getAvailableModels().contains(requested)) {
-            throw new IllegalArgumentException("Unsupported AI model: " + requested);
-        }
-        return requested;
     }
 
     public String generateResponse(
@@ -70,84 +69,35 @@ public class GroqService {
             String userMessage,
             List<Map<String, String>> conversationHistory,
             String requestedModel) {
-        List<Map<String, Object>> messages = buildHistory(conversationHistory);
-        messages.add(Map.of(
-                "role", "user",
-                "content", userMessage));
-        return callGroq(messages, resolveModel(requestedModel));
-    }
-
-    public String generateResponseWithImages(
-            String userMessage,
-            List<Map<String, String>> conversationHistory,
-            List<String> base64Images,
-            List<String> mimeTypes,
-            String requestedModel) {
-        if (base64Images == null || base64Images.isEmpty()) {
-            return generateResponse(userMessage, conversationHistory, requestedModel);
-        }
-
-        if (base64Images.size() > 3) {
-            throw new IllegalArgumentException(
-                    "You can attach a maximum of 3 images per message.");
-        }
 
         String resolvedModel = resolveModel(requestedModel);
-        if (!isVisionModel(resolvedModel)) {
-            throw new IllegalArgumentException(
-                    "The selected AI model does not support image attachments. "
-                            + "Configure GROQ_VISION_MODELS with a vision-capable model and select it.");
-        }
-
-        if (mimeTypes == null || mimeTypes.size() < base64Images.size()) {
-            throw new IllegalArgumentException("Image MIME type information is missing.");
-        }
-
         List<Map<String, Object>> messages = buildHistory(conversationHistory);
-        List<Map<String, Object>> contentParts = new ArrayList<>();
-
-        for (int i = 0; i < base64Images.size(); i++) {
-            String mime = mimeTypes.get(i);
-            if (mime == null || !mime.startsWith("image/")) {
-                throw new IllegalArgumentException("Unsupported image MIME type.");
-            }
-
-            String dataUrl = "data:" + mime + ";base64," + base64Images.get(i);
-            contentParts.add(Map.of(
-                    "type", "image_url",
-                    "image_url", Map.of("url", dataUrl)));
-        }
-
-        String text = (userMessage == null || userMessage.isBlank())
-                ? "Please analyse the attached image(s) carefully and answer in English."
-                : userMessage;
-
-        contentParts.add(Map.of(
-                "type", "text",
-                "text", text));
 
         messages.add(Map.of(
                 "role", "user",
-                "content", contentParts));
+                "content", userMessage == null ? "" : userMessage
+        ));
 
         return callGroq(messages, resolvedModel);
     }
 
-    private boolean isVisionModel(String model) {
-        if (configuredVisionModels == null || configuredVisionModels.isBlank()) {
-            return false;
+    private String resolveModel(String requestedModel) {
+        String requested = requestedModel == null ? "" : requestedModel.trim();
+
+        if (requested.isEmpty()) {
+            return defaultModel;
         }
 
-        for (String value : configuredVisionModels.split(",")) {
-            if (model.equals(value.trim())) {
-                return true;
-            }
+        if (!getAvailableModels().contains(requested)) {
+            throw new IllegalArgumentException("Unsupported Groq model: " + requested);
         }
-        return false;
+
+        return requested;
     }
 
     private List<Map<String, Object>> buildHistory(
             List<Map<String, String>> history) {
+
         List<Map<String, Object>> messages = new ArrayList<>();
 
         messages.add(Map.of(
@@ -155,315 +105,194 @@ public class GroqService {
                 "content",
                 "You are Twinkle AI, a professional, intelligent, and helpful general-purpose AI assistant. "
                         + "Understand the user's actual intent and answer using your model intelligence. "
-                        + "Do not follow a rigid response template and do not use predefined answer text unless the task explicitly requires it. "
+                        + "Do not follow a rigid response template. "
                         + "Always respond in English unless the user explicitly asks for another language. "
-                        + "Use conversation history, supplied text, documents, and images as context when relevant. "
-                        + "Answer simply for simple requests and provide appropriate depth, structure, examples, or step-by-step guidance for complex requests. "
+                        + "Use conversation history and supplied text as context when relevant. "
+                        + "Answer simply for simple requests and provide appropriate depth for complex requests. "
                         + "Be accurate, practical, clear, and natural. Do not invent facts. "
-                        + "For document uploads without a specific question or instruction, return the COMPLETE extracted document content in clean Markdown. "
-                        + "Preserve all source sections, headings, bullets, numbering, names, dates, technologies, links, contact details, and factual information. "
-                        + "Do not summarize, shorten, or omit content in that mode, and do not stop after the title, name, subtitle, or first section. "
-                        + "Only improve formatting; do not change the document's information. "
-                        + "Do not add unnecessary introductions, conclusions, analysis, commentary, or generic sections. "
-                        + "For normal user questions about documents, answer the question directly using the document as context. "
-                        + "For code, writing, calculations, explanations, and other tasks, adapt naturally to what the user is asking."));
+                        + "For normal questions, answer directly and naturally. "
+                        + "For code, writing, calculations, explanations, and other tasks, adapt naturally to what the user asks."
+        ));
 
         if (history != null) {
-            for (Map<String, String> h : history) {
-                if (h == null) {
+            for (Map<String, String> item : history) {
+                if (item == null) {
                     continue;
                 }
 
-                String role = h.get("role");
-                String content = h.get("content");
+                String role = item.get("role");
+                String content = item.get("content");
 
                 if (role == null || content == null || content.isBlank()) {
                     continue;
                 }
 
+                String normalizedRole = "assistant".equalsIgnoreCase(role)
+                        ? "assistant"
+                        : "user".equalsIgnoreCase(role)
+                        ? "user"
+                        : null;
+
+                if (normalizedRole == null) {
+                    continue;
+                }
+
                 messages.add(Map.of(
-                        "role", role,
-                        "content", content));
+                        "role", normalizedRole,
+                        "content", content
+                ));
             }
         }
 
         return messages;
     }
 
-    private static final int MAX_RATE_LIMIT_RETRIES = 2;
-    private static final long DEFAULT_RETRY_DELAY_MS = 1_000L;
-    private static final long MAX_RETRY_DELAY_MS = 30_000L;
-
     private String callGroq(
             List<Map<String, Object>> messages,
             String model) {
-        try {
-            Map<String, Object> requestBody = new HashMap<>();
-            requestBody.put("model", model);
-            requestBody.put("messages", messages);
-            requestBody.put("temperature", 0.7);
-            requestBody.put("max_tokens", 6000);
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.setBearerAuth(apiKey);
+        int rateLimitAttempt = 0;
 
-            HttpEntity<Map<String, Object>> entity =
-                    new HttpEntity<>(requestBody, headers);
+        while (true) {
+            try {
+                Map<String, Object> requestBody = new HashMap<>();
+                requestBody.put("model", model);
+                requestBody.put("messages", messages);
+                requestBody.put("temperature", 0.7);
+                requestBody.put("max_tokens", 6000);
 
-            for (int attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt++) {
-                try {
-                    ResponseEntity<Map> response = restTemplate.postForEntity(
-                            apiUrl + "/chat/completions",
-                            entity,
-                            Map.class);
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                headers.setBearerAuth(apiKey);
 
-                    Map<String, Object> body = response.getBody();
+                HttpEntity<Map<String, Object>> entity =
+                        new HttpEntity<>(requestBody, headers);
 
-                    if (body != null && body.containsKey("choices")) {
-                        List<Map<String, Object>> choices =
-                                (List<Map<String, Object>>) body.get("choices");
+                ResponseEntity<Map> response = restTemplate.postForEntity(
+                        apiUrl + "/chat/completions",
+                        entity,
+                        Map.class
+                );
 
-                        if (!choices.isEmpty()) {
-                            Map<String, Object> message =
-                                    (Map<String, Object>) choices.get(0).get("message");
+                Map<String, Object> body = response.getBody();
 
-                            if (message != null) {
-                                Object content = message.get("content");
+                if (body != null && body.get("choices") instanceof List<?> choices
+                        && !choices.isEmpty()
+                        && choices.get(0) instanceof Map<?, ?> choice
+                        && choice.get("message") instanceof Map<?, ?> message) {
 
-                                if (content != null
-                                        && !content.toString().isBlank()) {
-                                    return content.toString();
-                                }
-                            }
-                        }
+                    Object content = message.get("content");
+                    if (content != null && !content.toString().isBlank()) {
+                        return content.toString();
                     }
-
-                    throw new AIServiceException(
-                            "Groq returned an invalid or empty response.");
-
-                } catch (org.springframework.web.client.HttpClientErrorException e) {
-                    int status = e.getStatusCode().value();
-
-                    /*
-                     * Groq returns HTTP 429 when the API rate limit has been
-                     * reached. Retry only this condition so normal client
-                     * errors (400/401/403/etc.) keep their existing behavior.
-                     */
-                    if (status == 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
-                        long delayMs =
-                                getRateLimitRetryDelayMillis(
-                                        e.getResponseHeaders(),
-                                        attempt);
-
-                        log.warn(
-                                "Groq rate limit reached. model={}, attempt={}/{}, retrying in {} ms, remainingRequests={}, resetRequests={}",
-                                model,
-                                attempt + 1,
-                                MAX_RATE_LIMIT_RETRIES + 1,
-                                delayMs,
-                                getHeader(
-                                        e.getResponseHeaders(),
-                                        "x-ratelimit-remaining-requests"),
-                                getHeader(
-                                        e.getResponseHeaders(),
-                                        "x-ratelimit-reset-requests"));
-
-                        sleepBeforeRetry(delayMs);
-                        continue;
-                    }
-
-                    String responseBody = e.getResponseBodyAsString();
-
-                    if (status == 429) {
-                        log.warn(
-                                "Groq rate limit still active after {} attempts. model={}, response={}",
-                                MAX_RATE_LIMIT_RETRIES + 1,
-                                model,
-                                responseBody);
-
-                        throw new AIServiceException(
-                                "The AI service is temporarily rate-limited. "
-                                        + "Please wait a few seconds and try again.",
-                                e);
-                    }
-
-                    log.error(
-                            "Groq client error. model={}, status={}, response={}",
-                            model,
-                            status,
-                            responseBody);
-
-                    throw new AIServiceException(
-                            "Groq API error " + status + ": " + responseBody,
-                            e);
-
-                } catch (org.springframework.web.client.HttpServerErrorException e) {
-                    String responseBody = e.getResponseBodyAsString();
-
-                    log.error(
-                            "Groq server error. model={}, status={}, response={}",
-                            model,
-                            e.getStatusCode().value(),
-                            responseBody);
-
-                    throw new AIServiceException(
-                            "Groq API error " + e.getStatusCode().value() + ": " + responseBody,
-                            e);
                 }
+
+                throw new AIServiceException("Groq returned an invalid or empty response.");
+
+            } catch (HttpClientErrorException e) {
+                if (e.getStatusCode().value() == 429
+                        && rateLimitAttempt < MAX_RATE_LIMIT_RETRIES) {
+
+                    long delay = resolveRetryDelay(e, rateLimitAttempt);
+                    log.warn(
+                            "Groq rate limited. Retrying in {} ms. model={}, attempt={}/{}",
+                            delay,
+                            model,
+                            rateLimitAttempt + 1,
+                            MAX_RATE_LIMIT_RETRIES
+                    );
+
+                    sleep(delay);
+                    rateLimitAttempt++;
+                    continue;
+                }
+
+                String body = e.getResponseBodyAsString();
+                log.error(
+                        "Groq client error. model={}, status={}, response={}",
+                        model,
+                        e.getStatusCode().value(),
+                        body
+                );
+
+                String message = e.getStatusCode().value() == 429
+                        ? "The AI service is temporarily rate-limited. Please wait a few seconds and try again."
+                        : "Groq API error " + e.getStatusCode().value() + ": " + body;
+
+                throw new AIServiceException(message, e);
+
+            } catch (HttpServerErrorException e) {
+                String body = e.getResponseBodyAsString();
+                log.error(
+                        "Groq server error. model={}, status={}, response={}",
+                        model,
+                        e.getStatusCode().value(),
+                        body
+                );
+
+                throw new AIServiceException(
+                        "Groq API error " + e.getStatusCode().value() + ": " + body,
+                        e
+                );
+
+            } catch (ResourceAccessException e) {
+                log.error(
+                        "Unable to reach Groq. model={}, error={}",
+                        model,
+                        e.getMessage(),
+                        e
+                );
+
+                throw new AIServiceException(
+                        "Unable to connect to Groq AI service.",
+                        e
+                );
+
+            } catch (AIServiceException e) {
+                throw e;
+
+            } catch (Exception e) {
+                log.error(
+                        "Unexpected Groq error. model={}, error={}",
+                        model,
+                        e.getMessage(),
+                        e
+                );
+
+                throw new AIServiceException(
+                        "Unexpected error while communicating with the AI service.",
+                        e
+                );
             }
-
-            // The loop can only reach here if all rate-limit attempts fail.
-            throw new AIServiceException(
-                    "The AI service is temporarily rate-limited. "
-                            + "Please wait a few seconds and try again.");
-
-        } catch (org.springframework.web.client.ResourceAccessException e) {
-            log.error(
-                    "Unable to reach Groq. model={}, error={}",
-                    model,
-                    e.getMessage(),
-                    e);
-
-            throw new AIServiceException(
-                    "Unable to connect to Groq AI service.",
-                    e);
-
-        } catch (AIServiceException e) {
-            throw e;
-
-        } catch (Exception e) {
-            log.error(
-                    "Unexpected Groq error. model={}, error={}",
-                    model,
-                    e.getMessage(),
-                    e);
-
-            throw new AIServiceException(
-                    "Unexpected error while communicating with the AI service.",
-                    e);
         }
     }
 
-    private long getRateLimitRetryDelayMillis(
-            HttpHeaders responseHeaders,
-            int retryIndex) {
+    private long resolveRetryDelay(HttpClientErrorException exception, int attempt) {
+        String retryAfter = exception.getResponseHeaders() == null
+                ? null
+                : exception.getResponseHeaders().getFirst("Retry-After");
 
-        if (responseHeaders != null) {
-            String retryAfter =
-                    responseHeaders.getFirst("Retry-After");
-
-            Long retryAfterMillis =
-                    parseRetryDelayMillis(retryAfter);
-
-            if (retryAfterMillis != null) {
+        if (retryAfter != null && !retryAfter.isBlank()) {
+            try {
                 return Math.min(
-                        Math.max(retryAfterMillis, 250L),
-                        MAX_RETRY_DELAY_MS);
-            }
-
-            String resetRequests =
-                    responseHeaders.getFirst(
-                            "x-ratelimit-reset-requests");
-
-            Long resetMillis =
-                    parseRetryDelayMillis(resetRequests);
-
-            if (resetMillis != null) {
-                return Math.min(
-                        Math.max(resetMillis, 250L),
-                        MAX_RETRY_DELAY_MS);
+                        Long.parseLong(retryAfter.trim()) * 1000L,
+                        MAX_BACKOFF_MS
+                );
+            } catch (NumberFormatException ignored) {
+                // Fall back to exponential backoff.
             }
         }
 
-        // Fallback: 1s, then 2s, using exponential backoff.
-        long delay =
-                DEFAULT_RETRY_DELAY_MS
-                        * (1L << Math.min(retryIndex, 3));
-
-        return Math.min(delay, MAX_RETRY_DELAY_MS);
+        long delay = DEFAULT_BACKOFF_MS * (1L << Math.min(attempt, 4));
+        return Math.min(delay, MAX_BACKOFF_MS);
     }
 
-    private Long parseRetryDelayMillis(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-
-        String normalized = value.trim().toLowerCase(Locale.ROOT);
-
+    private void sleep(long delay) {
         try {
-            // Retry-After is normally expressed as seconds.
-            if (normalized.matches("\\d+")) {
-                return Long.parseLong(normalized) * 1_000L;
-            }
-
-            // Also support reset values such as "2s", "1m", "1m2.5s".
-            java.util.regex.Matcher matcher =
-                    java.util.regex.Pattern
-                            .compile("(?:(\\d+(?:\\.\\d+)?)h)?"
-                                    + "(?:(\\d+(?:\\.\\d+)?)m)?"
-                                    + "(?:(\\d+(?:\\.\\d+)?)s)?"
-                                    + "(?:(\\d+(?:\\.\\d+)?)ms)?")
-                            .matcher(normalized);
-
-            if (!matcher.matches()) {
-                return null;
-            }
-
-            double millis = 0.0;
-
-            if (matcher.group(1) != null) {
-                millis += Double.parseDouble(matcher.group(1))
-                        * 3_600_000.0;
-            }
-
-            if (matcher.group(2) != null) {
-                millis += Double.parseDouble(matcher.group(2))
-                        * 60_000.0;
-            }
-
-            if (matcher.group(3) != null) {
-                millis += Double.parseDouble(matcher.group(3))
-                        * 1_000.0;
-            }
-
-            if (matcher.group(4) != null) {
-                millis += Double.parseDouble(matcher.group(4));
-            }
-
-            return millis > 0
-                    ? Math.round(millis)
-                    : null;
-
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private String getHeader(
-            HttpHeaders headers,
-            String name) {
-
-        if (headers == null) {
-            return "-";
-        }
-
-        String value = headers.getFirst(name);
-
-        return value == null || value.isBlank()
-                ? "-"
-                : value;
-    }
-
-    private void sleepBeforeRetry(long delayMs) {
-        try {
-            Thread.sleep(delayMs);
+            Thread.sleep(Math.max(0L, delay));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-
-            throw new AIServiceException(
-                    "The AI service retry was interrupted.",
-                    e);
+            throw new AIServiceException("Groq retry was interrupted.", e);
         }
     }
 }
