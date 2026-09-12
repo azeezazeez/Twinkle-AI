@@ -10,6 +10,7 @@ import com.ai.chatbot_backend.dto.User;
 import com.ai.chatbot_backend.service.RedisEventService;
 import com.ai.chatbot_backend.service.ChatHistoryService;
 import com.ai.chatbot_backend.service.GroqService;
+import com.ai.chatbot_backend.service.GeminiService;
 import com.ai.chatbot_backend.service.UserService;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -51,14 +52,12 @@ import java.util.stream.Collectors;
 @Slf4j
 public class ChatController {
 
-    private static final String VISION_MODEL =
-            "qwen/qwen3.8-27b";
-
     private static final int MAX_IMAGES_PER_MESSAGE = 3;
     private static final long MAX_TOTAL_IMAGE_BYTES = 15L * 1024L * 1024L;
     private static final long MAX_TOTAL_ATTACHMENT_BYTES = 25L * 1024L * 1024L;
 
     private final GroqService groqService;
+    private final GeminiService geminiService;
     private final ChatHistoryService chatHistoryService;
     private final UserService userService;
     private final RedisEventService redisEventService;
@@ -357,8 +356,14 @@ public class ChatController {
 
 
                     // =================================================
-                    // DOCUMENT
+                    // DOCUMENT FALLBACK
                     // =================================================
+                    // Gemini natively understands PDF, images, audio, video,
+                    // and supported text formats. Office/OpenDocument formats
+                    // are extracted with Tika and sent to Gemini as text.
+                    if (isGeminiNativeMimeType(mime)) {
+                        continue;
+                    }
 
                     String text =
                             extractText(
@@ -399,22 +404,21 @@ public class ChatController {
 
                     userMessage =
                             "The user uploaded document(s) but did not provide a question or instruction. "
-                            + "Return the COMPLETE actual document content in a clean, readable Markdown format. "
-                            + "Preserve every real section and every factual item from the source, including headings, bullets, numbering, "
-                            + "dates, names, technologies, project details, education, certifications, links, and contact information. "
-                            + "Do not summarize, shorten, review, rewrite, or intentionally omit real document content. "
-                            + "Do not stop after the title, name, subtitle, or first section; continue through the entire document. "
-                            + "PDF/text extraction can create duplicated artifacts at the end of the extracted text. "
-                            + "Treat a trailing URL-only block, duplicated contact links, repeated section-heading list, table-of-contents-style heading list, "
-                            + "or other clearly duplicated extraction metadata as an artifact, not as document content. "
-                            + "Never attach such trailing duplicated artifacts to the preceding real section. "
-                            + "Keep each section limited to the content that actually belongs to that section in the source. "
-                            + "For example, the Certification section must contain only the certification entries under the Certification heading; "
-                            + "do not place GitHub/LinkedIn/portfolio URLs, mailto/tel links, or repeated section names inside Certification. "
-                            + "Do not invent missing content to replace an artifact. "
-                            + "You may improve Markdown formatting only; do not change the actual information. "
-                            + "Do not add an introduction, conclusion, analysis, or commentary. "
-                            + "Output only the complete formatted document content.\n\n"
+                            + "Format the uploaded document cleanly for display while preserving its actual content. "
+                            + "Do NOT summarize, analyze, review, rewrite, or add new information. "
+                            + "Preserve the document's wording, section order, headings, bullets, numbering, dates, "
+                            + "names, technologies, project details, and other factual content. "
+                            + "Create a clean Markdown layout. Put a horizontal line (---) between every major section. "
+                            + "Create one clearly labeled 'Links & Contact' section near the top or bottom and collect ALL "
+                            + "unique URLs, email addresses, phone links, and other clickable links from the document there. "
+                            + "Do not scatter links throughout the document unless a link is necessary to understand a specific item. "
+                            + "Render every collected link as a clickable Markdown link, for example "
+                            + "[GitHub](https://github.com/example), [Email](mailto:name@example.com), "
+                            + "or [Phone](tel:+123456789). "
+                            + "If the extracted PDF text contains a duplicated block of URLs at the end, do not repeat that "
+                            + "duplicate block; use those links only in the single 'Links & Contact' section. "
+                            + "Do not include an introduction, conclusion, analysis, summary, or commentary. "
+                            + "Output only the cleanly formatted document content.\n\n"
                             + extractedText;
 
                 } else {
@@ -432,7 +436,7 @@ public class ChatController {
             // =====================================================
 
             if (userMessage.isBlank()
-                    && imageBase64.isEmpty()) {
+                    && attachmentUrls.isEmpty()) {
 
                 throw new IllegalArgumentException(
                         "Message or at least one supported file is required"
@@ -440,11 +444,14 @@ public class ChatController {
             }
 
 
-            if (userMessage.isBlank()) {
+            if (userMessage.isBlank() && !attachmentUrls.isEmpty()) {
 
                 userMessage =
-                        "Analyse the attached image(s) carefully "
-                        + "and answer using the information visible in them.";
+                        "The user uploaded file(s) but did not provide a question or instruction. "
+                        + "Analyze the uploaded file(s) carefully. For documents, return the complete actual source content "
+                        + "in clean, readable Markdown without summarizing, shortening, or inventing information. "
+                        + "For images, audio, or video, describe and extract the relevant information actually present in the media. "
+                        + "Do not add unnecessary introduction or conclusion.";
             }
 
 
@@ -699,6 +706,22 @@ log.warn(
         );
 
 
+        // Audio
+        extensions.put(".mp3", "audio/mpeg");
+        extensions.put(".wav", "audio/wav");
+        extensions.put(".ogg", "audio/ogg");
+        extensions.put(".flac", "audio/flac");
+        extensions.put(".aac", "audio/aac");
+        extensions.put(".m4a", "audio/mp4");
+
+        // Video
+        extensions.put(".mp4", "video/mp4");
+        extensions.put(".webm", "video/webm");
+        extensions.put(".mov", "video/quicktime");
+        extensions.put(".avi", "video/x-msvideo");
+        extensions.put(".mkv", "video/x-matroska");
+
+
         // Images
         extensions.put(
                 ".png",
@@ -770,6 +793,26 @@ log.warn(
                 "Unsupported or unknown file type: "
                         + filename
         );
+    }
+
+
+    private boolean isGeminiNativeMimeType(String mime) {
+        if (mime == null || mime.isBlank()) {
+            return false;
+        }
+
+        String normalized = mime.toLowerCase(Locale.ROOT);
+
+        if (normalized.startsWith("image/")
+                || normalized.startsWith("audio/")
+                || normalized.startsWith("video/")) {
+            return true;
+        }
+
+        return "application/pdf".equals(normalized)
+                || normalized.startsWith("text/")
+                || "application/json".equals(normalized)
+                || "application/xml".equals(normalized);
     }
 
 
@@ -1096,17 +1139,11 @@ log.warn(
         // AVAILABLE MODELS
         // =====================================================
 
-        List<String>
-                availableModels =
-                groqService.getAvailableModels();
+        List<String> groqModels = groqService.getAvailableModels();
+        String geminiModel = geminiService.getModel();
 
-
-        if (availableModels == null
-                || availableModels.isEmpty()) {
-
-            throw new IllegalStateException(
-                    "No Groq models are configured."
-            );
+        if (groqModels == null || groqModels.isEmpty()) {
+            throw new IllegalStateException("No Groq models are configured.");
         }
 
 
@@ -1115,24 +1152,20 @@ log.warn(
         // =====================================================
 
         String requestedModel =
-                model == null
-                        || model.isBlank()
-                        ? availableModels.get(0)
+                model == null || model.isBlank()
+                        ? groqModels.get(0)
                         : model.trim();
 
+        boolean geminiRequested =
+                geminiService.isGeminiModel(requestedModel);
 
-        if (!availableModels.contains(
-                requestedModel
-        )) {
-
+        if (!geminiRequested && !groqModels.contains(requestedModel)) {
             log.warn(
                     "Requested model '{}' is unavailable. Falling back to '{}'.",
                     requestedModel,
-                    availableModels.get(0)
+                    groqModels.get(0)
             );
-
-            requestedModel =
-                    availableModels.get(0);
+            requestedModel = groqModels.get(0);
         }
 
 
@@ -1142,42 +1175,28 @@ log.warn(
 
         String aiResponse;
 
+        // Any attachment is routed to Gemini 3.8 Flash. This keeps Groq
+        // exclusively responsible for normal text chat.
+        if (attachmentUrls != null && !attachmentUrls.isEmpty()) {
+            aiResponse = geminiService.generateResponse(
+                    message,
+                    conversationHistory,
+                    attachmentUrls
+            );
 
-        if (imageBase64 != null
-                && !imageBase64.isEmpty()) {
-
-            /*
-             * Images are supported only by:
-             *
-             * qwen/qwen3.8-27b
-             */
-            if (!VISION_MODEL.equals(
-                    requestedModel
-            )) {
-
-                throw new IllegalArgumentException(
-                        "Image uploads are supported only by Twinkle vision."
-                );
-            }
-
-
-            aiResponse =
-                    groqService.generateResponseWithImages(
-                            message,
-                            conversationHistory,
-                            imageBase64,
-                            imageMimeTypes,
-                            requestedModel
-                    );
+        } else if (geminiRequested) {
+            aiResponse = geminiService.generateResponse(
+                    message,
+                    conversationHistory,
+                    List.of()
+            );
 
         } else {
-
-            aiResponse =
-                    groqService.generateResponse(
-                            message,
-                            conversationHistory,
-                            requestedModel
-                    );
+            aiResponse = groqService.generateResponse(
+                    message,
+                    conversationHistory,
+                    requestedModel
+            );
         }
 
 
@@ -1274,6 +1293,11 @@ log.warn(
                 new ArrayList<>(
                         groqService.getAvailableModels()
                 );
+
+        String geminiModel = geminiService.getModel();
+        if (!models.contains(geminiModel)) {
+            models.add(geminiModel);
+        }
 
 
         response.put(
