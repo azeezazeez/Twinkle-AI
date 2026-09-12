@@ -87,10 +87,11 @@ User → Signup → OTP Verification → Login → Secured API Requests
 
 | Section | Preview |
 |---------|---------|
-| **📝 Signup** | ![Signup](https://drive.google.com/uc?export=view&id=1Xg6UeOiDUz2WFDk5rw4PFBLvxzvXXEcj) |
-| **🔑 Verify OTP** | ![Verify OTP](https://drive.google.com/uc?export=view&id=1qHA4eIpH83DfoszGXLd4_NhQam1lB6fy) |
-| **🔐 Login** | ![Login](https://drive.google.com/uc?export=view&id=1_WlTAW0wtARl1KerSYTgo-oG3ppwui0U) |
-| **🏠 Twinkle AI Home** | ![Twinkle AI Home](https://drive.google.com/uc?export=view&id=18Z341Q6-Dq9OZHVhNG7kZZwMHKTLfmJM) |
+| **📝 Signup** | ![Signup](https://drive.google.com/uc?export=view&id=16w_B8SQ_vEwVBqQgSYURjq0Btkj4ihVV) |
+| **🔑 Verify OTP** | ![Verify OTP](https://drive.google.com/uc?export=view&id=1RCV77gOv5ujlwcbdRn0Z7H8aoKiBqTF-) |
+| **🔐 Login** | ![Login]( https://drive.google.com/uc?export=view&id=105Vvdfyipm63fcDwnE6m-R102F3Z6xhL) |
+| **🏠 Twinkle AI Home** | ![Twinkle AI Home](https://drive.google.com/uc?export=view&id=1w5Uw5rhDo3yxVDrIUDZgA9yNgLb3INsR) |
+| **☰ Sidebar** |  ![Sidebar](https://drive.google.com/uc?export=view&id=1sfO5M-ZiBuYEErvZDQhp_8-FQltgk9Pa) |
 
 ---
 
