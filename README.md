@@ -1,4 +1,4 @@
-# ✦ TWINKLE AI – Full Stack AI Chatbot Web Application
+# ✧ TWINKLE AI – Full Stack AI Chatbot Web Application
 
 Nexus AI is a full-stack AI chatbot web application built using **React (Frontend)** and **Spring Boot (Backend)**. It provides a seamless conversational experience with secure authentication, OTP verification, and AI-powered chat functionality.
 
