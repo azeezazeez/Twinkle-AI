@@ -82,6 +82,13 @@ const readPersistedSessionId = (): number | null => {
   }
 };
 
+const getInitialTheme = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const stored = localStorage.getItem('theme');
+  if (stored) return stored === 'dark';
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+};
+
 const formatFileSize = (bytes: number): string => {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)}KB`;
@@ -411,6 +418,40 @@ export default function Chat({ user, onLogout }: Props) {
   );
   const modelPickerRef = useRef<HTMLDivElement>(null);
 
+  // File upload
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [filePreviews, setFilePreviews] = useState<{ id: string; file: File; preview?: string }[]>([]);
+  const [isProcessingFiles, setIsProcessingFiles] = useState(false);
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewText, setPreviewText] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [messageAttachments, setMessageAttachments] = useState<Record<string | number, string[]>>({});
+
+  // Speech recognition (UI removed)
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const speechBaseRef = useRef('');
+
+  // Theme
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    const dark = getInitialTheme();
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.toggle('dark', dark);
+    }
+    return dark;
+  });
+
+  const toggleTheme = useCallback(() => {
+    setIsDark(prev => {
+      const next = !prev;
+      document.documentElement.classList.toggle('dark', next);
+      localStorage.setItem('theme', next ? 'dark' : 'light');
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
       if (modelPickerRef.current && !modelPickerRef.current.contains(event.target as Node)) {
@@ -435,18 +476,89 @@ export default function Chat({ user, onLogout }: Props) {
   const isSendingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Stores the specific session ID that should skip one message load
+  // (the newly created session after first send), so switching to any
+  // OTHER existing session always loads its messages correctly.
   const skipMessageLoadRef = useRef<number | null>(null);
 
-  // File upload
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [filePreviews, setFilePreviews] = useState<{ id: string; file: File; preview?: string }[]>([]);
-  const [isProcessingFiles, setIsProcessingFiles] = useState(false);
-  const [previewFile, setPreviewFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewText, setPreviewText] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Auto-resize textarea
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+      inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 180)}px`;
+    }
+  }, [input]);
 
-  const [messageAttachments, setMessageAttachments] = useState<Record<string | number, string[]>>({});
+  // Clean up object URLs
+  const filePreviewsRef = useRef(filePreviews);
+  useEffect(() => { filePreviewsRef.current = filePreviews; }, [filePreviews]);
+  useEffect(() => {
+    return () => {
+      filePreviewsRef.current.forEach(fp => {
+        if (fp.preview) URL.revokeObjectURL(fp.preview);
+      });
+    };
+  }, []);
+
+  // Speech recognition handlers (kept but never called from UI)
+  const startListening = useCallback(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      alert('Your browser does not support speech recognition. Please use Chrome, Edge, or Safari.');
+      return;
+    }
+    if (recognitionRef.current) recognitionRef.current.stop();
+    speechBaseRef.current = inputRef.current?.value || '';
+
+    const recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onstart = () => setIsListening(true);
+    recognition.onresult = (event: any) => {
+      let finalSegment = '';
+      let interimSegment = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) finalSegment += event.results[i][0].transcript;
+        else interimSegment += event.results[i][0].transcript;
+      }
+      if (finalSegment) {
+        speechBaseRef.current = speechBaseRef.current
+          ? `${speechBaseRef.current} ${finalSegment}`.trim()
+          : finalSegment.trim();
+      }
+      const display = interimSegment
+        ? `${speechBaseRef.current} ${interimSegment}`.trim()
+        : speechBaseRef.current;
+      setInput(display);
+    };
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+    recognition.onerror = (event: any) => {
+      console.error('Speech error:', event.error);
+      setIsListening(false);
+      recognitionRef.current = null;
+      if (event.error === 'not-allowed') alert('Microphone access denied.');
+      else if (event.error === 'network') alert('Network error occurred.');
+    };
+    recognitionRef.current = recognition;
+    recognition.start();
+    inputRef.current?.focus();
+  }, []);
+
+  const stopListening = useCallback(() => {
+    recognitionRef.current?.stop();
+    setIsListening(false);
+  }, []);
+
+  const toggleListening = useCallback(() => {
+    if (isListening) stopListening();
+    else startListening();
+  }, [isListening, startListening, stopListening]);
 
   // Load sessions & messages
   const loadSessions = useCallback(async () => {
@@ -545,7 +657,11 @@ export default function Chat({ user, onLogout }: Props) {
         );
 
         if (firstMessage) {
-          const targetTop = Math.max(0, firstMessage.offsetTop - 24);
+          // Keep the first sent message clearly below the fixed mobile header.
+          // The message list gets a matching top inset, so the message can never
+          // be positioned underneath the navbar when a new chat starts.
+          const mobileHeaderOffset = 92;
+          const targetTop = Math.max(0, firstMessage.offsetTop - mobileHeaderOffset);
           setShowScrollBottom(false);
           container.scrollTo({
             top: targetTop,
@@ -786,6 +902,8 @@ export default function Chat({ user, onLogout }: Props) {
   ) => {
     if ((!messageText.trim() && (!filesToSend || filesToSend.length === 0))) return;
     if (isSendingRef.current) return;
+    if (isListening) stopListening();
+
     isSendingRef.current = true;
     setIsTyping(true);
     setJustFinished(false);
@@ -1371,8 +1489,12 @@ const cleanMessageContent = (content: unknown): string => {
         <div className="twinkle-mobile-header-actions">
           <button
             type="button"
-            onClick={() => setMobileOpen(true)}
-            aria-label="Open chat options"
+            onClick={() => {
+              createNewSession();
+              setMobileOpen(false);
+            }}
+            aria-label="Create new chat"
+            title="New chat"
             className="twinkle-mobile-header-icon twinkle-mobile-header-more"
           >
             <SquarePen className="h-[21px] w-[21px]" strokeWidth={1.7} />
@@ -1387,7 +1509,7 @@ const cleanMessageContent = (content: unknown): string => {
           ref={messagesContainerRef}
           onScroll={handleScroll}
         >
-          <div className="w-full max-w-4xl mx-auto px-3 sm:px-5 md:px-7 lg:px-8 pt-5 md:pt-8 pb-8 md:pb-10">
+          <div className="w-full max-w-4xl mx-auto px-3 sm:px-5 md:px-7 lg:px-8 pt-[92px] md:pt-8 pb-8 md:pb-10">
             {messages.length === 0 && !isTyping ? (
               <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-2 max-w-3xl mx-auto">
                 <motion.div
@@ -1961,6 +2083,7 @@ const cleanMessageContent = (content: unknown): string => {
                     value={input}
                     onChange={(e) => {
                       setInput(e.target.value);
+                      if (isListening) speechBaseRef.current = e.target.value;
                     }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey && !isTyping) {
@@ -1968,7 +2091,7 @@ const cleanMessageContent = (content: unknown): string => {
                         handleSendMessage();
                       }
                     }}
-                    placeholder="Ask Anything"
+                    placeholder={isListening ? 'Listening…' : 'Ask Anything'}
                     rows={1}
                     className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent px-1 py-2 text-[15px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:min-h-[46px] sm:py-2.5"
                     onInput={(e) => {
