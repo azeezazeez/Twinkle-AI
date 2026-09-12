@@ -44,6 +44,9 @@ public class GeminiService {
     @Value("${gemini.max-output-tokens:16384}")
     private int maxOutputTokens;
 
+    @Value("${gemini.thinking-level:medium}")
+    private String thinkingLevel;
+
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
 
@@ -146,8 +149,11 @@ public class GeminiService {
         );
 
         Map<String, Object> generationConfig = new LinkedHashMap<>();
-        generationConfig.put("temperature", 0.7);
-        generationConfig.put("maxOutputTokens", Math.max(1024, maxOutputTokens));
+        generationConfig.put("maxOutputTokens", Math.max(1024, Math.min(maxOutputTokens, 65536)));
+
+        Map<String, Object> thinkingConfig = new LinkedHashMap<>();
+        thinkingConfig.put("thinkingLevel", normalizeThinkingLevel());
+        generationConfig.put("thinkingConfig", thinkingConfig);
 
         Map<String, Object> requestBody = new LinkedHashMap<>();
         requestBody.put("system_instruction", systemInstruction);
@@ -245,6 +251,39 @@ public class GeminiService {
                 );
             }
         }
+    }
+
+    private String extractApiError(String responseBody) {
+        if (responseBody == null || responseBody.isBlank()) {
+            return "Unknown Gemini API error.";
+        }
+
+        try {
+            Map<?, ?> root = objectMapper.readValue(
+                    responseBody,
+                    new TypeReference<Map<String, Object>>() {}
+            );
+
+            Object errorObject = root.get("error");
+            if (errorObject instanceof Map<?, ?> error) {
+                Object message = error.get("message");
+                if (message != null && !message.toString().isBlank()) {
+                    return message.toString();
+                }
+            }
+
+            Object message = root.get("message");
+            if (message != null && !message.toString().isBlank()) {
+                return message.toString();
+            }
+        } catch (Exception ignored) {
+            // Fall through and return the raw response below.
+        }
+
+        String compact = responseBody.trim().replaceAll("\\s+", " ");
+        return compact.length() > 1000
+                ? compact.substring(0, 1000) + "..."
+                : compact;
     }
 
     private String extractResponseText(Map body) {
@@ -378,6 +417,17 @@ public class GeminiService {
         } catch (Exception e) {
             return "";
         }
+    }
+
+    private String normalizeThinkingLevel() {
+        String value = thinkingLevel == null
+                ? "medium"
+                : thinkingLevel.trim().toLowerCase();
+
+        return switch (value) {
+            case "low", "medium", "high" -> value;
+            default -> "medium";
+        };
     }
 
     private long retryDelayMillis(Exception exception, int attempt) {
