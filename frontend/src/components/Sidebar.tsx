@@ -745,7 +745,7 @@ export default function Sidebar({
           <div className="flex-1" />
 
           <IconTooltip label="Toggle theme">
-            <ThemeToggleButton className="w-10 h-10" />
+            <ThemeToggleButton className="w-10 h-10 mb-2" />
           </IconTooltip>
 
           {/* Account option stays at the bottom, like the reference */}
