@@ -124,7 +124,7 @@ export default function VerifyOtp({ onLogin }: Props) {
             <motion.div
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="px-1 text-emerald-600 dark:text-emerald-400 text-[9px] md:text-[10px] font-bold uppercase tracking-widest leading-relaxed flex items-center gap-2"
+              className="w-full px-1 text-center text-emerald-600 dark:text-emerald-400 text-[9px] md:text-[10px] font-bold uppercase tracking-widest leading-relaxed flex items-center justify-center gap-2"
               role="status"
               aria-live="polite"
             >
@@ -137,7 +137,7 @@ export default function VerifyOtp({ onLogin }: Props) {
             <motion.div
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
-              className="px-1 text-red-600 dark:text-red-400 text-[9px] md:text-[10px] font-bold uppercase tracking-widest leading-relaxed"
+              className="w-full px-1 text-center text-red-600 dark:text-red-400 text-[9px] md:text-[10px] font-bold uppercase tracking-widest leading-relaxed"
               role="alert"
               aria-live="assertive"
             >
