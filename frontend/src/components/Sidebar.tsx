@@ -66,10 +66,13 @@ function IconTooltip({ label, children }: { label: string; children: React.React
 
 // ─── ThemeToggleButton ────────────────────────────────────────────────────────
 function ThemeToggleButton({ className }: { className?: string }) {
-  const [isDark, setIsDark] = useState(() =>
-    typeof document !== 'undefined' &&
-    document.documentElement.classList.contains('dark')
-  );
+  const [isDark, setIsDark] = useState(() => {
+    if (typeof document === 'undefined') return false;
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme === 'dark') return true;
+    if (savedTheme === 'light') return false;
+    return document.documentElement.classList.contains('dark');
+  });
 
   const toggle = () => {
     const next = !isDark;
@@ -79,14 +82,45 @@ function ThemeToggleButton({ className }: { className?: string }) {
   };
 
   useEffect(() => {
+    const savedTheme = localStorage.getItem('theme');
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+
+    const applyTheme = (theme: 'dark' | 'light') => {
+      document.documentElement.classList.toggle('dark', theme === 'dark');
+      setIsDark(theme === 'dark');
+    };
+
+    // Explicit user choice wins; otherwise follow the device theme.
+    if (savedTheme === 'dark' || savedTheme === 'light') {
+      applyTheme(savedTheme);
+    } else {
+      applyTheme(mediaQuery.matches ? 'dark' : 'light');
+    }
+
+    const handleDeviceThemeChange = (event: MediaQueryListEvent) => {
+      // Only follow the device automatically when the user has not
+      // explicitly selected a theme.
+      const currentPreference = localStorage.getItem('theme');
+      if (currentPreference !== 'dark' && currentPreference !== 'light') {
+        applyTheme(event.matches ? 'dark' : 'light');
+      }
+    };
+
+    mediaQuery.addEventListener('change', handleDeviceThemeChange);
+
     const observer = new MutationObserver(() => {
       setIsDark(document.documentElement.classList.contains('dark'));
     });
+
     observer.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ['class'],
     });
-    return () => observer.disconnect();
+
+    return () => {
+      mediaQuery.removeEventListener('change', handleDeviceThemeChange);
+      observer.disconnect();
+    };
   }, []);
 
   return (
@@ -644,6 +678,7 @@ export default function Sidebar({
               </div>
               <h2 className="text-lg font-medium tracking-tight text-zinc-900/90 dark:text-white/90">Twinkle</h2>
             </div>
+            <ThemeToggleButton />
           </div>
 
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
@@ -709,6 +744,10 @@ export default function Sidebar({
 
           <div className="flex-1" />
 
+          <IconTooltip label="Toggle theme">
+            <ThemeToggleButton className="w-10 h-10" />
+          </IconTooltip>
+
           {/* Account option stays at the bottom, like the reference */}
           <IconTooltip label={user.username}>
             <button onClick={expandDesktop} aria-label="Profile">
@@ -752,6 +791,7 @@ export default function Sidebar({
                   </div>
                   <h2 className="text-xl font-medium tracking-tight text-zinc-900/90 dark:text-white/90">Twinkle</h2>
                 </button>
+                <ThemeToggleButton />
               </div>
 
               <SessionList
