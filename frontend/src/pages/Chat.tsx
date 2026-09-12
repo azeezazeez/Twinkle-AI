@@ -335,7 +335,7 @@ interface ModelOption {
 const MODEL_OPTIONS: ModelOption[] = [
   { id: 'openai/gpt-oss-120b', name: 'Twinkle Pro', description: 'Advanced reasoning and coding', icon: Brain },
   { id: 'openai/gpt-oss-20b', name: 'Twinkle', description: 'Fast everyday conversations', icon: Zap },
-  { id: 'qwen/qwen3.8-27b', name: 'Twinkle Qwen', description: 'Enhanced vision and reasoning', icon: Eye, vision: true },
+  { id: 'qwen/qwen3.8-27b', name: 'Twinkle Vision', description: 'Enhanced vision and reasoning', icon: Eye, vision: true },
 ];
 
 const MODEL_STORAGE_KEY = 'nexus_selected_model';
