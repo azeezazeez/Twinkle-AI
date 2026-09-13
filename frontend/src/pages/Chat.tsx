@@ -429,13 +429,9 @@ export default function Chat({ user, onLogout }: Props) {
 
   const [messageAttachments, setMessageAttachments] = useState<Record<string | number, string[]>>({});
 
-  // Voice-to-text recording
+  // Speech recognition (UI removed)
   const [isListening, setIsListening] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const audioChunksRef = useRef<Float32Array[]>([]);
+  const recognitionRef = useRef<any>(null);
   const speechBaseRef = useRef('');
 
   // Theme
@@ -505,28 +501,64 @@ export default function Chat({ user, onLogout }: Props) {
     };
   }, []);
 
-  // Encode captured PCM samples as a standard WAV file.
-  // This avoids the browser SpeechRecognition service entirely, so the
-  // microphone button does not depend on Chrome's speech network endpoint.
-  useEffect(() => {
-    return () => {
-      processorRef.current?.disconnect();
-      mediaStreamRef.current?.getTracks().forEach(track => track.stop());
-      const context = audioContextRef.current;
-      if (context && context.state !== 'closed') {
-        context.close().catch(() => {});
+  // Speech recognition handlers (kept but never called from UI)
+  const startListening = useCallback(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      alert('Your browser does not support speech recognition. Please use Chrome, Edge, or Safari.');
+      return;
+    }
+    if (recognitionRef.current) recognitionRef.current.stop();
+    speechBaseRef.current = inputRef.current?.value || '';
+
+    const recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onstart = () => setIsListening(true);
+    recognition.onresult = (event: any) => {
+      let finalSegment = '';
+      let interimSegment = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) finalSegment += event.results[i][0].transcript;
+        else interimSegment += event.results[i][0].transcript;
       }
-      processorRef.current = null;
-      mediaStreamRef.current = null;
-      audioContextRef.current = null;
+      if (finalSegment) {
+        speechBaseRef.current = speechBaseRef.current
+          ? `${speechBaseRef.current} ${finalSegment}`.trim()
+          : finalSegment.trim();
+      }
+      const display = interimSegment
+        ? `${speechBaseRef.current} ${interimSegment}`.trim()
+        : speechBaseRef.current;
+      setInput(display);
     };
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+    recognition.onerror = (event: any) => {
+      console.error('Speech error:', event.error);
+      setIsListening(false);
+      recognitionRef.current = null;
+      if (event.error === 'not-allowed') alert('Microphone access denied.');
+      else if (event.error === 'network') alert('Network error occurred.');
+    };
+    recognitionRef.current = recognition;
+    recognition.start();
+    inputRef.current?.focus();
+  }, []);
+
+  const stopListening = useCallback(() => {
+    recognitionRef.current?.stop();
+    setIsListening(false);
   }, []);
 
   const toggleListening = useCallback(() => {
     if (isListening) stopListening();
     else startListening();
   }, [isListening, startListening, stopListening]);
-
 
   // Load sessions & messages
   const loadSessions = useCallback(async () => {
@@ -2006,7 +2038,7 @@ const cleanMessageContent = (content: unknown): string => {
                 <motion.button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={isTyping || isProcessingFiles || isTranscribing}
+                  disabled={isTyping || isProcessingFiles}
                   aria-label="Attach files"
                   title="Attach files"
                   whileHover={{ scale: 1.04, y: -1 }}
@@ -2059,7 +2091,7 @@ const cleanMessageContent = (content: unknown): string => {
                         handleSendMessage();
                       }
                     }}
-                    placeholder={isTranscribing ? 'Transcribing…' : isListening ? 'Listening…' : 'Ask Anything'}
+                    placeholder={isListening ? 'Listening…' : 'Ask Anything'}
                     rows={1}
                     className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent px-1 py-2 text-[15px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:min-h-[46px] sm:py-2.5"
                     onInput={(e) => {
@@ -2069,46 +2101,6 @@ const cleanMessageContent = (content: unknown): string => {
                     }}
                   />
                 </div>
-
-                {/* Voice-to-text */}
-                <motion.button
-                  type="button"
-                  onClick={toggleListening}
-                  disabled={isTyping || isProcessingFiles || isTranscribing}
-                  aria-label={isTranscribing ? 'Transcribing voice input' : isListening ? 'Stop voice input' : 'Start voice input'}
-                  aria-pressed={isListening}
-                  title={isTranscribing ? 'Transcribing voice input' : isListening ? 'Stop voice input' : 'Voice to text'}
-                  whileHover={{ scale: 1.04, y: -1 }}
-                  whileTap={{ scale: 0.94, y: 0 }}
-                  transition={{
-                    type: 'spring',
-                    stiffness: 420,
-                    damping: 24,
-                    mass: 0.6,
-                  }}
-                  className={`group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50 ${
-                    isListening
-                      ? 'bg-black text-white shadow-md dark:bg-white dark:text-black'
-                      : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'
-                  }`}
-                >
-                  <motion.span
-                    className="pointer-events-none absolute inset-0 rounded-full bg-black/0 dark:bg-white/0"
-                    animate={isListening ? { scale: [1, 1.18, 1], opacity: [0.08, 0.18, 0.08] } : { scale: 1, opacity: 0 }}
-                    transition={isListening ? { duration: 1.4, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.2 }}
-                  />
-                  <motion.span
-                    className="relative z-10 flex items-center justify-center"
-                    animate={isListening ? { scale: [1, 1.08, 1] } : { scale: 1 }}
-                    transition={isListening ? { duration: 1.1, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.2 }}
-                  >
-                    {isListening || isTranscribing ? (
-                      <MicOff className="h-5 w-5 stroke-[2.2]" />
-                    ) : (
-                      <Mic className="h-5 w-5 stroke-[2.2]" />
-                    )}
-                  </motion.span>
-                </motion.button>
 
                 {/* Think / model selector */}
                 <div className="relative shrink-0">
