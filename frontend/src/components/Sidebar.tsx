@@ -27,8 +27,8 @@ interface Props {
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const PINNED_KEY = 'nexus_pinned_sessions';
-const SIDEBAR_SEEN_KEY = 'nexus_sidebar_seen';
+const PINNED_KEY = 'Twinkle_pinned_sessions';
+const SIDEBAR_SEEN_KEY = 'Twinkle_sidebar_seen';
 
 const loadPinnedIds = (): number[] => {
   try { return JSON.parse(localStorage.getItem(PINNED_KEY) || '[]'); } catch { return []; }
