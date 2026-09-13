@@ -10,7 +10,7 @@ import ConfirmationModal from '../components/ConfirmationModal';
 import {
   ArrowDown, ArrowUp,
   Copy, Check, Edit2,
-  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, SquarePen,
+  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, SquarePen, Mic, MicOff,
 } from 'lucide-react';
 
 import ReactMarkdown from 'react-markdown';
@@ -514,7 +514,7 @@ export default function Chat({ user, onLogout }: Props) {
     const recognition = new SR();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = 'en-US';
+    recognition.lang = navigator.language || 'en-US';
 
     recognition.onstart = () => setIsListening(true);
     recognition.onresult = (event: any) => {
@@ -553,6 +553,14 @@ export default function Chat({ user, onLogout }: Props) {
   const stopListening = useCallback(() => {
     recognitionRef.current?.stop();
     setIsListening(false);
+  }, []);
+
+  // Always release the microphone if the chat page is unmounted.
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.stop();
+      recognitionRef.current = null;
+    };
   }, []);
 
   const toggleListening = useCallback(() => {
@@ -2101,6 +2109,46 @@ const cleanMessageContent = (content: unknown): string => {
                     }}
                   />
                 </div>
+
+                {/* Voice-to-text */}
+                <motion.button
+                  type="button"
+                  onClick={toggleListening}
+                  disabled={isTyping || isProcessingFiles}
+                  aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
+                  aria-pressed={isListening}
+                  title={isListening ? 'Stop voice input' : 'Voice to text'}
+                  whileHover={{ scale: 1.04, y: -1 }}
+                  whileTap={{ scale: 0.94, y: 0 }}
+                  transition={{
+                    type: 'spring',
+                    stiffness: 420,
+                    damping: 24,
+                    mass: 0.6,
+                  }}
+                  className={`group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50 ${
+                    isListening
+                      ? 'bg-black text-white shadow-md dark:bg-white dark:text-black'
+                      : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'
+                  }`}
+                >
+                  <motion.span
+                    className="pointer-events-none absolute inset-0 rounded-full bg-black/0 dark:bg-white/0"
+                    animate={isListening ? { scale: [1, 1.18, 1], opacity: [0.08, 0.18, 0.08] } : { scale: 1, opacity: 0 }}
+                    transition={isListening ? { duration: 1.4, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.2 }}
+                  />
+                  <motion.span
+                    className="relative z-10 flex items-center justify-center"
+                    animate={isListening ? { scale: [1, 1.08, 1] } : { scale: 1 }}
+                    transition={isListening ? { duration: 1.1, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.2 }}
+                  >
+                    {isListening ? (
+                      <MicOff className="h-5 w-5 stroke-[2.2]" />
+                    ) : (
+                      <Mic className="h-5 w-5 stroke-[2.2]" />
+                    )}
+                  </motion.span>
+                </motion.button>
 
                 {/* Think / model selector */}
                 <div className="relative shrink-0">
