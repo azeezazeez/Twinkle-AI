@@ -10,7 +10,7 @@ import ConfirmationModal from '../components/ConfirmationModal';
 import {
   ArrowDown, ArrowUp,
   Copy, Check, Edit2,
-  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, Mic, Square,
+  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText,
 } from 'lucide-react';
 
 import ReactMarkdown from 'react-markdown';
@@ -531,19 +531,6 @@ export default function Chat({ user, onLogout }: Props) {
 
   const [messageAttachments, setMessageAttachments] = useState<Record<string | number, string[]>>({});
 
-  // Voice input
-  const [isListening, setIsListening] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const processorNodeRef = useRef<ScriptProcessorNode | null>(null);
-  const liveSocketRef = useRef<WebSocket | null>(null);
-  const isListeningRef = useRef(false);
-  const speechBaseRef = useRef('');
-  const finalTranscriptRef = useRef('');
-  const interimTranscriptRef = useRef('');
-
   // Theme
   const [isDark, setIsDark] = useState<boolean>(() => {
     const dark = getInitialTheme();
@@ -610,271 +597,6 @@ export default function Chat({ user, onLogout }: Props) {
       });
     };
   }, []);
-
-  const downsampleTo16k = useCallback((buffer: Float32Array, inputSampleRate: number) => {
-    if (inputSampleRate === 16000) return buffer;
-
-    const ratio = inputSampleRate / 16000;
-    const newLength = Math.round(buffer.length / ratio);
-    const result = new Float32Array(newLength);
-    let offsetResult = 0;
-    let offsetBuffer = 0;
-
-    while (offsetResult < result.length) {
-      const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
-      let accum = 0;
-      let count = 0;
-
-      for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i += 1) {
-        accum += buffer[i];
-        count += 1;
-      }
-
-      result[offsetResult] = count > 0 ? accum / count : 0;
-      offsetResult += 1;
-      offsetBuffer = nextOffsetBuffer;
-    }
-
-    return result;
-  }, []);
-
-  const float32ToBase64Pcm = useCallback((samples: Float32Array) => {
-    const pcm = new Int16Array(samples.length);
-    for (let i = 0; i < samples.length; i += 1) {
-      const sample = Math.max(-1, Math.min(1, samples[i]));
-      pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
-    }
-
-    const bytes = new Uint8Array(pcm.buffer);
-    let binary = '';
-    const chunkSize = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunkSize) {
-      binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + chunkSize, bytes.length)));
-    }
-    return btoa(binary);
-  }, []);
-
-  const cleanupVoiceResources = useCallback(() => {
-    const processor = processorNodeRef.current;
-    if (processor) {
-      processor.onaudioprocess = null;
-      try { processor.disconnect(); } catch {}
-    }
-    processorNodeRef.current = null;
-
-    const source = sourceNodeRef.current;
-    if (source) {
-      try { source.disconnect(); } catch {}
-    }
-    sourceNodeRef.current = null;
-
-    const context = audioContextRef.current;
-    audioContextRef.current = null;
-    if (context) {
-      try { void context.close(); } catch {}
-    }
-
-    const stream = mediaStreamRef.current;
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-    }
-    mediaStreamRef.current = null;
-  }, []);
-
-  const stopListening = useCallback(() => {
-    isListeningRef.current = false;
-    setIsListening(false);
-
-    const socket = liveSocketRef.current;
-    liveSocketRef.current = null;
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      try {
-        socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
-      } catch {}
-      window.setTimeout(() => {
-        try { socket.close(); } catch {}
-      }, 700);
-    }
-
-    cleanupVoiceResources();
-    setTimeout(() => inputRef.current?.focus(), 50);
-  }, [cleanupVoiceResources]);
-
-  const startListening = useCallback(async () => {
-    if (isListening || isTranscribing) return;
-
-    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-      alert('Microphone access requires HTTPS or localhost.');
-      return;
-    }
-
-    try {
-      setIsTranscribing(true);
-
-      const token = await chatApi.getLiveTranscriptionToken();
-      if (!token) {
-        throw new Error('Could not create a live voice session.');
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
-
-      const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContextCtor) {
-        stream.getTracks().forEach(track => track.stop());
-        throw new Error('Your browser does not support live microphone transcription.');
-      }
-
-      const socket = new WebSocket(
-        `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}`
-      );
-
-      liveSocketRef.current = socket;
-      mediaStreamRef.current = stream;
-      speechBaseRef.current = inputRef.current?.value || input;
-      finalTranscriptRef.current = '';
-      interimTranscriptRef.current = '';
-      isListeningRef.current = true;
-
-      socket.onopen = () => {
-        socket.send(JSON.stringify({
-          setup: {
-            model: 'models/gemini-3.5-transcribe-live',
-            generationConfig: {
-              responseModalities: ['TEXT'],
-            },
-            inputAudioTranscription: {
-              languageCodes: [],
-              mode: 'SMART',
-            },
-          },
-        }));
-
-        const context = new AudioContextCtor();
-        audioContextRef.current = context;
-        const source = context.createMediaStreamSource(stream);
-        const processor = context.createScriptProcessor(4096, 1, 1);
-
-        sourceNodeRef.current = source;
-        processorNodeRef.current = processor;
-
-        processor.onaudioprocess = (event: AudioProcessingEvent) => {
-          if (!isListeningRef.current || socket.readyState !== WebSocket.OPEN) return;
-
-          const inputData = event.inputBuffer.getChannelData(0);
-          const pcm16k = downsampleTo16k(inputData, context.sampleRate);
-          if (pcm16k.length === 0) return;
-
-          try {
-            socket.send(JSON.stringify({
-              realtimeInput: {
-                audio: {
-                  data: float32ToBase64Pcm(pcm16k),
-                  mimeType: 'audio/pcm;rate=16000',
-                },
-              },
-            }));
-          } catch (error) {
-            console.error('Live voice audio send failed:', error);
-          }
-        };
-
-        source.connect(processor);
-        processor.connect(context.destination);
-        if (context.state === 'suspended') void context.resume();
-
-        setIsTranscribing(false);
-        setIsListening(true);
-        inputRef.current?.focus();
-      };
-
-      socket.onmessage = (event) => {
-        try {
-          const response = JSON.parse(event.data);
-          const content = response?.serverContent;
-          if (!content) return;
-
-          if (content.interimInputTranscription?.text) {
-            interimTranscriptRef.current = content.interimInputTranscription.text.trim();
-            const base = speechBaseRef.current.trim();
-            const committed = finalTranscriptRef.current.trim();
-            const interim = interimTranscriptRef.current;
-            setInput([base, committed, interim].filter(Boolean).join(' ').trim());
-          }
-
-          if (content.inputTranscription?.text) {
-            const finalText = content.inputTranscription.text.trim();
-            if (finalText) {
-              finalTranscriptRef.current = `${finalTranscriptRef.current} ${finalText}`.trim();
-              interimTranscriptRef.current = '';
-              const base = speechBaseRef.current.trim();
-              const committed = finalTranscriptRef.current.trim();
-              setInput([base, committed].filter(Boolean).join(' ').trim());
-            }
-          }
-        } catch (error) {
-          console.error('Live voice response parse failed:', error);
-        }
-      };
-
-      socket.onerror = (event) => {
-        console.error('Live voice WebSocket error:', event);
-        setIsTranscribing(false);
-        if (isListeningRef.current) {
-          isListeningRef.current = false;
-          setIsListening(false);
-          cleanupVoiceResources();
-          alert('Live voice transcription connection failed. Please try again.');
-        }
-      };
-
-      socket.onclose = () => {
-        liveSocketRef.current = null;
-        if (isListeningRef.current) {
-          isListeningRef.current = false;
-          setIsListening(false);
-          cleanupVoiceResources();
-          setIsTranscribing(false);
-        }
-      };
-    } catch (error: any) {
-      console.error('Live voice transcription failed:', error);
-      isListeningRef.current = false;
-      setIsListening(false);
-      setIsTranscribing(false);
-      cleanupVoiceResources();
-      liveSocketRef.current = null;
-      alert(
-        typeof error?.message === 'string' && error.message.trim()
-          ? error.message
-          : 'Unable to start live voice transcription. Please try again.'
-      );
-    }
-  }, [downsampleTo16k, float32ToBase64Pcm, cleanupVoiceResources, input, isListening, isTranscribing]);
-
-  const toggleListening = useCallback(() => {
-    if (isListening) stopListening();
-    else void startListening();
-  }, [isListening, startListening, stopListening]);
-
-  useEffect(() => {
-    return () => {
-      isListeningRef.current = false;
-      const socket = liveSocketRef.current;
-      liveSocketRef.current = null;
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        try { socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } })); } catch {}
-        try { socket.close(); } catch {}
-      }
-      cleanupVoiceResources();
-    };
-  }, [cleanupVoiceResources]);
 
   // Load sessions & messages
   const loadSessions = useCallback(async () => {
@@ -1217,11 +939,6 @@ export default function Chat({ user, onLogout }: Props) {
     regenerateTitle = false
   ) => {
     if ((!messageText.trim() && (!filesToSend || filesToSend.length === 0))) return;
-    if (isSendingRef.current || isTranscribing) return;
-    if (isListening) {
-      stopListening();
-      return;
-    }
 
     isSendingRef.current = true;
     setIsTyping(true);
@@ -2365,15 +2082,14 @@ const cleanMessageContent = (content: unknown): string => {
                     value={input}
                     onChange={(e) => {
                       setInput(e.target.value);
-                      if (isListening) speechBaseRef.current = e.target.value;
                     }}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey && !isTyping && !isListening && !isTranscribing) {
+                      if (e.key === 'Enter' && !e.shiftKey && !isTyping) {
                         e.preventDefault();
                         handleSendMessage();
                       }
                     }}
-                    placeholder={isListening ? 'Listening…' : 'Ask Anything'}
+                    placeholder="Ask Anything"
                     rows={1}
                     className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent px-1 py-2 text-[15px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:min-h-[46px] sm:py-2.5"
                     onInput={(e) => {
@@ -2456,30 +2172,6 @@ const cleanMessageContent = (content: unknown): string => {
                     )}
                   </AnimatePresence>
                 </div>
-
-                {/* Microphone */}
-                <motion.button
-                  type="button"
-                  onClick={toggleListening}
-                  disabled={isTyping || isTranscribing}
-                  aria-label={isListening ? 'Stop recording' : 'Voice input'}
-                  title={isListening ? 'Stop recording' : isTranscribing ? 'Transcribing…' : 'Voice input'}
-                  whileHover={{ scale: 1.04, y: -1 }}
-                  whileTap={{ scale: 0.94 }}
-                  transition={{ type: 'spring', stiffness: 420, damping: 24 }}
-                  className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isListening ? 'border-red-400 bg-red-500 text-white shadow-red-500/20' : 'border-zinc-200 bg-zinc-50 text-zinc-500 hover:border-zinc-400 hover:bg-white hover:text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:border-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'} disabled:cursor-not-allowed disabled:opacity-50`}
-                >
-                  {isTranscribing ? (
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-800 dark:border-zinc-600 dark:border-t-zinc-200" />
-                  ) : isListening ? (
-                    <span className="relative flex items-center justify-center">
-                      <span className="absolute h-3 w-3 animate-ping rounded-full bg-white/70" />
-                      <Square className="relative h-3.5 w-3.5 fill-current" />
-                    </span>
-                  ) : (
-                    <Mic className="h-4 w-4" />
-                  )}
-                </motion.button>
 
                 {/* Send / Stop */}
                 <motion.button
