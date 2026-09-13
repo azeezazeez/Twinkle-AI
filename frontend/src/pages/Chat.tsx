@@ -429,9 +429,13 @@ export default function Chat({ user, onLogout }: Props) {
 
   const [messageAttachments, setMessageAttachments] = useState<Record<string | number, string[]>>({});
 
-  // Speech recognition (UI removed)
+  // Voice-to-text recording
   const [isListening, setIsListening] = useState(false);
-  const recognitionRef = useRef<any>(null);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const audioChunksRef = useRef<Float32Array[]>([]);
   const speechBaseRef = useRef('');
 
   // Theme
@@ -501,65 +505,179 @@ export default function Chat({ user, onLogout }: Props) {
     };
   }, []);
 
-  // Speech recognition handlers (kept but never called from UI)
-  const startListening = useCallback(() => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      alert('Your browser does not support speech recognition. Please use Chrome, Edge, or Safari.');
+  // Encode captured PCM samples as a standard WAV file.
+  // This avoids the browser SpeechRecognition service entirely, so the
+  // microphone button does not depend on Chrome's speech network endpoint.
+  const encodeWav = useCallback((samples: Float32Array[], sampleRate: number): Blob => {
+    const length = samples.reduce((total, chunk) => total + chunk.length, 0);
+    const buffer = new ArrayBuffer(44 + length * 2);
+    const view = new DataView(buffer);
+
+    const writeString = (offset: number, value: string) => {
+      for (let i = 0; i < value.length; i++) {
+        view.setUint8(offset + i, value.charCodeAt(i));
+      }
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + length * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, length * 2, true);
+
+    let offset = 44;
+    for (const chunk of samples) {
+      for (let i = 0; i < chunk.length; i++) {
+        const sample = Math.max(-1, Math.min(1, chunk[i]));
+        view.setInt16(
+          offset,
+          sample < 0 ? sample * 0x8000 : sample * 0x7fff,
+          true
+        );
+        offset += 2;
+      }
+    }
+
+    return new Blob([buffer], { type: 'audio/wav' });
+  }, []);
+
+  const cleanupRecorder = useCallback(() => {
+    try {
+      processorRef.current?.disconnect();
+    } catch {}
+    processorRef.current = null;
+
+    mediaStreamRef.current?.getTracks().forEach(track => track.stop());
+    mediaStreamRef.current = null;
+
+    const context = audioContextRef.current;
+    audioContextRef.current = null;
+    if (context && context.state !== 'closed') {
+      context.close().catch(() => {});
+    }
+
+    mediaRecorderRef.current = null;
+  }, []);
+
+  const finishTranscription = useCallback(async () => {
+    const samples = audioChunksRef.current;
+    audioChunksRef.current = [];
+
+    if (!samples.length) {
+      setIsListening(false);
+      cleanupRecorder();
       return;
     }
-    if (recognitionRef.current) recognitionRef.current.stop();
-    speechBaseRef.current = inputRef.current?.value || '';
 
-    const recognition = new SR();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = navigator.language || 'en-US';
+    const sampleRate = audioContextRef.current?.sampleRate || 44100;
+    const audioBlob = encodeWav(samples, sampleRate);
 
-    recognition.onstart = () => setIsListening(true);
-    recognition.onresult = (event: any) => {
-      let finalSegment = '';
-      let interimSegment = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (event.results[i].isFinal) finalSegment += event.results[i][0].transcript;
-        else interimSegment += event.results[i][0].transcript;
+    cleanupRecorder();
+    setIsListening(false);
+    setIsTranscribing(true);
+
+    try {
+      const transcript = await chatApi.transcribeAudio(audioBlob);
+      if (transcript) {
+        const base = speechBaseRef.current.trim();
+        setInput(base ? `${base} ${transcript}`.trim() : transcript);
       }
-      if (finalSegment) {
-        speechBaseRef.current = speechBaseRef.current
-          ? `${speechBaseRef.current} ${finalSegment}`.trim()
-          : finalSegment.trim();
+    } catch (error: any) {
+      console.error('Voice transcription error:', error);
+      alert(error?.message || 'Voice transcription failed. Please try again.');
+    } finally {
+      setIsTranscribing(false);
+      inputRef.current?.focus();
+    }
+  }, [cleanupRecorder, encodeWav]);
+
+  const startListening = useCallback(async () => {
+    if (isListening || isTranscribing) return;
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      alert('Your browser does not support microphone recording. Please use a modern Chrome, Edge, Firefox, or Safari browser.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      const AudioContextClass =
+        window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+
+      if (!AudioContextClass) {
+        stream.getTracks().forEach(track => track.stop());
+        alert('Your browser does not support audio recording.');
+        return;
       }
-      const display = interimSegment
-        ? `${speechBaseRef.current} ${interimSegment}`.trim()
-        : speechBaseRef.current;
-      setInput(display);
-    };
-    recognition.onend = () => {
-      setIsListening(false);
-      recognitionRef.current = null;
-    };
-    recognition.onerror = (event: any) => {
-      console.error('Speech error:', event.error);
-      setIsListening(false);
-      recognitionRef.current = null;
-      if (event.error === 'not-allowed') alert('Microphone access denied.');
-      else if (event.error === 'network') alert('Network error occurred.');
-    };
-    recognitionRef.current = recognition;
-    recognition.start();
-    inputRef.current?.focus();
-  }, []);
+
+      const context = new AudioContextClass();
+      await context.resume();
+
+      const source = context.createMediaStreamSource(stream);
+      const processor = context.createScriptProcessor(4096, 1, 1);
+      const silentGain = context.createGain();
+      silentGain.gain.value = 0;
+
+      audioChunksRef.current = [];
+      speechBaseRef.current = inputRef.current?.value || '';
+      mediaStreamRef.current = stream;
+      audioContextRef.current = context;
+      processorRef.current = processor;
+
+      processor.onaudioprocess = event => {
+        const inputData = event.inputBuffer.getChannelData(0);
+        audioChunksRef.current.push(new Float32Array(inputData));
+      };
+
+      source.connect(processor);
+      processor.connect(silentGain);
+      silentGain.connect(context.destination);
+
+      setIsListening(true);
+      inputRef.current?.focus();
+    } catch (error: any) {
+      cleanupRecorder();
+      if (error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError') {
+        alert('Microphone access was denied. Please allow microphone access for Twinkle and try again.');
+      } else {
+        console.error('Microphone error:', error);
+        alert('Could not access the microphone. Please check your browser and microphone settings.');
+      }
+    }
+  }, [cleanupRecorder, isListening, isTranscribing]);
 
   const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
-    setIsListening(false);
-  }, []);
+    if (!isListening) return;
+    void finishTranscription();
+  }, [finishTranscription, isListening]);
 
-  // Always release the microphone if the chat page is unmounted.
   useEffect(() => {
     return () => {
-      recognitionRef.current?.stop();
-      recognitionRef.current = null;
+      processorRef.current?.disconnect();
+      mediaStreamRef.current?.getTracks().forEach(track => track.stop());
+      const context = audioContextRef.current;
+      if (context && context.state !== 'closed') {
+        context.close().catch(() => {});
+      }
+      processorRef.current = null;
+      mediaStreamRef.current = null;
+      audioContextRef.current = null;
     };
   }, []);
 
@@ -567,6 +685,7 @@ export default function Chat({ user, onLogout }: Props) {
     if (isListening) stopListening();
     else startListening();
   }, [isListening, startListening, stopListening]);
+
 
   // Load sessions & messages
   const loadSessions = useCallback(async () => {
@@ -2046,7 +2165,7 @@ const cleanMessageContent = (content: unknown): string => {
                 <motion.button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={isTyping || isProcessingFiles}
+                  disabled={isTyping || isProcessingFiles || isTranscribing}
                   aria-label="Attach files"
                   title="Attach files"
                   whileHover={{ scale: 1.04, y: -1 }}
@@ -2099,7 +2218,7 @@ const cleanMessageContent = (content: unknown): string => {
                         handleSendMessage();
                       }
                     }}
-                    placeholder={isListening ? 'Listening…' : 'Ask Anything'}
+                    placeholder={isTranscribing ? 'Transcribing…' : isListening ? 'Listening…' : 'Ask Anything'}
                     rows={1}
                     className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent px-1 py-2 text-[15px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:min-h-[46px] sm:py-2.5"
                     onInput={(e) => {
@@ -2114,10 +2233,10 @@ const cleanMessageContent = (content: unknown): string => {
                 <motion.button
                   type="button"
                   onClick={toggleListening}
-                  disabled={isTyping || isProcessingFiles}
-                  aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
+                  disabled={isTyping || isProcessingFiles || isTranscribing}
+                  aria-label={isTranscribing ? 'Transcribing voice input' : isListening ? 'Stop voice input' : 'Start voice input'}
                   aria-pressed={isListening}
-                  title={isListening ? 'Stop voice input' : 'Voice to text'}
+                  title={isTranscribing ? 'Transcribing voice input' : isListening ? 'Stop voice input' : 'Voice to text'}
                   whileHover={{ scale: 1.04, y: -1 }}
                   whileTap={{ scale: 0.94, y: 0 }}
                   transition={{
@@ -2142,7 +2261,7 @@ const cleanMessageContent = (content: unknown): string => {
                     animate={isListening ? { scale: [1, 1.08, 1] } : { scale: 1 }}
                     transition={isListening ? { duration: 1.1, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.2 }}
                   >
-                    {isListening ? (
+                    {isListening || isTranscribing ? (
                       <MicOff className="h-5 w-5 stroke-[2.2]" />
                     ) : (
                       <Mic className="h-5 w-5 stroke-[2.2]" />
