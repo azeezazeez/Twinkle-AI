@@ -11,7 +11,7 @@ import ConfirmationModal from '../components/ConfirmationModal';
 import {
   ArrowDown, ArrowUp,
   Copy, Check, Edit2, Sun, Moon, Menu,
-  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, Mic, Square,
+  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText,
 } from 'lucide-react';
 
 import ReactMarkdown from 'react-markdown';
@@ -263,11 +263,9 @@ export default function Chat({ user, onLogout }: Props) {
 
   const [messageAttachments, setMessageAttachments] = useState<Record<string | number, string[]>>({});
 
-  // Browser microphone recording -> backend Gemini transcription
+  // Speech recognition (UI removed)
   const [isListening, setIsListening] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const recognitionRef = useRef<any>(null);
   const speechBaseRef = useRef('');
 
   // Theme
@@ -336,176 +334,64 @@ export default function Chat({ user, onLogout }: Props) {
     };
   }, []);
 
-  // =========================================================
-  // MICROPHONE -> GEMINI TRANSCRIPTION
-  // =========================================================
-
-  const getSupportedAudioMimeType = useCallback((): string => {
-    if (typeof MediaRecorder === 'undefined') return '';
-    const candidates = [
-      'audio/webm;codecs=opus',
-      'audio/webm',
-      'audio/mp4',
-      'audio/ogg;codecs=opus',
-    ];
-
-    return candidates.find(type => MediaRecorder.isTypeSupported(type)) || '';
-  }, []);
-
-  const stopListening = useCallback(async (shouldTranscribe = true) => {
-    const recorder = mediaRecorderRef.current;
-
-    if (!recorder) {
-      setIsListening(false);
-      mediaStreamRef.current?.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
+  // Speech recognition handlers (kept but never called from UI)
+  const startListening = useCallback(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      alert('Your browser does not support speech recognition. Please use Chrome, Edge, or Safari.');
       return;
     }
+    if (recognitionRef.current) recognitionRef.current.stop();
+    speechBaseRef.current = inputRef.current?.value || '';
 
-    if (recorder.state !== 'inactive') {
-      recorder.stop();
-    }
+    const recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
 
+    recognition.onstart = () => setIsListening(true);
+    recognition.onresult = (event: any) => {
+      let finalSegment = '';
+      let interimSegment = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) finalSegment += event.results[i][0].transcript;
+        else interimSegment += event.results[i][0].transcript;
+      }
+      if (finalSegment) {
+        speechBaseRef.current = speechBaseRef.current
+          ? `${speechBaseRef.current} ${finalSegment}`.trim()
+          : finalSegment.trim();
+      }
+      const display = interimSegment
+        ? `${speechBaseRef.current} ${interimSegment}`.trim()
+        : speechBaseRef.current;
+      setInput(display);
+    };
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+    recognition.onerror = (event: any) => {
+      console.error('Speech error:', event.error);
+      setIsListening(false);
+      recognitionRef.current = null;
+      if (event.error === 'not-allowed') alert('Microphone access denied.');
+      else if (event.error === 'network') alert('Network error occurred.');
+    };
+    recognitionRef.current = recognition;
+    recognition.start();
+    inputRef.current?.focus();
+  }, []);
+
+  const stopListening = useCallback(() => {
+    recognitionRef.current?.stop();
     setIsListening(false);
-
-    if (!shouldTranscribe) {
-      audioChunksRef.current = [];
-      mediaRecorderRef.current = null;
-      mediaStreamRef.current?.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-    }
   }, []);
-
-  const startListening = useCallback(async () => {
-    if (isTyping || isProcessingFiles) return;
-
-    if (typeof window === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-      alert('Microphone recording is not supported by this browser.');
-      return;
-    }
-
-    const mimeType = getSupportedAudioMimeType();
-    if (!mimeType) {
-      alert('This browser does not support a compatible audio recording format.');
-      return;
-    }
-
-    try {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        mediaRecorderRef.current.stop();
-      }
-
-      mediaStreamRef.current?.getTracks().forEach(track => track.stop());
-
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, { mimeType });
-
-      audioChunksRef.current = [];
-      mediaStreamRef.current = stream;
-      mediaRecorderRef.current = recorder;
-      speechBaseRef.current = inputRef.current?.value || '';
-
-      recorder.ondataavailable = (event: BlobEvent) => {
-        if (event.data && event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.onerror = (event) => {
-        console.error('Microphone recording error:', event);
-        setIsListening(false);
-        mediaRecorderRef.current = null;
-        stream.getTracks().forEach(track => track.stop());
-        mediaStreamRef.current = null;
-        audioChunksRef.current = [];
-        alert('The microphone recording failed. Please try again.');
-      };
-
-      recorder.onstop = async () => {
-        const chunks = audioChunksRef.current;
-        audioChunksRef.current = [];
-        mediaRecorderRef.current = null;
-        stream.getTracks().forEach(track => track.stop());
-        mediaStreamRef.current = null;
-
-        if (chunks.length === 0) return;
-
-        const audioBlob = new Blob(chunks, {
-          type: mimeType.split(';')[0] || mimeType,
-        });
-
-        if (audioBlob.size === 0) return;
-
-        try {
-          setIsTyping(true);
-
-          const transcribedText = await chatApi.transcribeAudio(audioBlob);
-
-          if (transcribedText) {
-            const existingText = speechBaseRef.current.trim();
-            const combinedText = existingText
-              ? `${existingText} ${transcribedText}`.trim()
-              : transcribedText.trim();
-
-            setInput(combinedText);
-            speechBaseRef.current = combinedText;
-
-            requestAnimationFrame(() => inputRef.current?.focus());
-          }
-        } catch (error: any) {
-          console.error('Audio transcription failed:', error);
-          alert(
-            typeof error?.message === 'string' && error.message.trim()
-              ? error.message
-              : 'Could not transcribe the recording. Please try again.'
-          );
-        } finally {
-          setIsTyping(false);
-        }
-      };
-
-      recorder.start();
-      setIsListening(true);
-      inputRef.current?.focus();
-    } catch (error: any) {
-      console.error('Microphone access failed:', error);
-      setIsListening(false);
-      mediaRecorderRef.current = null;
-      mediaStreamRef.current?.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-
-      if (error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError') {
-        alert('Microphone access was denied. Please allow microphone access in your browser and try again.');
-      } else if (error?.name === 'NotFoundError') {
-        alert('No microphone was found on this device.');
-      } else {
-        alert('Could not start the microphone. Please try again.');
-      }
-    }
-  }, [getSupportedAudioMimeType, isProcessingFiles, isTyping]);
 
   const toggleListening = useCallback(() => {
-    if (isListening) {
-      stopListening(true);
-    } else {
-      startListening();
-    }
+    if (isListening) stopListening();
+    else startListening();
   }, [isListening, startListening, stopListening]);
-
-  useEffect(() => {
-    return () => {
-      try {
-        const recorder = mediaRecorderRef.current;
-        if (recorder && recorder.state !== 'inactive') recorder.stop();
-      } catch {
-        // Ignore recorder cleanup errors during unmount.
-      }
-      mediaStreamRef.current?.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-      mediaRecorderRef.current = null;
-      audioChunksRef.current = [];
-    };
-  }, []);
 
   // Load sessions & messages
   const loadSessions = useCallback(async () => {
@@ -1613,47 +1499,6 @@ export default function Chat({ user, onLogout }: Props) {
                     )}
                   </AnimatePresence>
                 </div>
-
-                {/* Microphone */}
-                <motion.button
-                  type="button"
-                  onClick={toggleListening}
-                  disabled={isTyping || isProcessingFiles}
-                  aria-label={isListening ? 'Stop recording' : 'Voice input'}
-                  title={isListening ? 'Stop recording' : 'Voice input'}
-                  whileHover={{ scale: 1.04, y: -1 }}
-                  whileTap={{ scale: 0.94 }}
-                  transition={{
-                    type: 'spring',
-                    stiffness: 420,
-                    damping: 24,
-                    mass: 0.6,
-                  }}
-                  className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border shadow-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50 ${
-                    isListening
-                      ? 'border-red-300 bg-red-50 text-red-600 shadow-red-500/15 dark:border-red-500/50 dark:bg-red-950/30 dark:text-red-400'
-                      : 'border-zinc-200 bg-white text-zinc-500 hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:border-indigo-500/40 dark:hover:bg-indigo-950/30 dark:hover:text-indigo-400'
-                  }`}
-                >
-                  {isListening ? (
-                    <motion.span
-                      animate={{ scale: [1, 1.08, 1] }}
-                      transition={{ duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
-                      className="flex items-center justify-center"
-                    >
-                      <Square className="h-4 w-4 fill-current stroke-[2.5]" />
-                    </motion.span>
-                  ) : (
-                    <Mic className="h-5 w-5 stroke-[2.2]" />
-                  )}
-                  {isListening && (
-                    <motion.span
-                      className="pointer-events-none absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-zinc-950"
-                      animate={{ opacity: [1, 0.35, 1] }}
-                      transition={{ duration: 1, repeat: Infinity }}
-                    />
-                  )}
-                </motion.button>
 
                 {/* Send / Stop */}
                 <motion.button
