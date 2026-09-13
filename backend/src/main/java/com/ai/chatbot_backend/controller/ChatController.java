@@ -151,6 +151,55 @@ public class ChatController {
 
 
     // =========================================================
+    // VOICE-TO-TEXT TRANSCRIPTION
+    // =========================================================
+
+    @PostMapping(
+            value = "/transcribe",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE
+    )
+    public ResponseEntity<?> transcribeAudio(
+            @RequestPart("audio") MultipartFile audio) {
+
+        try {
+            if (audio == null || audio.isEmpty()) {
+                throw new IllegalArgumentException("Audio recording is empty.");
+            }
+
+            // Keep voice input intentionally small so the endpoint remains a
+            // quick transcription operation rather than a general file upload.
+            if (audio.getSize() > 10L * 1024L * 1024L) {
+                throw new IllegalArgumentException("Voice recording is too large. Keep it under 10MB.");
+            }
+
+            String mime = audio.getContentType();
+            if (mime == null || mime.isBlank()) {
+                mime = "audio/wav";
+            }
+
+            String text = geminiService.transcribeAudio(
+                    audio.getBytes(),
+                    mime
+            );
+
+            Map<String, String> response = new HashMap<>();
+            response.put("text", text == null ? "" : text.trim());
+            return ResponseEntity.ok(response);
+
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", e.getMessage()
+            ));
+        } catch (Exception e) {
+            log.error("Voice transcription failed: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of(
+                    "error", "Voice transcription failed. Please try again."
+            ));
+        }
+    }
+
+
+    // =========================================================
     // STATUS
     // =========================================================
 
