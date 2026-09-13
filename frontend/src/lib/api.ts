@@ -806,7 +806,13 @@ export const chatApi = {
 
   transcribeAudio: async (audio: Blob): Promise<string> => {
     const formData = new FormData();
-    formData.append('audio', audio, 'voice-input.wav');
+    const extension =
+      audio.type.includes('webm') ? 'webm' :
+      audio.type.includes('mp4') ? 'mp4' :
+      audio.type.includes('ogg') ? 'ogg' :
+      audio.type.includes('wav') ? 'wav' : 'audio';
+
+    formData.append('audio', audio, `voice-input.${extension}`);
 
     const response = await fetchWithAuth(
       `${API_BASE}/chat/transcribe`,
