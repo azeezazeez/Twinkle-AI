@@ -151,79 +151,6 @@ public class ChatController {
 
 
     // =========================================================
-    // LIVE VOICE TRANSCRIPTION TOKEN
-    // =========================================================
-
-    @GetMapping("/live-transcription-token")
-    public ResponseEntity<?> createLiveTranscriptionToken(HttpSession session) {
-        try {
-            if (getCurrentUser(session) == null) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
-                        "error", "Authentication required."
-                ));
-            }
-
-            String token = geminiService.createLiveTranscriptionToken();
-            return ResponseEntity.ok(Map.of("token", token));
-        } catch (Exception e) {
-            log.error("Live transcription token creation failed: {}", e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of(
-                    "error", "Unable to start live voice transcription."
-            ));
-        }
-    }
-
-
-    // =========================================================
-    // VOICE-TO-TEXT TRANSCRIPTION
-    // =========================================================
-
-    @PostMapping(
-            value = "/transcribe",
-            consumes = MediaType.MULTIPART_FORM_DATA_VALUE
-    )
-    public ResponseEntity<?> transcribeAudio(
-            @RequestPart("audio") MultipartFile audio) {
-
-        try {
-            if (audio == null || audio.isEmpty()) {
-                throw new IllegalArgumentException("Audio recording is empty.");
-            }
-
-            // Keep voice input intentionally small so the endpoint remains a
-            // quick transcription operation rather than a general file upload.
-            if (audio.getSize() > 10L * 1024L * 1024L) {
-                throw new IllegalArgumentException("Voice recording is too large. Keep it under 10MB.");
-            }
-
-            String mime = audio.getContentType();
-            if (mime == null || mime.isBlank()) {
-                mime = "audio/wav";
-            }
-
-            String text = geminiService.transcribeAudio(
-                    audio.getBytes(),
-                    mime
-            );
-
-            Map<String, String> response = new HashMap<>();
-            response.put("text", text == null ? "" : text.trim());
-            return ResponseEntity.ok(response);
-
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of(
-                    "error", e.getMessage()
-            ));
-        } catch (Exception e) {
-            log.error("Voice transcription failed: {}", e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of(
-                    "error", "Voice transcription failed. Please try again."
-            ));
-        }
-    }
-
-
-    // =========================================================
     // STATUS
     // =========================================================
 
@@ -1887,6 +1814,167 @@ log.warn(
                             HttpStatus.INTERNAL_SERVER_ERROR
                     )
                     .body(response);
+        }
+    }
+
+
+    // =========================================================
+    // GENERATE TITLE
+    // =========================================================
+
+    @PostMapping("/generate-title")
+    public ResponseEntity<Map<String, Object>>
+    generateTitle(
+            @RequestBody Map<String, String> request,
+            HttpSession session
+    ) {
+
+        Map<String, Object> response =
+                new HashMap<>();
+
+
+        try {
+
+            User currentUser =
+                    getCurrentUser(session);
+
+
+            if (currentUser == null) {
+
+                response.put(
+                        "error",
+                        "User not logged in"
+                );
+
+
+                return ResponseEntity
+                        .status(
+                                HttpStatus.UNAUTHORIZED
+                        )
+                        .body(response);
+            }
+
+
+            String firstMessage =
+                    request.get("firstMessage");
+
+
+            if (firstMessage == null
+                    || firstMessage.trim().isEmpty()) {
+
+                response.put(
+                        "error",
+                        "Message cannot be empty"
+                );
+
+
+                return ResponseEntity
+                        .status(
+                                HttpStatus.BAD_REQUEST
+                        )
+                        .body(response);
+            }
+
+
+            String truncated =
+                    firstMessage.length() > 100
+                            ? firstMessage.substring(
+                                    0,
+                                    100
+                            )
+                            : firstMessage;
+
+
+            String prompt =
+                    String.format(
+                            "Generate a very short, concise title (maximum 5-7 words) for a "
+                                    + "conversation that starts with: \"%s\". "
+                                    + "Return ONLY the title, no quotes, no explanation.",
+                            truncated
+                    );
+
+
+            String title =
+                    groqService.generateResponse(
+                            prompt,
+                            List.of()
+                    );
+
+
+            title =
+                    title
+                            .replace("\"", "")
+                            .replace("'", "")
+                            .trim();
+
+
+            if (title.length() > 60) {
+
+                title =
+                        title.substring(
+                                0,
+                                57
+                        ) + "...";
+            }
+
+
+            response.put(
+                    "title",
+                    title
+            );
+
+
+            response.put(
+                    "success",
+                    true
+            );
+
+
+            return ResponseEntity.ok(
+                    response
+            );
+
+
+        } catch (Exception e) {
+
+            log.error(
+                    "Error generating title: {}",
+                    e.getMessage(),
+                    e
+            );
+
+
+            String raw =
+                    request.getOrDefault(
+                            "firstMessage",
+                            "New Chat"
+                    );
+
+
+            String fallbackTitle =
+                    raw.length() > 30
+                            ? raw.substring(
+                                    0,
+                                    30
+                            ) + "..."
+                            : raw;
+
+
+            response.put(
+                    "title",
+                    fallbackTitle
+            );
+
+
+            response.put(
+                    "success",
+                    false
+            );
+
+
+            return ResponseEntity.ok(
+                    response
+            );
         }
     }
 
