@@ -10,7 +10,7 @@ import ConfirmationModal from '../components/ConfirmationModal';
 import {
   ArrowDown, ArrowUp,
   Copy, Check, Edit2,
-  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, SquarePen,
+  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, Mic, Square,
 } from 'lucide-react';
 
 import ReactMarkdown from 'react-markdown';
@@ -87,6 +87,108 @@ const getInitialTheme = (): boolean => {
   const stored = localStorage.getItem('theme');
   if (stored) return stored === 'dark';
   return window.matchMedia('(prefers-color-scheme: dark)').matches;
+};
+
+/**
+ * Deterministic, rule-based chat title generator.
+ * No AI model is used for naming conversations.
+ */
+const generateProfessionalChatTitle = (message: string, hasFiles = false): string => {
+  const original = (message || '').trim();
+  if (!original) return hasFiles ? 'File Analysis' : 'New Chat';
+
+  const subject = original
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/\s+/g, ' ')
+    .replace(/^\s*(can|could|would|will)\s+you\s+(please\s+)?/i, '')
+    .replace(/^\s*please\s+/i, '')
+    .replace(/^\s*i\s+(want|need|would like)\s+(to\s+)?/i, '')
+    .replace(/^\s*help\s+me\s+(to\s+)?/i, '')
+    .replace(/^\s*(kindly|let's)\s+/i, '')
+    .trim();
+
+  const actions: Array<[RegExp, string]> = [
+    [/\b(simplify|make\s+(it|this|that)\s+(simple|simpler|easier)|make\s+.*\b(simple|simpler|easier)\b)\b/i, 'Simplify'],
+    [/\b(debug|fix|solve|resolve|repair)\b/i, 'Fix'],
+    [/\b(design|redesign|layout|style|stylize)\b/i, 'Design'],
+    [/\b(create|make|build|develop|generate|produce|prepare)\b/i, 'Create'],
+    [/\b(explain|describe|clarify|what\s+is|how\s+does|how\s+do)\b/i, 'Explain'],
+    [/\b(write|draft|compose)\b/i, 'Write'],
+    [/\b(convert|transform|turn)\b/i, 'Convert'],
+    [/\b(summarize|summarise|summary)\b/i, 'Summarize'],
+    [/\b(analyze|analyse|review|evaluate)\b/i, 'Analyze'],
+    [/\b(compare|comparison|difference|differences)\b/i, 'Compare'],
+    [/\b(remove|delete|erase)\b/i, 'Remove'],
+    [/\b(add|insert)\b/i, 'Add'],
+  ];
+
+  const artifacts: Array<[RegExp, string]> = [
+    [/\b(16\s*:\s*9|widescreen)\b/i, '16:9'],
+    [/\b(ppt|pptx|powerpoint)\b/i, 'PPT Presentation'],
+    [/\b(presentation|presentations|slides|slide\s+deck)\b/i, 'Presentation'],
+    [/\b(handwritten|hand\s*written).*\bposter\b|\bposter\b.*\b(handwritten|hand\s*written)\b/i, 'Handwritten Poster'],
+    [/\bposter\b/i, 'Poster'],
+    [/\bdrone\b.*\bchart\b|\bchart\b.*\bdrone\b/i, 'Drone Chart'],
+    [/\bchart\b|\bgraph\b|\bdiagram\b/i, 'Chart'],
+    [/\b(login|sign[- ]?in)\s+(page|screen|form)\b/i, 'Login Page'],
+    [/\b(image|picture|photo|illustration|visual)\b/i, 'Image'],
+    [/\bpdf\b/i, 'PDF'],
+    [/\b(code|program|script|function)\b/i, 'Code'],
+    [/\breact\b/i, 'React'],
+    [/\b(javascript|typescript)\b/i, 'JavaScript'],
+    [/\bjava\b/i, 'Java'],
+    [/\bpython\b/i, 'Python'],
+    [/\b(sql|database|db)\b/i, 'Database'],
+    [/\bapi\b/i, 'API'],
+  ];
+
+  const topics: Array<[RegExp, string]> = [
+    [/\btwinkle\s+(ai\s+)?project\b/i, 'Twinkle'],
+    [/\btwinkle\b/i, 'Twinkle'],
+    [/\bai\s+project\b/i, 'AI Project'],
+    [/\bmachine\s+learning\b/i, 'Machine Learning'],
+    [/\bartificial\s+intelligence\b/i, 'Artificial Intelligence'],
+    [/\bchatbot\b/i, 'Chatbot'],
+    [/\bauthentication\b/i, 'Authentication'],
+    [/\bportfolio\b/i, 'Portfolio'],
+    [/\bwebsite\b/i, 'Website'],
+    [/\bapp(?:lication)?\b/i, 'Application'],
+  ];
+
+  const findRule = (rules: Array<[RegExp, string]>) => {
+    for (const [pattern, value] of rules) {
+      if (pattern.test(subject)) return value;
+    }
+    return '';
+  };
+
+  const action = findRule(actions);
+  const artifact = findRule(artifacts);
+  const topic = findRule(topics);
+
+  if (artifact === '16:9') return /\bppt|powerpoint|presentation|slides?\b/i.test(subject) ? 'Set Presentation 16:9' : 'Set 16:9 Format';
+  if (topic === 'Twinkle' && artifact === 'Drone Chart') return 'Twinkle Drone Chart';
+  if (topic === 'Twinkle' && artifact === 'Chart') return 'Twinkle Chart Design';
+  if (topic === 'Twinkle' && artifact === 'Handwritten Poster') return action === 'Simplify' ? 'Simplify Twinkle Poster' : 'Twinkle Handwritten Poster';
+  if (topic === 'AI Project' && artifact === 'PPT Presentation') return 'Create AI Project Presentation';
+  if (action === 'Simplify' && artifact === 'Handwritten Poster') return 'Simplify Handwritten Poster';
+
+  if (action && topic && artifact) {
+    if (artifact === 'PPT Presentation' || artifact === 'Presentation') return `${action} ${topic} Presentation`;
+    if (artifact === 'Chart') return `${topic} Chart Design`;
+    return `${action} ${topic} ${artifact}`;
+  }
+  if (action && artifact) return `${action} ${artifact}`;
+  if (action && topic) return `${action} ${topic}`;
+  if (topic && artifact) return `${topic} ${artifact}`;
+  if (artifact) return `${action || 'View'} ${artifact}`;
+
+  const stopWords = new Set(['can','could','would','please','help','me','i','want','need','to','a','an','the','my','this','that','for','with','and','is','are','be','it','of','on','in','from','you','give']);
+  const words = subject.replace(/[^\p{L}\p{N}:#/+.-]+/gu, ' ').split(/\s+/).filter(word => word && !stopWords.has(word.toLowerCase()));
+  const fallback = words.slice(0, action ? 5 : 6).map(word => /^[A-Z0-9]+$/.test(word) ? word : word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+  if (!fallback) return hasFiles ? 'File Analysis' : 'New Chat';
+  return action ? `${action} ${fallback}`.split(/\s+/).slice(0, 6).join(' ') : fallback.split(/\s+/).slice(0, 6).join(' ');
 };
 
 const formatFileSize = (bytes: number): string => {
@@ -173,7 +275,7 @@ const fileToDataUrl = (file: File): Promise<string> =>
     reader.readAsDataURL(file);
   });
 
-const attachmentNameStorageKey = 'nexus-ai-attachment-names';
+const attachmentNameStorageKey = 'Twinkle-ai-attachment-names';
 
 const getAttachmentStorageId = (value: string): string => {
   // Small deterministic hash so localStorage keys never contain the entire
@@ -338,7 +440,7 @@ const MODEL_OPTIONS: ModelOption[] = [
   { id: 'gemini-3.8-flash', name: 'Twinkle Vision', description: 'Advanced image & file understanding', icon: Eye, vision: true, documents: true },
 ];
 
-const MODEL_STORAGE_KEY = 'nexus_selected_model';
+const MODEL_STORAGE_KEY = 'Twinkle_selected_model';
 
 const RESPONSE_STATUS_MESSAGES = [
   'Preparing your response…',
@@ -365,7 +467,7 @@ const getNextEmptyChatPrompt = (current: string): string => {
 
 export default function Chat({ user, onLogout }: Props) {
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [currentSessionId, setCurrentSessionId] = useState<number | null>(readPersistedSessionId);
+  const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -429,9 +531,12 @@ export default function Chat({ user, onLogout }: Props) {
 
   const [messageAttachments, setMessageAttachments] = useState<Record<string | number, string[]>>({});
 
-  // Speech recognition (UI removed)
+  // Voice input
   const [isListening, setIsListening] = useState(false);
-  const recognitionRef = useRef<any>(null);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
   const speechBaseRef = useRef('');
 
   // Theme
@@ -501,64 +606,139 @@ export default function Chat({ user, onLogout }: Props) {
     };
   }, []);
 
-  // Speech recognition handlers (kept but never called from UI)
-  const startListening = useCallback(() => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      alert('Your browser does not support speech recognition. Please use Chrome, Edge, or Safari.');
-      return;
-    }
-    if (recognitionRef.current) recognitionRef.current.stop();
-    speechBaseRef.current = inputRef.current?.value || '';
+  const getSupportedAudioMimeType = useCallback(() => {
+    if (typeof MediaRecorder === 'undefined') return '';
 
-    const recognition = new SR();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
+    const candidates = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4',
+      'audio/ogg;codecs=opus',
+    ];
 
-    recognition.onstart = () => setIsListening(true);
-    recognition.onresult = (event: any) => {
-      let finalSegment = '';
-      let interimSegment = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (event.results[i].isFinal) finalSegment += event.results[i][0].transcript;
-        else interimSegment += event.results[i][0].transcript;
-      }
-      if (finalSegment) {
-        speechBaseRef.current = speechBaseRef.current
-          ? `${speechBaseRef.current} ${finalSegment}`.trim()
-          : finalSegment.trim();
-      }
-      const display = interimSegment
-        ? `${speechBaseRef.current} ${interimSegment}`.trim()
-        : speechBaseRef.current;
-      setInput(display);
-    };
-    recognition.onend = () => {
-      setIsListening(false);
-      recognitionRef.current = null;
-    };
-    recognition.onerror = (event: any) => {
-      console.error('Speech error:', event.error);
-      setIsListening(false);
-      recognitionRef.current = null;
-      if (event.error === 'not-allowed') alert('Microphone access denied.');
-      else if (event.error === 'network') alert('Network error occurred.');
-    };
-    recognitionRef.current = recognition;
-    recognition.start();
-    inputRef.current?.focus();
+    return candidates.find(type => MediaRecorder.isTypeSupported(type)) || '';
   }, []);
 
   const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
-    setIsListening(false);
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.stop();
+    } else {
+      setIsListening(false);
+    }
   }, []);
+
+  const startListening = useCallback(async () => {
+    if (isListening || isTranscribing) return;
+
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      alert('Microphone access requires HTTPS or localhost.');
+      return;
+    }
+
+    if (typeof MediaRecorder === 'undefined') {
+      alert('Your browser does not support microphone recording. Please use a current Chrome, Edge, or Safari browser.');
+      return;
+    }
+
+    const mimeType = getSupportedAudioMimeType();
+    if (!mimeType) {
+      alert('This browser does not provide a supported audio recording format.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream, { mimeType });
+
+      audioChunksRef.current = [];
+      mediaStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+      speechBaseRef.current = inputRef.current?.value || input;
+
+      recorder.ondataavailable = (event: BlobEvent) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onerror = (event: Event) => {
+        console.error('Microphone recording error:', event);
+        setIsListening(false);
+        mediaRecorderRef.current = null;
+        mediaStreamRef.current?.getTracks().forEach(track => track.stop());
+        mediaStreamRef.current = null;
+        alert('The microphone recording failed. Please try again.');
+      };
+
+      recorder.onstop = async () => {
+        setIsListening(false);
+        mediaRecorderRef.current = null;
+        mediaStreamRef.current?.getTracks().forEach(track => track.stop());
+        mediaStreamRef.current = null;
+
+        const chunks = audioChunksRef.current;
+        audioChunksRef.current = [];
+        if (chunks.length === 0) return;
+
+        const audioBlob = new Blob(chunks, { type: mimeType });
+        if (audioBlob.size === 0) return;
+
+        setIsTranscribing(true);
+        try {
+          const transcript = await chatApi.transcribeAudio(audioBlob);
+          if (transcript) {
+            const base = speechBaseRef.current.trim();
+            const combined = base ? `${base} ${transcript}`.trim() : transcript.trim();
+            setInput(combined);
+            speechBaseRef.current = combined;
+          }
+        } catch (error: any) {
+          console.error('Voice transcription failed:', error);
+          alert(
+            typeof error?.message === 'string' && error.message.trim()
+              ? error.message
+              : 'Voice transcription failed. Please try again.'
+          );
+        } finally {
+          setIsTranscribing(false);
+          setTimeout(() => inputRef.current?.focus(), 50);
+        }
+      };
+
+      recorder.start();
+      setIsListening(true);
+      inputRef.current?.focus();
+    } catch (error: any) {
+      console.error('Microphone access failed:', error);
+      mediaRecorderRef.current = null;
+      mediaStreamRef.current?.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+
+      if (error?.name === 'NotAllowedError' || error?.name === 'SecurityError') {
+        alert('Microphone access was denied. Please allow microphone access for this site and try again.');
+      } else if (error?.name === 'NotFoundError') {
+        alert('No microphone was found on this device.');
+      } else {
+        alert('Unable to start the microphone. Please check your browser permissions and try again.');
+      }
+    }
+  }, [getSupportedAudioMimeType, input, isListening, isTranscribing]);
 
   const toggleListening = useCallback(() => {
     if (isListening) stopListening();
-    else startListening();
+    else void startListening();
   }, [isListening, startListening, stopListening]);
+
+  useEffect(() => {
+    return () => {
+      const recorder = mediaRecorderRef.current;
+      if (recorder && recorder.state !== 'inactive') recorder.stop();
+      mediaStreamRef.current?.getTracks().forEach(track => track.stop());
+      mediaRecorderRef.current = null;
+      mediaStreamRef.current = null;
+    };
+  }, []);
 
   // Load sessions & messages
   const loadSessions = useCallback(async () => {
@@ -901,8 +1081,11 @@ export default function Chat({ user, onLogout }: Props) {
     regenerateTitle = false
   ) => {
     if ((!messageText.trim() && (!filesToSend || filesToSend.length === 0))) return;
-    if (isSendingRef.current) return;
-    if (isListening) stopListening();
+    if (isSendingRef.current || isTranscribing) return;
+    if (isListening) {
+      stopListening();
+      return;
+    }
 
     isSendingRef.current = true;
     setIsTyping(true);
@@ -1010,33 +1193,31 @@ export default function Chat({ user, onLogout }: Props) {
         return [...prev, aiMsg];
       });
 
-      // Generate a fresh adaptive chat title for a new chat, and also when
-      // an existing user message is edited and re-submitted. This keeps the
-      // sidebar/chat header aligned with the latest direction of the chat.
+      // Generate and persist the chat title locally using deterministic rules.
+      // No AI model/API call is used for naming conversations.
       if ((isNewSession || regenerateTitle) && activeSessionId) {
         try {
-          const titleSource = finalMessage || 'File analysis';
-          const { title } = await chatApi.generateTitle(titleSource) as any;
-          if (title?.trim()) {
-            const newTitle = title.trim();
+          const newTitle = generateProfessionalChatTitle(
+            finalMessage || 'File analysis',
+            currentRequestHasFiles
+          );
 
-            await chatApi.renameSession(activeSessionId, newTitle);
+          await chatApi.renameSession(activeSessionId, newTitle);
 
-            // Update local state immediately so the mobile drawer and the
-            // desktop sidebar/header show the generated title without waiting
-            // for another render or a remount of the mobile drawer.
-            setSessions(prev =>
-              prev.map(session =>
-                session.id === activeSessionId
-                  ? { ...session, sessionName: newTitle }
-                  : session
-              )
-            );
+          // Keep the Sidebar's sessions prop synchronized immediately.
+          setSessions(prev =>
+            prev.map(session =>
+              session.id === activeSessionId
+                ? { ...session, sessionName: newTitle }
+                : session
+            )
+          );
 
-            // Confirm the server state after the immediate UI update.
-            await loadSessions();
-          }
-        } catch (renameErr) { console.error('Adaptive title rename failed:', renameErr); }
+          // Confirm the saved server state.
+          await loadSessions();
+        } catch (renameErr) {
+          console.error('Deterministic Twinkle AI chat title save failed:', renameErr);
+        }
       }
     } catch (err: any) {
       clearTimeout(wakingTimer);
@@ -1314,10 +1495,10 @@ const normalizeTwinkleIdentity = (content: string): string => {
   const normalized = content.trim();
 
   // Replace the old default identity response with a clearer Twinkle AI
-  // introduction. Keep this narrowly scoped so documents mentioning Nexus
+  // introduction. Keep this narrowly scoped so documents mentioning Twinkle
   // are not rewritten accidentally.
   if (
-    /^I['’]m\s+Nexus\s+AI,\s+a\s+helpful\s+assistant\s+designed\s+to\s+help\s+you\s+with\s+information,\s+analysis,\s+and\s+more\.?$/i.test(normalized)
+    /^I['’]m\s+Twinkle\s+AI,\s+a\s+helpful\s+assistant\s+designed\s+to\s+help\s+you\s+with\s+information,\s+analysis,\s+and\s+more\.?$/i.test(normalized)
   ) {
     return `Hi! I’m Twinkle AI, a professional AI assistant designed to help you understand information, solve problems, work with files, write and analyze content, develop software, and accomplish tasks efficiently.
 
@@ -1467,41 +1648,6 @@ const cleanMessageContent = (content: unknown): string => {
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
       />
-      {/* Mobile header: reference-style compact navigation. Desktop is unchanged. */}
-      <div className="twinkle-mobile-header lg:hidden">
-        <button
-          type="button"
-          onClick={() => setMobileOpen(true)}
-          aria-label="Open sidebar"
-          className="twinkle-mobile-header-menu"
-        >
-          <span className="twinkle-menu-line" />
-          <span className="twinkle-menu-line twinkle-menu-line-short" />
-        </button>
-        <button
-          type="button"
-          onClick={() => setMobileOpen(true)}
-          className="twinkle-mobile-title"
-          aria-label="Open chat menu"
-        >
-          <span>TWINKLE</span>
-        </button>
-        <div className="twinkle-mobile-header-actions">
-          <button
-            type="button"
-            onClick={() => {
-              createNewSession();
-              setMobileOpen(false);
-            }}
-            aria-label="Create new chat"
-            title="New chat"
-            className="twinkle-mobile-header-icon twinkle-mobile-header-more"
-          >
-            <SquarePen className="h-[21px] w-[21px]" strokeWidth={1.7} />
-          </button>
-        </div>
-      </div>
-
       <main className="relative flex h-full min-h-0 min-w-0 w-full max-w-full flex-1 flex-col overflow-hidden bg-transparent">
         {/* Messages */}
         <div
@@ -2086,7 +2232,7 @@ const cleanMessageContent = (content: unknown): string => {
                       if (isListening) speechBaseRef.current = e.target.value;
                     }}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey && !isTyping) {
+                      if (e.key === 'Enter' && !e.shiftKey && !isTyping && !isListening && !isTranscribing) {
                         e.preventDefault();
                         handleSendMessage();
                       }
@@ -2174,6 +2320,31 @@ const cleanMessageContent = (content: unknown): string => {
                     )}
                   </AnimatePresence>
                 </div>
+
+                {/* Microphone */}
+                <motion.button
+                  type="button"
+                  onClick={toggleListening}
+                  disabled={isTyping || isTranscribing}
+                  aria-label={isListening ? 'Stop recording' : 'Voice input'}
+                  title={isListening ? 'Stop recording' : isTranscribing ? 'Transcribing…' : 'Voice input'}
+                  whileHover={{ scale: 1.04, y: -1 }}
+                  whileTap={{ scale: 0.94 }}
+                  transition={{ type: 'spring', stiffness: 420, damping: 24 }}
+                  className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isListening ? 'border-red-400 bg-red-500 text-white shadow-red-500/20' : 'border-zinc-200 bg-zinc-50 text-zinc-500 hover:border-zinc-400 hover:bg-white hover:text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:border-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'} disabled:cursor-not-allowed disabled:opacity-50`}
+                >
+                  {isTranscribing ? (
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-800 dark:border-zinc-600 dark:border-t-zinc-200" />
+                  ) : isListening ? (
+                    <span className="relative flex items-center justify-center">
+                      <span className="absolute h-3 w-3 animate-ping rounded-full bg-white/70" />
+                      <Square className="relative h-3.5 w-3.5 fill-current" />
+                    </span>
+                  ) : (
+                    <Mic className="h-4 w-4" />
+                  )}
+                </motion.button>
+
                 {/* Send / Stop */}
                 <motion.button
                   type="button"
