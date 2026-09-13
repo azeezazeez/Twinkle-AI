@@ -113,7 +113,7 @@ export default function Signup({ onSignup }: Props) {
           </h1>
 
           <p className="text-[10px] md:text-sm font-medium tracking-widest uppercase opacity-60 text-[--text-muted]">
-            Join the nexus community
+            Join the Twinkle community
           </p>
         </div>
 
