@@ -5,13 +5,12 @@ import Sidebar from '../components/Sidebar';
 import { chatApi, authApi, wakeUpServer } from '../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
 import StormLogo from '../components/StormLogo';
-import UserAvatar from '../components/UserAvatar';
 import ConfirmationModal from '../components/ConfirmationModal';
 
 import {
   ArrowDown, ArrowUp,
-  Copy, Check, Edit2, Sun, Moon, Menu,
-  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, SquarePen, Mic, Square,
+  Copy, Check, Edit2,
+  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, SquarePen,
 } from 'lucide-react';
 
 import ReactMarkdown from 'react-markdown';
@@ -36,14 +35,14 @@ const CodeBlock = ({ language, value }: { language: string; value: string }) => 
     <div className="group/code relative my-6 overflow-hidden rounded-xl border border-white/20 dark:border-white/10 shadow-2xl backdrop-blur-xl bg-white/5 dark:bg-black/20 transition-all">
       <div className="flex items-center justify-between px-4 py-2.5 bg-white/10 dark:bg-black/20 border-b border-white/10">
         <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+          <div className="w-1.5 h-1.5 rounded-full bg-zinc-1000" />
           {language || 'code'}
         </span>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-[10px] font-black text-zinc-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all hover:scale-105 active:scale-95"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-[10px] font-black text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-600 dark:text-zinc-300 transition-all hover:scale-105 active:scale-95"
         >
-          {copied ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+          {copied ? <Check className="w-3 h-3 text-zinc-500" /> : <Copy className="w-3 h-3" />}
           <span className="uppercase tracking-widest">{copied ? 'Copied' : 'Copy'}</span>
         </button>
       </div>
@@ -90,127 +89,243 @@ const getInitialTheme = (): boolean => {
   return window.matchMedia('(prefers-color-scheme: dark)').matches;
 };
 
-/**
- * Deterministic, rule-based chat title generator.
- * No AI model is used for naming conversations.
- */
-const generateProfessionalChatTitle = (message: string, hasFiles = false): string => {
-  const original = (message || '').trim();
-  if (!original) return hasFiles ? 'File Analysis' : 'New Chat';
-
-  const subject = original
-    .replace(/[\u2018\u2019]/g, "'")
-    .replace(/[\u201C\u201D]/g, '"')
-    .replace(/\s+/g, ' ')
-    .replace(/^\s*(can|could|would|will)\s+you\s+(please\s+)?/i, '')
-    .replace(/^\s*please\s+/i, '')
-    .replace(/^\s*i\s+(want|need|would like)\s+(to\s+)?/i, '')
-    .replace(/^\s*help\s+me\s+(to\s+)?/i, '')
-    .replace(/^\s*(kindly|let's)\s+/i, '')
-    .trim();
-
-  const lower = subject.toLowerCase();
-  const actions: Array<[RegExp, string]> = [
-    [/\b(simplify|make\s+(it|this|that)\s+(simple|simpler|easier)|make\s+.*\b(simple|simpler|easier)\b)\b/i, 'Simplify'],
-    [/\b(debug|fix|solve|resolve|repair)\b/i, 'Fix'],
-    [/\b(design|redesign|layout|style|stylize)\b/i, 'Design'],
-    [/\b(create|make|build|develop|generate|produce|prepare)\b/i, 'Create'],
-    [/\b(explain|describe|clarify|what\s+is|how\s+does|how\s+do)\b/i, 'Explain'],
-    [/\b(write|draft|compose)\b/i, 'Write'],
-    [/\b(convert|transform|turn)\b/i, 'Convert'],
-    [/\b(summarize|summarise|summary)\b/i, 'Summarize'],
-    [/\b(analyze|analyse|review|evaluate)\b/i, 'Analyze'],
-    [/\b(compare|comparison|difference|differences)\b/i, 'Compare'],
-    [/\b(remove|delete|erase)\b/i, 'Remove'],
-    [/\b(add|insert)\b/i, 'Add'],
-  ];
-
-  const artifacts: Array<[RegExp, string]> = [
-    [/\b(16\s*:\s*9|widescreen)\b/i, '16:9'],
-    [/\b(ppt|pptx|powerpoint)\b/i, 'PPT Presentation'],
-    [/\b(presentation|presentations|slides|slide\s+deck)\b/i, 'Presentation'],
-    [/\b(handwritten|hand\s*written).*\bposter\b|\bposter\b.*\b(handwritten|hand\s*written)\b/i, 'Handwritten Poster'],
-    [/\bposter\b/i, 'Poster'],
-    [/\bdrone\b.*\bchart\b|\bchart\b.*\bdrone\b/i, 'Drone Chart'],
-    [/\bchart\b|\bgraph\b|\bdiagram\b/i, 'Chart'],
-    [/\b(login|sign[- ]?in)\s+(page|screen|form)\b/i, 'Login Page'],
-    [/\b(image|picture|photo|illustration|visual)\b/i, 'Image'],
-    [/\bpdf\b/i, 'PDF'],
-    [/\b(code|program|script|function)\b/i, 'Code'],
-    [/\breact\b/i, 'React'],
-    [/\b(javascript|typescript)\b/i, 'JavaScript'],
-    [/\bjava\b/i, 'Java'],
-    [/\bpython\b/i, 'Python'],
-    [/\b(sql|database|db)\b/i, 'Database'],
-    [/\bapi\b/i, 'API'],
-  ];
-
-  const topics: Array<[RegExp, string]> = [
-    [/\btwinkle\s+(ai\s+)?project\b/i, 'Twinkle'],
-    [/\btwinkle\b/i, 'Twinkle'],
-    [/\bai\s+project\b/i, 'AI Project'],
-    [/\bmachine\s+learning\b/i, 'Machine Learning'],
-    [/\bartificial\s+intelligence\b/i, 'Artificial Intelligence'],
-    [/\bchatbot\b/i, 'Chatbot'],
-    [/\bauthentication\b/i, 'Authentication'],
-    [/\bportfolio\b/i, 'Portfolio'],
-    [/\bwebsite\b/i, 'Website'],
-    [/\bapp(?:lication)?\b/i, 'Application'],
-  ];
-
-  const findRule = (rules: Array<[RegExp, string]>) => {
-    for (const [pattern, value] of rules) {
-      if (pattern.test(subject)) return value;
-    }
-    return '';
-  };
-
-  const action = findRule(actions);
-  const artifact = findRule(artifacts);
-  const topic = findRule(topics);
-
-  if (artifact === '16:9') return /\bppt|powerpoint|presentation|slides?\b/i.test(subject) ? 'Set Presentation 16:9' : 'Set 16:9 Format';
-  if (topic === 'Twinkle' && artifact === 'Drone Chart') return 'Twinkle Drone Chart';
-  if (topic === 'Twinkle' && artifact === 'Chart') return 'Twinkle Chart Design';
-  if (topic === 'Twinkle' && artifact === 'Handwritten Poster') return action === 'Simplify' ? 'Simplify Twinkle Poster' : 'Twinkle Handwritten Poster';
-  if (topic === 'AI Project' && artifact === 'PPT Presentation') return 'Create AI Project Presentation';
-  if (action === 'Simplify' && artifact === 'Handwritten Poster') return 'Simplify Handwritten Poster';
-
-  if (action && topic && artifact) {
-    if (artifact === 'PPT Presentation' || artifact === 'Presentation') return `${action} ${topic} Presentation`;
-    if (artifact === 'Chart') return `${topic} Chart Design`;
-    return `${action} ${topic} ${artifact}`;
-  }
-  if (action && artifact) return `${action} ${artifact}`;
-  if (action && topic) return `${action} ${topic}`;
-  if (topic && artifact) return `${topic} ${artifact}`;
-  if (artifact) return `${action || 'View'} ${artifact}`;
-
-  const stopWords = new Set(['can','could','would','please','help','me','i','want','need','to','a','an','the','my','this','that','for','with','and','is','are','be','it','of','on','in','from','you','give']);
-  const words = subject.replace(/[^\p{L}\p{N}:#/+.-]+/gu, ' ').split(/\s+/).filter(word => word && !stopWords.has(word.toLowerCase()));
-  const fallback = words.slice(0, action ? 5 : 6).map(word => /^[A-Z0-9]+$/.test(word) ? word : word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-  if (!fallback) return hasFiles ? 'File Analysis' : 'New Chat';
-  return action ? `${action} ${fallback}`.split(/\s+/).slice(0, 6).join(' ') : fallback.split(/\s+/).slice(0, 6).join(' ');
-};
-
 const formatFileSize = (bytes: number): string => {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)}KB`;
   return `${(bytes / 1048576).toFixed(1)}MB`;
 };
 
+const MAX_IMAGES_PER_MESSAGE = 3;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_TOTAL_IMAGE_BYTES = 15 * 1024 * 1024;
+const MAX_IMAGE_DIMENSION = 2048;
+
+const compressImage = async (file: File): Promise<File> => {
+  if (!file.type.startsWith('image/') || file.type === 'image/gif' || file.size <= MAX_IMAGE_BYTES) {
+    return file;
+  }
+
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+
+    image.onload = () => {
+      try {
+        const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(image.width, image.height));
+        const width = Math.max(1, Math.round(image.width * scale));
+        const height = Math.max(1, Math.round(image.height * scale));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('Could not prepare the image for upload.');
+
+        context.drawImage(image, 0, 0, width, height);
+
+        canvas.toBlob(
+          blob => {
+            URL.revokeObjectURL(objectUrl);
+            if (!blob) {
+              reject(new Error(`Could not compress ${file.name}.`));
+              return;
+            }
+
+            const baseName = file.name.replace(/\.[^.]+$/, '');
+            resolve(new File([blob], `${baseName}.jpg`, {
+              type: 'image/jpeg',
+              lastModified: file.lastModified,
+            }));
+          },
+          'image/jpeg',
+          0.82
+        );
+      } catch (error) {
+        URL.revokeObjectURL(objectUrl);
+        reject(error);
+      }
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error(`Could not read ${file.name} as an image.`));
+    };
+
+    image.src = objectUrl;
+  });
+};
+
 const fileToDataUrl = (file: File): Promise<string> =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = (e) => resolve(e.target?.result as string);
-    reader.onerror = () => reject(new Error('Failed to read file'));
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      if (!result) {
+        reject(new Error(`Failed to read ${file.name}`));
+        return;
+      }
+      // Keep the exact browser-generated data URL. Do not add filename
+      // parameters: PDF/image viewers can reject non-standard data URLs.
+      resolve(result);
+    };
+    reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
     reader.readAsDataURL(file);
   });
+
+const attachmentNameStorageKey = 'nexus-ai-attachment-names';
+
+const getAttachmentStorageId = (value: string): string => {
+  // Small deterministic hash so localStorage keys never contain the entire
+  // (potentially huge) base64 data URL.
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+};
+
+const getStoredAttachmentName = (dataUrl: string): string | null => {
+  if (!dataUrl) return null;
+  try {
+    const raw = localStorage.getItem(attachmentNameStorageKey);
+    if (!raw) return null;
+    const map = JSON.parse(raw);
+    const value = map?.[getAttachmentStorageId(dataUrl)];
+    return typeof value === 'string' && value.trim() ? value : null;
+  } catch {
+    return null;
+  }
+};
+
+const rememberAttachmentNames = (files: File[], dataUrls: string[]) => {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = localStorage.getItem(attachmentNameStorageKey);
+    const map = raw ? JSON.parse(raw) : {};
+    files.forEach((file, index) => {
+      const dataUrl = dataUrls[index];
+      if (dataUrl) {
+        map[getAttachmentStorageId(dataUrl)] = file.name;
+      }
+    });
+
+    // Prevent the small metadata store from growing forever.
+    const entries = Object.entries(map);
+    const limited = Object.fromEntries(entries.slice(-100));
+    localStorage.setItem(attachmentNameStorageKey, JSON.stringify(limited));
+  } catch {
+    // Filename persistence is best-effort and must never block sending.
+  }
+};
+
+const getAttachmentNameFromDataUrl = (
+  dataUrl: string,
+  index: number
+): string => {
+  // Read legacy filename parameters only for backwards compatibility.
+  const nameMatch = dataUrl.match(/(?:^|;)name=([^;,]+)/i);
+
+  if (nameMatch?.[1]) {
+    try {
+      return decodeURIComponent(nameMatch[1]);
+    } catch {
+      return nameMatch[1];
+    }
+  }
+
+  const mimeMatch = dataUrl.match(/^data:([^;,]+)/i);
+  const mime = mimeMatch?.[1]?.toLowerCase() || '';
+  const extensionMap: Record<string, string> = {
+    'application/pdf': 'pdf',
+    'application/msword': 'doc',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'application/vnd.ms-excel': 'xls',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+    'application/vnd.ms-powerpoint': 'ppt',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+    'text/plain': 'txt',
+    'text/csv': 'csv',
+    'application/json': 'json',
+    'application/xml': 'xml',
+    'text/xml': 'xml',
+    'text/markdown': 'md',
+  };
+
+  const extension =
+    extensionMap[mime] ||
+    mime.split('/')[1]?.split('+')[0] ||
+    'bin';
+
+  return getStoredAttachmentName(dataUrl) || `attachment-${index + 1}.${extension}`;
+};
+
+// Rebuild any persisted data URL as a File. This is used for
+// previewing and retrying attachments after the chat has been reloaded.
+const isValidAttachmentDataUrl = (dataUrl: unknown): dataUrl is string => {
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) return false;
+  return /^data:[^;,]+(?:;[^,]*)?;base64,[A-Za-z0-9+/=\s]+$/i.test(dataUrl);
+};
+
+const dataUrlToFile = async (
+  dataUrl: string,
+  index: number,
+  fallbackName?: string
+): Promise<File> => {
+  if (!isValidAttachmentDataUrl(dataUrl)) {
+    throw new Error('The saved attachment is invalid.');
+  }
+
+  const match = dataUrl.match(/^data:([^;,]+)(?:;[^,]*)?;base64,(.+)$/);
+  if (!match) {
+    throw new Error('The saved attachment is invalid.');
+  }
+
+  const mimeType = match[1] || 'application/octet-stream';
+  const base64 = match[2];
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+
+  const extensionMap: Record<string, string> = {
+    'application/pdf': 'pdf',
+    'application/msword': 'doc',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'application/vnd.ms-excel': 'xls',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+    'application/vnd.ms-powerpoint': 'ppt',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+    'text/plain': 'txt',
+    'text/csv': 'csv',
+    'application/json': 'json',
+    'application/xml': 'xml',
+    'text/xml': 'xml',
+    'text/markdown': 'md',
+  };
+
+  const extension =
+    extensionMap[mimeType] ||
+    mimeType.split('/')[1]?.split('+')[0] ||
+    'bin';
+
+  const safeName =
+    fallbackName?.trim() ||
+    getAttachmentNameFromDataUrl(dataUrl, index) ||
+    `attachment-${index + 1}.${extension}`;
+
+  return new File([bytes], safeName, {
+    type: mimeType,
+    lastModified: Date.now(),
+  });
+};
 
 interface ModelOption {
   id: string;
   name: string;
-  provider: 'Groq';
   description: string;
   icon: React.ElementType;
   vision?: boolean;
@@ -218,12 +333,35 @@ interface ModelOption {
 }
 
 const MODEL_OPTIONS: ModelOption[] = [
-  { id: 'openai/gpt-oss-120b', name: 'Nexus Advanced', provider: 'Groq', description: 'Advanced reasoning and coding', icon: Brain },
-  { id: 'openai/gpt-oss-20b', name: 'Nexus Fast', provider: 'Groq', description: 'Fast everyday conversations', icon: Zap },
-  { id: 'qwen/qwen3.8-27b', name: 'Qwen Vision Pro', provider: 'Groq', description: 'Enhanced vision and reasoning', icon: Eye, vision: true },
+  { id: 'openai/gpt-oss-20b', name: 'Twinkle', description: 'Fast everyday conversations', icon: Zap },
+  { id: 'openai/gpt-oss-120b', name: 'Twinkle Pro', description: 'Advanced reasoning and coding', icon: Brain },
+  { id: 'gemini-3.8-flash', name: 'Twinkle Vision', description: 'Advanced image & file understanding', icon: Eye, vision: true, documents: true },
 ];
 
 const MODEL_STORAGE_KEY = 'nexus_selected_model';
+
+const RESPONSE_STATUS_MESSAGES = [
+  'Preparing your response…',
+  'Reviewing your request…',
+  'Working through the details…',
+  'Putting everything together…',
+];
+
+const EMPTY_CHAT_PROMPTS = [
+  "What's on your mind today?",
+  "What would you like to explore?",
+  "What can I help you with today?",
+  "What are you working on?",
+  "What would you like to create today?",
+  "What should we figure out together?",
+];
+
+const getNextEmptyChatPrompt = (current: string): string => {
+  if (EMPTY_CHAT_PROMPTS.length <= 1) return EMPTY_CHAT_PROMPTS[0];
+  const available = EMPTY_CHAT_PROMPTS.filter(prompt => prompt !== current);
+  return available[Math.floor(Math.random() * available.length)];
+};
+
 
 export default function Chat({ user, onLogout }: Props) {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -234,14 +372,36 @@ export default function Chat({ user, onLogout }: Props) {
   const [loading, setLoading] = useState(true);
   const [justFinished, setJustFinished] = useState(false);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const [responseStatus, setResponseStatus] = useState('Preparing your response…');
+
   const [copiedId, setCopiedId] = useState<number | string | null>(null);
   const [editingMessage, setEditingMessage] = useState<{ id: string | number; content: string } | null>(null);
   const [editInput, setEditInput] = useState('');
   const [modalType, setModalType] = useState<'none' | 'delete-all' | 'delete-single'>('none');
   const [sessionIdToDelete, setSessionIdToDelete] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!isTyping) {
+      setResponseStatus('Preparing your response…');
+      return;
+    }
+
+    let index = 0;
+    setResponseStatus(RESPONSE_STATUS_MESSAGES[0]);
+
+    const interval = window.setInterval(() => {
+      index = (index + 1) % RESPONSE_STATUS_MESSAGES.length;
+      setResponseStatus(RESPONSE_STATUS_MESSAGES[index]);
+    }, 2200);
+
+    return () => window.clearInterval(interval);
+  }, [isTyping]);
+  const sessionToDelete = sessions.find(session => session.id === sessionIdToDelete);
   const [serverWaking, setServerWaking] = useState(false);
   const [requestHasFiles, setRequestHasFiles] = useState(false);
+  // Keep the chat interface clean on login; the sidebar opens only when requested.
   const [mobileOpen, setMobileOpen] = useState(false);
+
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     try {
       const stored = localStorage.getItem(MODEL_STORAGE_KEY);
@@ -253,22 +413,25 @@ export default function Chat({ user, onLogout }: Props) {
     }
   });
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [emptyChatPrompt, setEmptyChatPrompt] = useState(() =>
+    EMPTY_CHAT_PROMPTS[Math.floor(Math.random() * EMPTY_CHAT_PROMPTS.length)]
+  );
   const modelPickerRef = useRef<HTMLDivElement>(null);
 
   // File upload
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [filePreviews, setFilePreviews] = useState<{ id: string; file: File; preview?: string }[]>([]);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewText, setPreviewText] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [messageAttachments, setMessageAttachments] = useState<Record<string | number, string[]>>({});
 
-  // Microphone recording -> backend Gemini transcription.
-  // This uses the existing /api/chat/transcribe endpoint for transcription.
+  // Speech recognition (UI removed)
   const [isListening, setIsListening] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const recognitionRef = useRef<any>(null);
   const speechBaseRef = useRef('');
 
   // Theme
@@ -309,6 +472,7 @@ export default function Chat({ user, onLogout }: Props) {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const firstMessageScrollPendingRef = useRef(false);
   const isSendingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -337,154 +501,64 @@ export default function Chat({ user, onLogout }: Props) {
     };
   }, []);
 
-  // Browser microphone recording + backend Gemini transcription.
-  const getSupportedAudioMimeType = useCallback(() => {
-    if (typeof MediaRecorder === 'undefined') return '';
+  // Speech recognition handlers (kept but never called from UI)
+  const startListening = useCallback(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      alert('Your browser does not support speech recognition. Please use Chrome, Edge, or Safari.');
+      return;
+    }
+    if (recognitionRef.current) recognitionRef.current.stop();
+    speechBaseRef.current = inputRef.current?.value || '';
 
-    const candidates = [
-      'audio/webm;codecs=opus',
-      'audio/webm',
-      'audio/mp4',
-      'audio/ogg;codecs=opus',
-    ];
+    const recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
 
-    return candidates.find(type => MediaRecorder.isTypeSupported(type)) || '';
+    recognition.onstart = () => setIsListening(true);
+    recognition.onresult = (event: any) => {
+      let finalSegment = '';
+      let interimSegment = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) finalSegment += event.results[i][0].transcript;
+        else interimSegment += event.results[i][0].transcript;
+      }
+      if (finalSegment) {
+        speechBaseRef.current = speechBaseRef.current
+          ? `${speechBaseRef.current} ${finalSegment}`.trim()
+          : finalSegment.trim();
+      }
+      const display = interimSegment
+        ? `${speechBaseRef.current} ${interimSegment}`.trim()
+        : speechBaseRef.current;
+      setInput(display);
+    };
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+    recognition.onerror = (event: any) => {
+      console.error('Speech error:', event.error);
+      setIsListening(false);
+      recognitionRef.current = null;
+      if (event.error === 'not-allowed') alert('Microphone access denied.');
+      else if (event.error === 'network') alert('Network error occurred.');
+    };
+    recognitionRef.current = recognition;
+    recognition.start();
+    inputRef.current?.focus();
   }, []);
 
   const stopListening = useCallback(() => {
-    const recorder = mediaRecorderRef.current;
-
-    if (recorder && recorder.state !== 'inactive') {
-      recorder.stop();
-    } else {
-      mediaStreamRef.current?.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-      setIsListening(false);
-    }
+    recognitionRef.current?.stop();
+    setIsListening(false);
   }, []);
-
-  const startListening = useCallback(async () => {
-    if (isListening) return;
-
-    if (!navigator.mediaDevices?.getUserMedia) {
-      alert('Microphone access is unavailable in this browser. Please use Chrome or Edge over HTTPS.');
-      return;
-    }
-
-    if (typeof MediaRecorder === 'undefined') {
-      alert('Audio recording is not supported by this browser. Please use a recent Chrome or Edge browser.');
-      return;
-    }
-
-    const mimeType = getSupportedAudioMimeType();
-    if (!mimeType) {
-      alert('No supported audio recording format was found in this browser.');
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, { mimeType });
-
-      mediaStreamRef.current = stream;
-      mediaRecorderRef.current = recorder;
-      audioChunksRef.current = [];
-      speechBaseRef.current = inputRef.current?.value?.trim() || '';
-
-      recorder.ondataavailable = (event: BlobEvent) => {
-        if (event.data && event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.onerror = () => {
-        console.error('Audio recording failed.');
-        setIsListening(false);
-        mediaRecorderRef.current = null;
-        mediaStreamRef.current?.getTracks().forEach(track => track.stop());
-        mediaStreamRef.current = null;
-        audioChunksRef.current = [];
-        alert('The microphone recording failed. Please try again.');
-      };
-
-      recorder.onstop = async () => {
-        const chunks = audioChunksRef.current;
-        audioChunksRef.current = [];
-
-        mediaRecorderRef.current = null;
-        mediaStreamRef.current?.getTracks().forEach(track => track.stop());
-        mediaStreamRef.current = null;
-        setIsListening(false);
-
-        if (chunks.length === 0) {
-          inputRef.current?.focus();
-          return;
-        }
-
-        const audioBlob = new Blob(chunks, { type: mimeType });
-        if (audioBlob.size === 0) {
-          inputRef.current?.focus();
-          return;
-        }
-
-        try {
-          setIsTyping(true);
-          const transcript = await chatApi.transcribeAudio(audioBlob);
-
-          if (transcript) {
-            const base = speechBaseRef.current.trim();
-            setInput(base ? `${base} ${transcript}`.trim() : transcript.trim());
-          }
-        } catch (error: any) {
-          console.error('Voice transcription failed:', error);
-          alert(
-            typeof error?.message === 'string' && error.message.trim()
-              ? error.message
-              : 'Voice transcription failed. Please try again.'
-          );
-        } finally {
-          setIsTyping(false);
-          setTimeout(() => inputRef.current?.focus(), 50);
-        }
-      };
-
-      recorder.start(250);
-      setIsListening(true);
-      inputRef.current?.focus();
-    } catch (error: any) {
-      console.error('Microphone access failed:', error);
-      mediaRecorderRef.current = null;
-      mediaStreamRef.current?.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-      setIsListening(false);
-
-      if (error?.name === 'NotAllowedError' || error?.name === 'SecurityError') {
-        alert('Microphone access was denied. Allow microphone permission for this site and try again.');
-      } else if (error?.name === 'NotFoundError') {
-        alert('No microphone was found on this device.');
-      } else {
-        alert('Could not access the microphone. Please check your browser permissions and try again.');
-      }
-    }
-  }, [getSupportedAudioMimeType, isListening]);
 
   const toggleListening = useCallback(() => {
     if (isListening) stopListening();
-    else void startListening();
+    else startListening();
   }, [isListening, startListening, stopListening]);
-
-  useEffect(() => {
-    return () => {
-      const recorder = mediaRecorderRef.current;
-      if (recorder && recorder.state !== 'inactive') {
-        recorder.stop();
-      }
-      mediaStreamRef.current?.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-      mediaRecorderRef.current = null;
-      audioChunksRef.current = [];
-    };
-  }, []);
 
   // Load sessions & messages
   const loadSessions = useCallback(async () => {
@@ -520,7 +594,7 @@ export default function Chat({ user, onLogout }: Props) {
         const id = msg?.id ?? `history-${sid}-${index}`;
         if (Array.isArray(msg?.attachments) && msg.attachments.length > 0) {
           persistedAttachments[id] = msg.attachments.filter(
-            (url: unknown): url is string => typeof url === 'string' && url.length > 0
+            (url: unknown): url is string => isValidAttachmentDataUrl(url)
           );
         }
       });
@@ -563,15 +637,42 @@ export default function Chat({ user, onLogout }: Props) {
     }
   }, [currentSessionId, loadMessages]);
 
-  // Keep scrolling inside the message panel only. Using scrollIntoView() here
-  // can scroll the outer page/layout and make the fixed navbar or composer
-  // appear to jump. Directly scrolling the message container keeps both
-  // the navbar and composer in their fixed positions.
+  // Keep scrolling inside the message panel only so the floating composer
+  // remains stable while the conversation scrolls.
+  //
+  // On mobile, the first message of a newly started chat is positioned near
+  // the top of the conversation so the sent message is immediately visible.
+  // Later messages keep the existing bottom-scrolling behavior.
   useEffect(() => {
     const container = messagesContainerRef.current;
     if (!container) return;
 
     const frame = requestAnimationFrame(() => {
+      if (
+        firstMessageScrollPendingRef.current &&
+        window.matchMedia('(max-width: 767px)').matches
+      ) {
+        const firstMessage = container.querySelector<HTMLElement>(
+          '[data-twinkle-message]'
+        );
+
+        if (firstMessage) {
+          // Keep the first sent message clearly below the fixed mobile header.
+          // The message list gets a matching top inset, so the message can never
+          // be positioned underneath the navbar when a new chat starts.
+          const mobileHeaderOffset = 92;
+          const targetTop = Math.max(0, firstMessage.offsetTop - mobileHeaderOffset);
+          setShowScrollBottom(false);
+          container.scrollTo({
+            top: targetTop,
+            behavior: 'smooth',
+          });
+          firstMessageScrollPendingRef.current = false;
+          return;
+        }
+      }
+
+      setShowScrollBottom(false);
       container.scrollTo({
         top: container.scrollHeight,
         behavior: 'smooth',
@@ -583,7 +684,140 @@ export default function Chat({ user, onLogout }: Props) {
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
-    setShowScrollBottom(scrollHeight - scrollTop - clientHeight > 100);
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+
+    // The scroll-to-bottom control is meaningful only when a conversation
+    // exists and the user is actually away from the latest messages.
+    setShowScrollBottom(messages.length > 0 && distanceFromBottom > 100);
+  };
+
+  const extractZipEntry = async (file: File, entryName: string): Promise<string | null> => {
+    const buffer = await file.arrayBuffer();
+    const view = new DataView(buffer);
+    const minEocd = 22;
+    const maxComment = 0xffff;
+    const start = Math.max(0, view.byteLength - minEocd - maxComment);
+    let eocd = -1;
+
+    for (let i = view.byteLength - minEocd; i >= start; i--) {
+      if (view.getUint32(i, true) === 0x06054b50) {
+        eocd = i;
+        break;
+      }
+    }
+
+    if (eocd < 0) return null;
+
+    const directorySize = view.getUint32(eocd + 12, true);
+    const directoryOffset = view.getUint32(eocd + 16, true);
+    let cursor = directoryOffset;
+    const end = directoryOffset + directorySize;
+    const decoder = new TextDecoder();
+
+    while (cursor < end && cursor + 46 <= view.byteLength) {
+      if (view.getUint32(cursor, true) !== 0x02014b50) break;
+
+      const method = view.getUint16(cursor + 10, true);
+      const compressedSize = view.getUint32(cursor + 20, true);
+      const nameLength = view.getUint16(cursor + 28, true);
+      const extraLength = view.getUint16(cursor + 30, true);
+      const commentLength = view.getUint16(cursor + 32, true);
+      const localOffset = view.getUint32(cursor + 42, true);
+      const name = decoder.decode(new Uint8Array(buffer, cursor + 46, nameLength));
+
+      if (name === entryName) {
+        if (localOffset + 30 > view.byteLength || view.getUint32(localOffset, true) !== 0x04034b50) return null;
+
+        const localNameLength = view.getUint16(localOffset + 26, true);
+        const localExtraLength = view.getUint16(localOffset + 28, true);
+        const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+        const compressed = new Uint8Array(buffer, dataStart, compressedSize);
+
+        if (method === 0) return decoder.decode(compressed);
+        if (method === 8 && typeof DecompressionStream !== 'undefined') {
+          const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+          const decompressed = await new Response(stream).arrayBuffer();
+          return decoder.decode(new Uint8Array(decompressed));
+        }
+        return null;
+      }
+
+      cursor += 46 + nameLength + extraLength + commentLength;
+    }
+
+    return null;
+  };
+
+  const extractDocxText = async (file: File): Promise<string | null> => {
+    const xml = await extractZipEntry(file, 'word/document.xml');
+    if (!xml) return null;
+
+    const doc = new DOMParser().parseFromString(xml, 'application/xml');
+    const paragraphs = Array.from(doc.getElementsByTagNameNS('*', 'p'));
+    if (paragraphs.length === 0) return doc.documentElement.textContent?.trim() || null;
+
+    return paragraphs
+      .map(paragraph => paragraph.textContent?.replace(/\s+/g, ' ').trim() || '')
+      .filter(Boolean)
+      .join('\n\n');
+  };
+
+  const openFilePreview = async (file: File, objectUrl?: string) => {
+    setPreviewFile(file);
+    setPreviewText(null);
+    setPreviewUrl(objectUrl || URL.createObjectURL(file));
+
+    const isDocx = /\.docx$/i.test(file.name) || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const isTextLike = file.type.startsWith('text/') || /\.(txt|csv|tsv|json|xml|html?|md|markdown|rtf|js|jsx|ts|tsx|css|java|py|sql|yml|yaml)$/i.test(file.name);
+
+    if (isDocx) {
+      try {
+        setPreviewText(await extractDocxText(file) || 'No readable text was found in this DOCX file.');
+      } catch {
+        setPreviewText('Unable to render this DOCX file in the browser.');
+      }
+    } else if (isTextLike) {
+      try {
+        setPreviewText(await file.text());
+      } catch {
+        setPreviewText('Unable to read this document in the browser.');
+      }
+    }
+  };
+
+  const openPersistedAttachmentPreview = async (
+    dataUrl: string,
+    index: number
+  ) => {
+    if (!isValidAttachmentDataUrl(dataUrl)) {
+      console.error('Invalid persisted attachment preview data.');
+      return;
+    }
+
+    try {
+      const file = await dataUrlToFile(
+        dataUrl,
+        index,
+        getStoredAttachmentName(dataUrl) || undefined
+      );
+
+      // Use a Blob URL for persisted attachments. This is more reliable for
+      // PDF/browser previewing than loading a large base64 data URL directly.
+      const objectUrl = URL.createObjectURL(file);
+      await openFilePreview(file, objectUrl);
+    } catch (error) {
+      console.error('Failed to open attachment preview:', error);
+    }
+  };
+
+  const closeFilePreview = () => {
+    if (previewUrl && previewFile) {
+      const isSelectedPreview = filePreviews.some(fp => fp.file === previewFile && fp.preview === previewUrl);
+      if (!isSelectedPreview) URL.revokeObjectURL(previewUrl);
+    }
+    setPreviewFile(null);
+    setPreviewUrl(null);
+    setPreviewText(null);
   };
 
   // File handlers (kept but no UI to trigger them)
@@ -599,16 +833,51 @@ export default function Chat({ user, onLogout }: Props) {
 
       if (incomingFiles.length === 0) return;
 
-      const newPreviews = incomingFiles.map(file => ({
+      const existingImageCount = selectedFiles.filter(file => file.type.startsWith('image/')).length;
+      const incomingImageFiles = incomingFiles.filter(file => file.type.startsWith('image/'));
+      const remainingImageSlots = MAX_IMAGES_PER_MESSAGE - existingImageCount;
+
+      if (incomingImageFiles.length > remainingImageSlots) {
+        throw new Error(
+          `You can attach a maximum of ${MAX_IMAGES_PER_MESSAGE} images per message.`
+        );
+      }
+
+      const processedFiles: File[] = [];
+      for (const file of incomingFiles) {
+        processedFiles.push(file.type.startsWith('image/') ? await compressImage(file) : file);
+      }
+
+      const existingImageBytes = selectedFiles
+        .filter(file => file.type.startsWith('image/'))
+        .reduce((total, file) => total + file.size, 0);
+      const incomingImageBytes = processedFiles
+        .filter(file => file.type.startsWith('image/'))
+        .reduce((total, file) => total + file.size, 0);
+
+      if (existingImageBytes + incomingImageBytes > MAX_TOTAL_IMAGE_BYTES) {
+        throw new Error(
+          `Images are too large. Keep the total image size under ${formatFileSize(MAX_TOTAL_IMAGE_BYTES)} per message.`
+        );
+      }
+
+      const newPreviews = processedFiles.map(file => ({
         id: `${file.name}-${file.lastModified}-${Date.now()}-${Math.random()}`,
         file,
-        preview: file.type.startsWith('image/')
+        preview: file.type.startsWith('image/') || file.type === 'application/pdf'
           ? URL.createObjectURL(file)
           : undefined,
       }));
 
       setFilePreviews(prev => [...prev, ...newPreviews]);
-      setSelectedFiles(prev => [...prev, ...incomingFiles]);
+      setSelectedFiles(prev => [...prev, ...processedFiles]);
+    } catch (error: any) {
+      console.error('File selection failed:', error);
+      alert(
+        typeof error?.message === 'string'
+          ? error.message
+          : 'The selected file could not be prepared. Please try again.'
+      );
     } finally {
       setIsProcessingFiles(false);
     }
@@ -633,7 +902,7 @@ export default function Chat({ user, onLogout }: Props) {
   ) => {
     if ((!messageText.trim() && (!filesToSend || filesToSend.length === 0))) return;
     if (isSendingRef.current) return;
-    if (isListening) return;
+    if (isListening) stopListening();
 
     isSendingRef.current = true;
     setIsTyping(true);
@@ -647,11 +916,19 @@ export default function Chat({ user, onLogout }: Props) {
     abortControllerRef.current = controller;
 
     const tempId = `temp-${Date.now()}`;
+
+    // Remember that this is the first message in a new chat so mobile can
+    // move the sent message into view near the top of the conversation.
+    const existingMessageCount = messagesSnapshot?.length ?? messages.length;
+    if (existingMessageCount === 0) {
+      firstMessageScrollPendingRef.current = true;
+    }
+
     const tempUserMsg: Message = {
       id: tempId,
       sessionId: currentSessionId || 0,
       role: 'user',
-      content: messageText.trim() || (filesToSend?.some(f => f.type.startsWith('image/')) ? 'Image uploaded' : ''),
+      content: messageText.trim(),
       timestamp: new Date().toISOString(),
     };
 
@@ -664,8 +941,8 @@ export default function Chat({ user, onLogout }: Props) {
 
     setInput('');
     setSelectedFiles([]);
-    filePreviews.forEach(fp => {
-      if (fp.preview) URL.revokeObjectURL(fp.preview);
+    (Array.isArray(filePreviews) ? filePreviews : []).forEach(fp => {
+      if (fp?.preview) URL.revokeObjectURL(fp.preview);
     });
     setFilePreviews([]);
 
@@ -733,30 +1010,33 @@ export default function Chat({ user, onLogout }: Props) {
         return [...prev, aiMsg];
       });
 
-      // Generate the title locally using saved deterministic actions.
-      // No AI model/API call is used for naming the conversation.
+      // Generate a fresh adaptive chat title for a new chat, and also when
+      // an existing user message is edited and re-submitted. This keeps the
+      // sidebar/chat header aligned with the latest direction of the chat.
       if ((isNewSession || regenerateTitle) && activeSessionId) {
         try {
-          const newTitle = generateProfessionalChatTitle(
-            finalMessage,
-            currentRequestHasFiles
-          );
+          const titleSource = finalMessage || 'File analysis';
+          const { title } = await chatApi.generateTitle(titleSource) as any;
+          if (title?.trim()) {
+            const newTitle = title.trim();
 
-          // The rename API is only persistence; the title itself is generated locally.
-          await chatApi.renameSession(activeSessionId, newTitle);
+            await chatApi.renameSession(activeSessionId, newTitle);
 
-          setSessions(prev =>
-            prev.map(session =>
-              session.id === activeSessionId
-                ? { ...session, sessionName: newTitle }
-                : session
-            )
-          );
+            // Update local state immediately so the mobile drawer and the
+            // desktop sidebar/header show the generated title without waiting
+            // for another render or a remount of the mobile drawer.
+            setSessions(prev =>
+              prev.map(session =>
+                session.id === activeSessionId
+                  ? { ...session, sessionName: newTitle }
+                  : session
+              )
+            );
 
-          await loadSessions();
-        } catch (renameErr) {
-          console.error('Deterministic chat title save failed:', renameErr);
-        }
+            // Confirm the server state after the immediate UI update.
+            await loadSessions();
+          }
+        } catch (renameErr) { console.error('Adaptive title rename failed:', renameErr); }
       }
     } catch (err: any) {
       clearTimeout(wakingTimer);
@@ -839,23 +1119,31 @@ export default function Chat({ user, onLogout }: Props) {
 
   const handleSendMessage = async (e?: React.FormEvent, directMessage?: string) => {
     if (e) { e.preventDefault(); e.stopPropagation(); }
-    const text = directMessage !== undefined ? directMessage : input;
-    if (!text.trim() && selectedFiles.length === 0) return;
 
-    const filesToSend = selectedFiles.length > 0 ? [...selectedFiles] : undefined;
+    const text = typeof directMessage === 'string' ? directMessage : (input || '');
+
+    // Defensive normalization prevents stale browser/HMR state from causing
+    // "Cannot read properties of undefined (reading 'length')" during upload.
+    const currentSelectedFiles = Array.isArray(selectedFiles)
+      ? selectedFiles.filter((file): file is File => file instanceof File)
+      : [];
+
+    if (!text.trim() && currentSelectedFiles.length === 0) return;
+
+    const filesToSend = currentSelectedFiles.length > 0
+      ? [...currentSelectedFiles]
+      : undefined;
+
     let previewUrls: string[] | undefined;
 
     try {
-      if (filesToSend) {
-        const imageFiles = filesToSend.filter(file =>
-          file.type.startsWith('image/')
+      if (filesToSend && filesToSend.length > 0) {
+        // Keep a data URL for EVERY attachment so the sent message can
+        // render the same attachment after it has been sent or reloaded.
+        previewUrls = await Promise.all(
+          filesToSend.map(fileToDataUrl)
         );
-
-        if (imageFiles.length > 0) {
-          previewUrls = await Promise.all(
-            imageFiles.map(fileToDataUrl)
-          );
-        }
+        rememberAttachmentNames(filesToSend, previewUrls);
       }
 
       await sendMessage(
@@ -883,11 +1171,52 @@ export default function Chat({ user, onLogout }: Props) {
   };
 
   // Retry a user message using the conversation state before that message.
-  const handleRetryMessage = (msg: Message) => {
+  // Persisted attachments are reconstructed so images and documents are
+  // actually sent again instead of being reduced to placeholder text.
+  const handleRetryMessage = async (msg: Message) => {
     if (isTyping) return;
+
     const msgIndex = messages.findIndex(m => m.id === msg.id);
     const messagesBeforeMsg = msgIndex > 0 ? messages.slice(0, msgIndex) : [];
-    sendMessage(cleanMessageContent(msg.content), messagesBeforeMsg);
+    const attachmentUrls = messageAttachments[msg.id] || [];
+
+    try {
+      const retryFiles = attachmentUrls.length > 0
+        ? await Promise.all(
+            attachmentUrls.map((url, index) =>
+              dataUrlToFile(
+                url,
+                index,
+                getStoredAttachmentName(url) || undefined
+              )
+            )
+          )
+        : undefined;
+
+      const retryText =
+        cleanMessageContent(msg.content) === 'Image uploaded'
+          ? ''
+          : cleanMessageContent(msg.content);
+
+      await sendMessage(
+        retryText,
+        messagesBeforeMsg,
+        retryFiles,
+        attachmentUrls.length > 0 ? attachmentUrls : undefined
+      );
+    } catch (error) {
+      console.error('Failed to restore attachments for retry:', error);
+      setMessages(prev => [
+        ...prev,
+        {
+          id: 'error-' + Date.now(),
+          sessionId: currentSessionId || 0,
+          role: 'assistant',
+          content: 'The attached file could not be restored for retry. Please upload it again.',
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+    }
   };
 
   const handleStopResponse = () => {
@@ -901,6 +1230,7 @@ export default function Chat({ user, onLogout }: Props) {
   };
 
   const createNewSession = () => {
+    setEmptyChatPrompt(current => getNextEmptyChatPrompt(current));
     setCurrentSessionId(null);
     persistSessionId(null);
     setMessages([]);
@@ -979,12 +1309,102 @@ export default function Chat({ user, onLogout }: Props) {
     }
   };
 
-  const cleanMessageContent = (content: unknown): string => {
+  
+const normalizeTwinkleIdentity = (content: string): string => {
+  const normalized = content.trim();
+
+  // Replace the old default identity response with a clearer Twinkle AI
+  // introduction. Keep this narrowly scoped so documents mentioning Nexus
+  // are not rewritten accidentally.
+  if (
+    /^I['’]m\s+Nexus\s+AI,\s+a\s+helpful\s+assistant\s+designed\s+to\s+help\s+you\s+with\s+information,\s+analysis,\s+and\s+more\.?$/i.test(normalized)
+  ) {
+    return `Hi! I’m Twinkle AI, a professional AI assistant designed to help you understand information, solve problems, work with files, write and analyze content, develop software, and accomplish tasks efficiently.
+
+I adapt my responses to what you’re actually asking. I aim to provide clear, accurate, practical, and meaningful answers rather than following a rigid response template.
+
+You can ask me questions, give me a file or image to analyze, ask for help with coding or technical problems, request writing or explanations, or simply tell me what you’re trying to accomplish — I’ll help you figure out the best way forward.`;
+  }
+
+  return content;
+};
+
+const cleanMessageContent = (content: unknown): string => {
     if (typeof content !== 'string') return '';
 
-    return content
+    let cleaned = normalizeTwinkleIdentity(content)
+      // NEVER strip Markdown links here. Keeping the original [label](url)
+      // structure lets ReactMarkdown preserve clickability while the
+      // renderer below displays the complete URL as the visible text.
+      //
+      // Contact/project links are normalized onto separate lines so each
+      // link is easy to read in the document-style output.
+      .replace(/^([ \t]*(?:\[[^\]]+\]\((?:https?|mailto|tel):[^)]+\)[ \t]*\|[ \t]*)+\[[^\]]+\]\((?:https?|mailto|tel):[^)]+\)[ \t]*)$/gim, (line) =>
+        line.split(/\s*\|\s*/).join('\n')
+      )
+      .replace(/\s*\|\s*(?=(?:Email|Phone|Github|GitHub|LinkedIn|Portfolio)\s*:)/gi, '\n')
+      // Make document labels use the same heavy weight as **Technologies**.
+      .replace(/(^|\n)(\s*[-*]?\s*)(Github|GitHub|Live Link|Live link|Email|Phone|Technologies)\s*:/gim, '$1$2**$3:**')
+      // Keep project GitHub and Live Link entries on their own lines.
+      .replace(/\s+(\*\*(?:Github|GitHub):\*\*)\s*(https?:\/\/[^\s]+)/g, '\n$1 $2\n')
+      .replace(/\s+(\*\*(?:Live Link|Live link):\*\*)\s*(https?:\/\/[^\s]+)/g, '\n$1 $2')
+      // The resume subtitle should have the same heavy visual weight as
+      // labels such as Email/Technologies.
+      .replace(/^(Java Developer\s*[—-]\s*Java Backend Developer)\s*$/gim, '**$1**')
+      // Remove the internal attachment marker from persisted/live messages.
       .replace(/\n?\n?\[Attached Files:.*?\]/g, '')
       .trim();
+
+    // The upload flow can persist the internal "no question/instruction"
+    // formatting prompt as the user's message. It is an implementation
+    // detail and must never be rendered as chat content, including after
+    // the conversation is refreshed and messages are loaded from the API.
+    if (/^The user uploaded document\(s\) but did not provide a question or instruction\./i.test(cleaned)) {
+      return '';
+    }
+
+    // Remove generated helper sections that are not part of the document
+    // itself. This is intentionally done on the client too so old persisted
+    // messages are cleaned when they are loaded after refresh.
+    cleaned = cleaned
+      .replace(/\n?\s*#{1,6}\s*Additional Links\s*(?:\(Repeated in Source\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
+      .replace(/\n?\s*#{1,6}\s*Document Structure\s*(?:\(as extracted\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
+      // Remove only the extracted "Additional Section" and "Links & Contact"
+      // sections. Keep hyperlinks that belong to the actual document content.
+      .replace(/\n?\s*#{1,6}\s*Additional Section\s*(?:\(as in original document\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s*Links\s*&\s*Contact\b|$)/gi, '\n')
+      .replace(/\n?\s*#{1,6}\s*Links\s*&\s*Contact\s*\n[\s\S]*$/gi, '\n')
+      .trim();
+
+    // Remove the dedicated Architecture section/bullet requested by the UI
+    // formatting rules, without removing legitimate architecture mentions
+    // inside normal project/experience descriptions.
+    cleaned = cleaned
+      .replace(/\n?\s*#{1,6}\s*Architecture\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
+      .replace(/^\s*[-*]\s*\*\*Architecture:\*\*.*(?:\n|$)/gim, '')
+      // Remove only the generated Document Navigation section.
+      .replace(/\n?\s*#{1,6}\s*Document\s+Navigation\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
+      .trim();
+
+    // Extracted PDF text can contain the same standalone URLs twice (often a
+    // duplicate block at the end). Keep the first occurrence so links near
+    // the top of the document remain intact, and drop later duplicates.
+    const seenStandaloneLinks = new Set<string>();
+    cleaned = cleaned
+      .split('\n')
+      .filter(line => {
+        const value = line.trim();
+        if (!/^(?:https?:\/\/|mailto:|tel:)/i.test(value)) return true;
+
+        const normalized = value.replace(/[)>.,]+$/, '').replace(/\/$/, '').toLowerCase();
+        if (seenStandaloneLinks.has(normalized)) return false;
+        seenStandaloneLinks.add(normalized);
+        return true;
+      })
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+
+    return cleaned;
   };
 
   const handleStartEdit = (msg: Message) => {
@@ -1016,7 +1436,7 @@ export default function Chat({ user, onLogout }: Props) {
           transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
           className="flex flex-col items-center gap-4"
         >
-          <StormLogo className="w-12 h-12 text-indigo-500/50" />
+          <StormLogo className="w-12 h-12 text-black dark:text-white transition-transform duration-500 ease-in-out hover:rotate-180" />
           <span className="tracking-widest text-[10px] font-black uppercase">Loading...</span>
         </motion.div>
       </div>
@@ -1025,14 +1445,21 @@ export default function Chat({ user, onLogout }: Props) {
 
   return (
     <div className="relative flex h-[100dvh] min-h-0 w-full max-w-full overflow-hidden bg-white dark:bg-zinc-950 font-sans transition-colors duration-300">
-      <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-indigo-500/5 rounded-full blur-[160px] pointer-events-none" />
+      <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-zinc-1000/5 rounded-full blur-[160px] pointer-events-none" />
 
       <Sidebar
         user={user}
         sessions={sessions}
         currentSessionId={currentSessionId}
-        onSelectSession={(id) => { setCurrentSessionId(id); persistSessionId(id); }}
-        onNewSession={createNewSession}
+        onSelectSession={(id) => {
+          setCurrentSessionId(id);
+          persistSessionId(id);
+          setMobileOpen(false);
+        }}
+        onNewSession={() => {
+          createNewSession();
+          setMobileOpen(false);
+        }}
         onDeleteSession={deleteSession}
         onRenameSession={renameSession}
         onClearAll={() => setModalType('delete-all')}
@@ -1040,73 +1467,61 @@ export default function Chat({ user, onLogout }: Props) {
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
       />
-
-      <main className="relative flex h-full min-h-0 min-w-0 w-full max-w-full flex-1 flex-col overflow-hidden bg-transparent pt-14 md:pt-16 lg:pl-14">
-        {/* Header - fixed so mobile/tablet refresh or message scrolling can never push it away */}
-        <header className="fixed top-0 left-0 right-0 lg:left-14 z-[10000] h-14 md:h-16 w-auto bg-white/95 dark:bg-zinc-950/95 backdrop-blur-2xl border-b border-zinc-200 dark:border-zinc-800 flex items-center shrink-0">
-          {/* Mobile menu: fixed to the left edge so it never overlaps the chat title */}
+      {/* Mobile header: reference-style compact navigation. Desktop is unchanged. */}
+      <div className="twinkle-mobile-header lg:hidden">
+        <button
+          type="button"
+          onClick={() => setMobileOpen(true)}
+          aria-label="Open sidebar"
+          className="twinkle-mobile-header-menu"
+        >
+          <span className="twinkle-menu-line" />
+          <span className="twinkle-menu-line twinkle-menu-line-short" />
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileOpen(true)}
+          className="twinkle-mobile-title"
+          aria-label="Open chat menu"
+        >
+          <span>TWINKLE</span>
+        </button>
+        <div className="twinkle-mobile-header-actions">
           <button
-            onClick={() => setMobileOpen(true)}
-            className="lg:hidden absolute left-3 md:left-5 top-1/2 -translate-y-1/2 z-[10001] w-9 h-9 flex items-center justify-center rounded-xl text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all"
-            aria-label="Open chats"
+            type="button"
+            onClick={() => {
+              createNewSession();
+              setMobileOpen(false);
+            }}
+            aria-label="Create new chat"
+            title="New chat"
+            className="twinkle-mobile-header-icon twinkle-mobile-header-more"
           >
-            <Menu className="w-5 h-5" />
+            <SquarePen className="h-[21px] w-[21px]" strokeWidth={1.7} />
           </button>
+        </div>
+      </div>
 
-          {/* Center title: reserves space for both left menu and right theme button */}
-          <div className="absolute left-14 right-14 sm:left-16 sm:right-16 md:left-20 md:right-20 flex flex-col items-center gap-0.5 text-center min-w-0 overflow-hidden">
-            <div className="flex items-center justify-center gap-1.5 min-w-0 max-w-full">
-              <StormLogo className="w-4 h-4 md:w-5 md:h-5 text-indigo-600 dark:text-indigo-500 shrink-0" />
-              <span className="text-[10px] md:text-xs font-black text-zinc-900 dark:text-zinc-100 uppercase tracking-widest truncate">Nexus AI</span>
-              <div className="hidden sm:flex items-center gap-1 ml-1 shrink-0">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              </div>
-            </div>
-            <span className="block w-full text-[10px] font-semibold text-zinc-500 dark:text-zinc-400 truncate">
-              {sessions.find(s => s.id === currentSessionId)?.sessionName || 'New Chat'}
-            </span>
-          </div>
-
-          {/* Theme button: always pinned to the right-most edge */}
-          <motion.button
-            whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-            onClick={toggleTheme}
-            aria-label="Toggle theme"
-            className="absolute right-2 sm:right-3 md:right-4 top-1/2 -translate-y-1/2 z-[10001] w-9 h-9 md:w-10 md:h-10 shrink-0 flex items-center justify-center rounded-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all"
-          >
-              <AnimatePresence mode="wait" initial={false}>
-                {isDark
-                  ? <motion.span key="sun" initial={{ rotate: -90, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }} exit={{ rotate: 90, opacity: 0 }}><Sun className="w-4 h-4" /></motion.span>
-                  : <motion.span key="moon" initial={{ rotate: 90, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }} exit={{ rotate: -90, opacity: 0 }}><Moon className="w-4 h-4" /></motion.span>
-                }
-              </AnimatePresence>
-            </motion.button>
-        </header>
-
+      <main className="relative flex h-full min-h-0 min-w-0 w-full max-w-full flex-1 flex-col overflow-hidden bg-transparent">
         {/* Messages */}
         <div
           className="min-h-0 min-w-0 flex-1 w-full max-w-full overflow-x-hidden overflow-y-auto overscroll-contain scroll-hide pb-32 pt-0 md:pb-36"
           ref={messagesContainerRef}
           onScroll={handleScroll}
         >
-          <div className="w-full max-w-3xl mx-auto px-3 sm:px-4 md:px-6 pt-6 md:pt-10 pb-8 md:pb-10">
+          <div className="w-full max-w-4xl mx-auto px-3 sm:px-5 md:px-7 lg:px-8 pt-[92px] md:pt-8 pb-8 md:pb-10">
             {messages.length === 0 && !isTyping ? (
-              <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-2 max-w-2xl mx-auto">
-                <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="mb-8">
-                  <StormLogo className="w-12 h-12 md:w-14 md:h-14 text-indigo-600" />
+              <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-2 max-w-3xl mx-auto">
+                <motion.div
+                  initial={{ scale: 0.82, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="mb-6"
+                >
+                  <StormLogo className="twinkle-chat-logo w-12 h-12 md:w-14 md:h-14 text-zinc-800 dark:text-zinc-100" />
                 </motion.div>
-                <h2 className="text-2xl md:text-3xl font-bold text-zinc-900 dark:text-zinc-100 mb-6">How can I help you today?</h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full">
-                  {['Plan a 3-day trip to Tokyo', 'How to build a SaaS with React?', 'Write a professional covering letter', 'Explain the theory of relativity'].map((s, i) => (
-                    <button
-                      key={i}
-                      onClick={() => handleSendMessage(undefined, s)}
-                      className="group p-3.5 md:p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm font-medium text-zinc-500 dark:text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-400 transition-all text-left shadow-sm"
-                    >
-                      <span className="block truncate">{s}</span>
-                    </button>
-                  ))}
-                </div>
+                <h2 className="text-2xl md:text-3xl lg:text-4xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                  {emptyChatPrompt}
+                </h2>
               </div>
             ) : (
               <div className="space-y-5 md:space-y-7 pb-6 pt-2">
@@ -1114,54 +1529,115 @@ export default function Chat({ user, onLogout }: Props) {
                   const isEditing = editingMessage?.id === msg.id;
                   const shouldSpin = isTyping && msg.role === 'assistant' && index === messages.length - 1;
                   const attachedImages = messageAttachments[msg.id] || [];
+                  const rawMessageContent = cleanMessageContent(msg.content);
+                  const displayContent =
+                    attachedImages.length > 0 && rawMessageContent === 'Image uploaded'
+                      ? ''
+                      : rawMessageContent;
 
                   return (
                     <div
                       key={msg.id || `msg-${index}`}
+                      data-twinkle-message
                       className={`flex w-full min-w-0 ${
                         msg.role === 'user' ? 'justify-end' : 'justify-start'
                       }`}
                     >
                       <div
-                        className={`flex min-w-0 w-full items-start gap-2.5 md:gap-3 ${
+                        className={`flex min-w-0 w-full gap-2.5 md:gap-3 ${
                           msg.role === 'user'
-                            ? 'flex-row-reverse max-w-[92%] sm:max-w-[88%]'
-                            : 'max-w-full'
+                            ? 'flex-col items-end'
+                            : 'items-start'
                         }`}
                       >
-                        <div className="w-7 h-7 md:w-8 md:h-8 shrink-0 flex items-center justify-center mt-1">
-                          {msg.role === 'user' ? (
-                            <div className="w-full h-full rounded-full border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 flex items-center justify-center shadow-sm overflow-hidden">
-                              <UserAvatar name={user?.username || 'User'} className="w-full h-full text-[10px]" />
-                            </div>
-                          ) : (
-                            <StormLogo className={`w-6 h-6 text-indigo-500 dark:text-indigo-400 ${shouldSpin ? 'animate-spin' : ''}`} />
-                          )}
-                        </div>
+                        {msg.role === 'assistant' && (
+                          <div className="shrink-0 w-7 h-7 md:w-8 md:h-8 flex items-center justify-center mt-1">
+                            <StormLogo className={`w-6 h-6 text-black dark:text-white ${shouldSpin ? 'animate-spin' : ''}`} />
+                          </div>
+                        )}
 
-                        <div className="flex flex-col gap-1 min-w-0 flex-1 max-w-full">
-                          {/* Message card */}
+                        {msg.role === 'user' && attachedImages.length > 0 && (
+                          <div className="w-full flex justify-end -mt-1">
+                            <div className="flex flex-wrap justify-end gap-2.5 max-w-[92%] sm:max-w-[88%]">
+                              {attachedImages.filter(isValidAttachmentDataUrl).map((url, i) => {
+                                const mimeMatch = url.match(/^data:([^;,]+)/i);
+                                const mime = mimeMatch?.[1]?.toLowerCase() || '';
+                                const attachmentName =
+                                  getStoredAttachmentName(url) ||
+                                  getAttachmentNameFromDataUrl(url, i);
+                                const isImage = mime.startsWith('image/');
+                                const isPdf = mime === 'application/pdf';
+
+                                return (
+                                  <button
+                                    key={`sender-attachment-${i}`}
+                                    type="button"
+                                    onClick={() => void openPersistedAttachmentPreview(url, i)}
+                                    title="Open attachment preview"
+                                    className="group relative overflow-hidden rounded-xl border border-zinc-200/70 bg-white text-left shadow-sm transition-all hover:border-zinc-500 hover:shadow-md dark:border-zinc-700 dark:bg-zinc-900"
+                                  >
+                                    {isImage ? (
+                                      <img
+                                        src={url}
+                                        alt={`Attachment ${i + 1}`}
+                                        className="block h-32 w-32 object-cover transition-transform duration-200 group-hover:scale-[1.03] sm:h-36 sm:w-36"
+                                      />
+                                    ) : isPdf ? (
+                                      <div className="relative h-32 w-32 overflow-hidden bg-white dark:bg-zinc-800 sm:h-36 sm:w-36">
+                                        <iframe
+                                          src={`${url}#page=1&toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+                                          title={`PDF attachment ${i + 1}`}
+                                          className="pointer-events-none absolute left-0 top-0 h-[576px] w-[408px] origin-top-left scale-[0.31] bg-white"
+                                        />
+                                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/65 via-black/20 to-transparent px-2 pb-2 pt-8">
+                                          <span className="text-[9px] font-bold uppercase tracking-wider text-white">PDF</span>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="flex h-32 w-32 flex-col items-center justify-center gap-2 bg-zinc-50 px-2 dark:bg-zinc-800 sm:h-36 sm:w-36">
+                                        <FileText className="h-9 w-9 text-zinc-900 dark:text-zinc-100" />
+                                        <span className="rounded-md bg-zinc-100 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-zinc-600 dark:bg-zinc-800 dark:text-zinc-600 dark:text-zinc-300">
+                                          {mime === 'application/msword' ? 'DOC'
+                                            : mime.includes('wordprocessingml') ? 'DOCX'
+                                            : mime === 'application/vnd.ms-excel' ? 'XLS'
+                                            : mime.includes('spreadsheetml') ? 'XLSX'
+                                            : mime === 'application/vnd.ms-powerpoint' ? 'PPT'
+                                            : mime.includes('presentationml') ? 'PPTX'
+                                            : mime.split('/')[1]?.toUpperCase() || 'FILE'}
+                                        </span>
+                                        <span className="text-center text-[9px] font-medium text-zinc-400">
+                                          Click to preview
+                                        </span>
+                                      </div>
+                                    )}
+                                    <span className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/45 text-white opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
+                                      <Eye className="h-3.5 w-3.5" />
+                                    </span>
+                                    <span
+                                      className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent px-2 pb-1.5 pt-5 text-[9px] font-semibold text-white"
+                                      title={attachmentName}
+                                    >
+                                      {attachmentName}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className={`flex flex-col gap-1 min-w-0 max-w-full ${
+                          msg.role === 'user' ? 'items-end w-full' : 'flex-1'
+                        }`}>
+                          {/* Message card: do not render an empty bubble for attachment-only messages. */}
+                          {((isEditing || displayContent.trim().length > 0)) && (
                           <div
                             className={`min-w-0 max-w-full ${
                               msg.role === 'user'
                                 ? 'w-fit max-w-[92%] sm:max-w-[88%] px-3.5 py-3 sm:px-4 sm:py-3.5 rounded-2xl shadow-sm border overflow-hidden bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 rounded-tr-none'
-                                : 'w-full text-zinc-900 dark:text-zinc-100'
+                                : 'w-full rounded-2xl border border-zinc-200/80 dark:border-zinc-700/80 bg-white/70 dark:bg-zinc-900/40 px-4 py-3.5 md:px-5 md:py-4 shadow-sm text-zinc-900 dark:text-zinc-100'
                             }`}
                           >
-                            {attachedImages.length > 0 && (
-                              <div className="flex flex-wrap gap-2 mb-3">
-                                {attachedImages.map((url, i) => (
-                                  <div key={i} className="relative group/img max-w-full">
-                                    <img
-                                      src={url}
-                                      alt={`Attachment ${i + 1}`}
-                                      className="max-w-full w-auto h-auto max-h-[180px] rounded-xl object-cover border border-zinc-200/50 dark:border-zinc-600/40 shadow-sm"
-                                    />
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-
                             <div className="text-sm md:text-base leading-relaxed markdown-body max-w-none min-w-0 w-full break-words [overflow-wrap:anywhere]">
                               {isEditing ? (
                                 <div className="flex flex-col gap-3 w-full min-w-0 p-1">
@@ -1189,7 +1665,7 @@ export default function Chat({ user, onLogout }: Props) {
                                     <button
                                       onClick={handleSaveEdit}
                                       disabled={!editInput.trim() || isTyping}
-                                      className="px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest shadow-lg disabled:opacity-40 bg-indigo-600 text-white hover:bg-indigo-700"
+                                      className="px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest shadow-lg disabled:opacity-40 bg-black text-white hover:bg-zinc-700"
                                     >
                                       Send
                                     </button>
@@ -1199,15 +1675,88 @@ export default function Chat({ user, onLogout }: Props) {
                                 <ReactMarkdown
                                   remarkPlugins={[remarkGfm]}
                                   components={{
+                                    h1({ children, ...props }: any) {
+                                      return (
+                                        <h1
+                                          className="mt-5 mb-3 pb-2 border-b border-zinc-300 dark:border-zinc-700 text-2xl md:text-3xl font-black tracking-tight text-zinc-950 dark:text-zinc-50"
+                                          {...props}
+                                        >
+                                          {children}
+                                        </h1>
+                                      );
+                                    },
+                                    h2({ children, ...props }: any) {
+                                      return (
+                                        <h2
+                                          className="mt-5 mb-3 pb-2 border-b border-zinc-300 dark:border-zinc-700 text-xl md:text-2xl font-black tracking-tight text-zinc-950 dark:text-zinc-50"
+                                          {...props}
+                                        >
+                                          {children}
+                                        </h2>
+                                      );
+                                    },
+                                    h3({ children, ...props }: any) {
+                                      return (
+                                        <h3
+                                          className="mt-4 mb-2 pb-2 border-b border-zinc-300 dark:border-zinc-700 text-lg md:text-xl font-black tracking-tight text-zinc-950 dark:text-zinc-50"
+                                          {...props}
+                                        >
+                                          {children}
+                                        </h3>
+                                      );
+                                    },
+                                    strong({ children, ...props }: any) {
+                                      return (
+                                        <strong className="font-black" {...props}>
+                                          {children}
+                                        </strong>
+                                      );
+                                    },
+                                    em({ children, ...props }: any) {
+                                      const value = String(children ?? '');
+                                      const isResumeSubtitle =
+                                        /Java Developer\s*[—-]\s*Java Backend Developer/i.test(value);
+                                      return (
+                                        <em
+                                          className={isResumeSubtitle ? 'not-italic font-black' : undefined}
+                                          {...props}
+                                        >
+                                          {children}
+                                        </em>
+                                      );
+                                    },
+                                    a({ children, href, ...props }: any) {
+                                      // Always show the complete destination instead
+                                      // of a shortened Markdown label such as
+                                      // [Cartify Repo](https://github.com/...).
+                                      // This keeps every URL visible AND clickable.
+                                      const visibleHref = href
+                                        ?.replace(/^mailto:/i, '')
+                                        .replace(/^tel:/i, '');
+                                      const isExternal = /^https?:\/\//i.test(href || '');
+
+                                      return (
+                                        <a
+                                          href={href}
+                                          target={isExternal ? '_blank' : undefined}
+                                          rel={isExternal ? 'noopener noreferrer' : undefined}
+                                          className="!underline underline-offset-2 decoration-1 !text-blue-600 dark:!text-blue-400 hover:!text-blue-700 dark:hover:!text-blue-300 font-medium break-all"
+                                          style={{ textDecoration: 'underline' }}
+                                          {...props}
+                                        >
+                                          {visibleHref || children}
+                                        </a>
+                                      );
+                                    },
                                     pre({ children, ...props }: any) {
                                       return (
-                                        <div className="my-4 w-full max-w-full min-w-0 overflow-hidden rounded-xl border border-indigo-200/40 dark:border-indigo-500/20 shadow-lg bg-gradient-to-br from-indigo-50/80 to-violet-50/60 dark:from-indigo-950/50 dark:to-violet-950/40">
-                                          <div className="flex items-center gap-2 px-3 sm:px-4 py-2 border-b border-indigo-200/30 dark:border-indigo-500/15 bg-indigo-100/40 dark:bg-indigo-900/20">
-                                            <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 dark:bg-indigo-500 shrink-0" />
-                                            <span className="text-[10px] font-black uppercase tracking-widest text-indigo-400 dark:text-indigo-500">Architecture</span>
+                                        <div className="my-4 w-full max-w-full min-w-0 overflow-hidden rounded-xl border border-zinc-200/40 dark:border-zinc-500/20 shadow-lg bg-gradient-to-br from-zinc-50/80 to-violet-50/60 dark:from-zinc-950/50 dark:to-violet-950/40">
+                                          <div className="flex items-center gap-2 px-3 sm:px-4 py-2 border-b border-zinc-200/30 dark:border-zinc-500/15 bg-zinc-100/40 dark:bg-zinc-900/20">
+                                            <div className="w-1.5 h-1.5 rounded-full bg-zinc-400 dark:bg-zinc-1000 shrink-0" />
+                                            <span className="text-[10px] font-black uppercase tracking-widest text-zinc-600 dark:text-zinc-300 dark:text-zinc-900 dark:text-zinc-100">Code</span>
                                           </div>
                                           <pre
-                                            className="max-w-full overflow-x-auto p-3 sm:p-4 md:p-5 text-[0.75rem] sm:text-[0.82rem] leading-relaxed font-mono text-indigo-700 dark:text-indigo-300 whitespace-pre"
+                                            className="max-w-full overflow-x-auto p-3 sm:p-4 md:p-5 text-[0.75rem] sm:text-[0.82rem] leading-relaxed font-mono text-zinc-900 dark:text-zinc-100 dark:text-zinc-300 whitespace-pre"
                                             {...props}
                                           >
                                             {children}
@@ -1223,7 +1772,7 @@ export default function Chat({ user, onLogout }: Props) {
                                         <CodeBlock language={match[1]} value={content} />
                                       ) : (
                                         <code
-                                          className={`${className || ''} bg-zinc-100 dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 px-1 py-0.5 rounded font-mono text-[0.85em] break-words [overflow-wrap:anywhere]`}
+                                          className={`${className || ''} bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-600 dark:text-zinc-300 px-1 py-0.5 rounded font-mono text-[0.85em] break-words [overflow-wrap:anywhere]`}
                                           {...props}
                                         >
                                           {children}
@@ -1232,11 +1781,12 @@ export default function Chat({ user, onLogout }: Props) {
                                     }
                                   } as Components}
                                 >
-                                  {cleanMessageContent(msg.content)}
+                                  {displayContent}
                                 </ReactMarkdown>
                               )}
                             </div>
                           </div>
+                          )}
 
                           {/* Message action buttons.
                               Always visible so touch devices do not depend on hover. */}
@@ -1246,8 +1796,8 @@ export default function Chat({ user, onLogout }: Props) {
                             }`}
                           >
                             {msg.role === 'assistant' && (
-                              <span className="text-[10px] font-black text-indigo-500/60 uppercase tracking-[0.18em] mr-auto pl-1">
-                                Nexus AI
+                              <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-[0.18em] mr-auto pl-1">
+                                Twinkle
                               </span>
                             )}
 
@@ -1269,7 +1819,7 @@ export default function Chat({ user, onLogout }: Props) {
                                     onClick={() => handleRetryMessage(msg)}
                                     title="Retry message"
                                     aria-label="Retry message"
-                                    className="p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700 text-zinc-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all touch-manipulation"
+                                    className="p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700 text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-600 dark:text-zinc-300 transition-all touch-manipulation"
                                   >
                                     <RotateCcw className="w-4 h-4 md:w-3.5 md:h-3.5" />
                                   </button>
@@ -1279,7 +1829,7 @@ export default function Chat({ user, onLogout }: Props) {
                                     onClick={() => handleStartEdit(msg)}
                                     title="Edit message"
                                     aria-label="Edit message"
-                                    className="p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700 text-zinc-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all touch-manipulation"
+                                    className="p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700 text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-600 dark:text-zinc-300 transition-all touch-manipulation"
                                   >
                                     <Edit2 className="w-4 h-4 md:w-3.5 md:h-3.5" />
                                   </button>
@@ -1298,8 +1848,8 @@ export default function Chat({ user, onLogout }: Props) {
                                 aria-label="Copy message"
                                 className={`p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700 transition-all touch-manipulation ${
                                   copiedId === msg.id
-                                    ? 'text-emerald-500'
-                                    : 'text-zinc-500 hover:text-indigo-600 dark:hover:text-indigo-400'
+                                    ? 'text-zinc-500'
+                                    : 'text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-600 dark:text-zinc-300'
                                 }`}
                               >
                                 {copiedId === msg.id
@@ -1317,24 +1867,24 @@ export default function Chat({ user, onLogout }: Props) {
                 {isTyping && (
                   <div className="flex items-start gap-3 min-w-0 max-w-full">
                     <div className="w-7 h-7 md:w-8 md:h-8 shrink-0 flex items-center justify-center mt-1">
-                      <StormLogo className="w-6 h-6 text-indigo-500 animate-spin" />
+                      <StormLogo className="w-6 h-6 text-zinc-800 dark:text-zinc-100 animate-pulse" />
                     </div>
                     <div className="min-w-0 max-w-full px-1 py-2 flex flex-col gap-2">
                       <div className="flex items-center gap-2">
                         <motion.div
                           animate={{ scale: [1, 1.2, 1], opacity: [0.3, 1, 0.3] }}
                           transition={{ repeat: Infinity, duration: 1 }}
-                          className="w-1.5 h-1.5 bg-indigo-600 rounded-full"
+                          className="w-1.5 h-1.5 bg-black rounded-full"
                         />
                         <motion.div
                           animate={{ scale: [1, 1.2, 1], opacity: [0.3, 1, 0.3] }}
                           transition={{ repeat: Infinity, duration: 1, delay: 0.2 }}
-                          className="w-1.5 h-1.5 bg-indigo-600 rounded-full"
+                          className="w-1.5 h-1.5 bg-black rounded-full"
                         />
                         <motion.div
                           animate={{ scale: [1, 1.2, 1], opacity: [0.3, 1, 0.3] }}
                           transition={{ repeat: Infinity, duration: 1, delay: 0.4 }}
-                          className="w-1.5 h-1.5 bg-indigo-600 rounded-full"
+                          className="w-1.5 h-1.5 bg-black rounded-full"
                         />
                       </div>
                       <AnimatePresence>
@@ -1364,38 +1914,101 @@ export default function Chat({ user, onLogout }: Props) {
         </div>
 
         {/* Input bar */}
-        <div className="fixed bottom-0 left-0 right-0 z-[9000] w-full max-w-full overflow-visible border-t border-zinc-200/70 bg-white/95 px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur-2xl dark:border-zinc-800/70 dark:bg-zinc-950/95 sm:px-4 md:px-6 md:pt-4 md:pb-[calc(1rem+env(safe-area-inset-bottom))]">
-          <div className="w-full max-w-3xl mx-auto relative min-w-0">
+        <div className="fixed bottom-0 left-0 right-0 z-[9000] w-full max-w-full overflow-visible bg-transparent px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-4 sm:pt-3 sm:pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-6 md:pt-4 md:pb-[calc(1rem+env(safe-area-inset-bottom))] lg:pl-[4.5rem]">
+          <div className="mx-auto w-full max-w-[920px] min-w-0 relative">
             <AnimatePresence>
-              {showScrollBottom && (
-                <motion.button
-                  initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
-                  onClick={() => messagesContainerRef.current?.scrollTo({ top: messagesContainerRef.current.scrollHeight, behavior: 'smooth' })}
-                  className="absolute -top-14 right-2 p-2.5 bg-indigo-600 text-white rounded-full shadow-xl shadow-indigo-500/30 hover:bg-indigo-700 transition-all z-10 hover:scale-110"
-                >
-                  <ArrowDown className="w-4 h-4 md:w-5 md:h-5" />
-                </motion.button>
+              {showScrollBottom && messages.length > 0 && (
+                isTyping ? (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                    transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+                    className="absolute -top-14 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2.5 rounded-full border border-white/75 bg-white/65 px-3.5 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 backdrop-blur-2xl dark:border-white/10 dark:bg-zinc-900/55 dark:ring-white/10"
+                    aria-live="polite"
+                    aria-label={responseStatus}
+                  >
+                    <span className="flex shrink-0 items-center gap-1" aria-hidden="true">
+                      <motion.span
+                        animate={{ y: [0, -1.5, 0], opacity: [0.35, 1, 0.35] }}
+                        transition={{ repeat: Infinity, duration: 1.15, ease: 'easeInOut' }}
+                        className="h-1.5 w-1.5 rounded-full bg-zinc-700 dark:bg-zinc-200"
+                      />
+                      <motion.span
+                        animate={{ y: [0, -1.5, 0], opacity: [0.35, 1, 0.35] }}
+                        transition={{ repeat: Infinity, duration: 1.15, ease: 'easeInOut', delay: 0.16 }}
+                        className="h-1.5 w-1.5 rounded-full bg-zinc-700 dark:bg-zinc-200"
+                      />
+                      <motion.span
+                        animate={{ y: [0, -1.5, 0], opacity: [0.35, 1, 0.35] }}
+                        transition={{ repeat: Infinity, duration: 1.15, ease: 'easeInOut', delay: 0.32 }}
+                        className="h-1.5 w-1.5 rounded-full bg-zinc-700 dark:bg-zinc-200"
+                      />
+                    </span>
+
+                    <motion.span
+                      key={responseStatus}
+                      initial={{ opacity: 0, y: 3 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.22, ease: 'easeOut' }}
+                      className="whitespace-nowrap text-[11px] font-medium tracking-tight text-zinc-700 dark:text-zinc-200"
+                    >
+                      {responseStatus}
+                    </motion.span>
+                  </motion.div>
+                ) : (
+                  <motion.button
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    onClick={() =>
+                      messagesContainerRef.current?.scrollTo({
+                        top: messagesContainerRef.current.scrollHeight,
+                        behavior: 'smooth',
+                      })
+                    }
+                    className="absolute -top-14 left-1/2 z-10 -translate-x-1/2 rounded-full border border-white/70 bg-white/60 p-2.5 text-black shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 backdrop-blur-xl transition-all hover:scale-110 hover:bg-white/75 dark:border-white/15 dark:bg-zinc-900/50 dark:ring-white/10 dark:hover:bg-zinc-900/65"
+                    aria-label="Scroll to latest message"
+                    title="Scroll to latest message"
+                  >
+                    <ArrowDown className="h-4 w-4 md:h-5 md:w-5" />
+                  </motion.button>
+                )
               )}
             </AnimatePresence>
 
-            <div className={`relative z-[60] flex flex-col bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl shadow-lg transition-all ${justFinished ? 'animate-blink' : ''}`}>
+            <div className={`relative z-[60] flex w-full min-w-0 flex-col overflow-visible rounded-[24px] border border-zinc-200/90 bg-white shadow-[0_2px_18px_rgba(0,0,0,0.08)] transition-all dark:border-zinc-700/90 dark:bg-zinc-900 dark:shadow-black/20 ${justFinished ? 'animate-blink' : ''}`}>
               {/* File preview strip (kept for consistency but never shown without UI trigger) */}
               <AnimatePresence>
                 {filePreviews.length > 0 && (
                   <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="flex flex-wrap gap-3 px-3 pt-3 pb-2.5 border-b border-zinc-100 dark:border-zinc-800/70">
                     {filePreviews.map(fp => (
                       <div key={fp.id} className="relative flex flex-col items-center gap-1 shrink-0">
-                        {fp.preview ? (
-                          <div className="w-16 h-16 rounded-xl overflow-hidden bg-zinc-200 dark:bg-zinc-700 shadow-sm border border-zinc-200/60">
-                            <img src={fp.preview} alt={fp.file.name} className="w-full h-full object-cover" />
-                          </div>
-                        ) : (
-                          <div className="w-16 h-16 rounded-xl flex items-center justify-center bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
-                            <X className="w-6 h-6 text-indigo-500" />
-                          </div>
-                        )}
-                        <span className="text-[9px] font-medium text-zinc-400 truncate max-w-[64px]">{fp.file.name}</span>
-                        <button onClick={() => removeFile(fp.id)} className="absolute -top-1.5 -right-1.5 w-[18px] h-[18px] rounded-full flex items-center justify-center bg-zinc-600 dark:bg-zinc-500 text-white shadow-md hover:bg-red-500">
+                        <button
+                          type="button"
+                          onClick={() => void openFilePreview(fp.file, fp.preview)}
+                          className="group/preview relative block w-20 text-left"
+                          title={`Preview ${fp.file.name}`}
+                        >
+                          {fp.file.type.startsWith('image/') && fp.preview ? (
+                            <div className="w-20 h-16 rounded-xl overflow-hidden bg-zinc-200 dark:bg-zinc-700 shadow-sm border border-zinc-200/60 cursor-pointer">
+                              <img src={fp.preview} alt={fp.file.name} className="w-full h-full object-cover transition-transform group-hover/preview:scale-105" />
+                            </div>
+                          ) : fp.file.type === 'application/pdf' && fp.preview ? (
+                            <div className="relative w-20 h-16 rounded-xl overflow-hidden bg-white dark:bg-zinc-800 shadow-sm border border-zinc-200 dark:border-zinc-700 cursor-pointer">
+                              <iframe src={`${fp.preview}#page=1&view=FitH`} title={`Preview ${fp.file.name}`} className="pointer-events-none absolute inset-0 h-[288px] w-[360px] origin-top-left scale-[0.222] bg-white" />
+                              <div className="absolute inset-0 bg-transparent group-hover/preview:bg-zinc-1000/5 transition-colors" />
+                            </div>
+                          ) : (
+                            <div className="w-20 h-16 rounded-xl flex flex-col items-center justify-center gap-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 cursor-pointer hover:border-zinc-500 dark:hover:border-zinc-500/50 transition-colors">
+                              <FileText className="w-6 h-6 text-zinc-900 dark:text-zinc-100" />
+                              <span className="text-[8px] font-black uppercase text-zinc-500 dark:text-zinc-400">{fp.file.name.split('.').pop()?.toUpperCase() || 'FILE'}</span>
+                            </div>
+                          )}
+                          <span className="mt-1 block text-[9px] font-medium text-zinc-500 dark:text-zinc-400 truncate max-w-[80px]" title={fp.file.name}>{fp.file.name}</span>
+                          <span className="block text-[8px] text-zinc-400">{formatFileSize(fp.file.size)}</span>
+                        </button>
+                        <button onClick={() => removeFile(fp.id)} className="absolute -top-1.5 -right-1.5 w-[18px] h-[18px] rounded-full flex items-center justify-center bg-zinc-600 dark:bg-zinc-500 text-white shadow-md hover:bg-zinc-500">
                           <X className="w-2.5 h-2.5" />
                         </button>
                       </div>
@@ -1406,7 +2019,7 @@ export default function Chat({ user, onLogout }: Props) {
 
               <div
                 ref={modelPickerRef}
-                className="relative z-[200] flex items-center gap-2 px-3 py-2.5 sm:px-4"
+                className="twinkle-composer-row relative z-[200] flex min-w-0 items-end gap-1 px-2.5 py-2 sm:gap-2 sm:px-3 sm:py-2.5 md:px-4"
               >
                 {/* Hidden file input */}
                 <input
@@ -1436,10 +2049,10 @@ export default function Chat({ user, onLogout }: Props) {
                     damping: 24,
                     mass: 0.6,
                   }}
-                  className="group relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-500 shadow-sm transition-colors duration-200 hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:border-indigo-500/40 dark:hover:bg-indigo-950/30 dark:hover:text-indigo-400"
+                  className="group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
                 >
                   <motion.span
-                    className="pointer-events-none absolute inset-0 rounded-2xl bg-indigo-500/0 blur-md"
+                    className="pointer-events-none absolute inset-0 rounded-2xl bg-zinc-1000/0 blur-md"
                     whileHover={{ scale: 1.15, opacity: 0.18 }}
                     transition={{ duration: 0.25, ease: 'easeOut' }}
                   />
@@ -1447,8 +2060,8 @@ export default function Chat({ user, onLogout }: Props) {
                   <motion.span
                     className="relative z-10 flex items-center justify-center"
                     animate={isProcessingFiles ? { rotate: 90 } : { rotate: 0 }}
-                    whileHover={{ scale: 1.12 }}
-                    whileTap={{ scale: 0.9 }}
+                    whileHover={{ scale: 1.12, rotate: 180 }}
+                    whileTap={{ scale: 0.9, rotate: 180 }}
                     transition={{
                       type: 'spring',
                       stiffness: 500,
@@ -1473,14 +2086,14 @@ export default function Chat({ user, onLogout }: Props) {
                       if (isListening) speechBaseRef.current = e.target.value;
                     }}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey && !isTyping && !isListening) {
+                      if (e.key === 'Enter' && !e.shiftKey && !isTyping) {
                         e.preventDefault();
                         handleSendMessage();
                       }
                     }}
                     placeholder={isListening ? 'Listening…' : 'Ask Anything'}
                     rows={1}
-                    className="block w-full min-w-0 resize-none overflow-y-auto bg-transparent px-1 py-3 text-sm font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[46px] max-h-[180px]"
+                    className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent px-1 py-2 text-[15px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:min-h-[46px] sm:py-2.5"
                     onInput={(e) => {
                       const t = e.target as HTMLTextAreaElement;
                       t.style.height = 'auto';
@@ -1489,7 +2102,7 @@ export default function Chat({ user, onLogout }: Props) {
                   />
                 </div>
 
-                {/* Model selector */}
+                {/* Think / model selector */}
                 <div className="relative shrink-0">
                   <motion.button
                     type="button"
@@ -1500,31 +2113,13 @@ export default function Chat({ user, onLogout }: Props) {
                     whileHover={{ y: -1 }}
                     whileTap={{ scale: 0.97 }}
                     transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                    className="group inline-flex h-11 min-w-0 shrink-0 items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-zinc-50/90 px-2.5 text-left shadow-sm transition-all hover:border-indigo-300 hover:bg-indigo-50/60 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-800/80 dark:hover:border-indigo-500/60 dark:hover:bg-indigo-950/30 sm:px-3 sm:max-w-[230px] sm:justify-start"
+                    className="group relative inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-zinc-300 bg-white px-2.5 text-black shadow-sm transition-all hover:border-black hover:shadow-md dark:border-zinc-700 dark:bg-zinc-900 dark:text-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-400 dark:from-zinc-950/60 dark:via-zinc-900 dark:to-zinc-900/40 dark:text-zinc-300 sm:px-3"
                   >
-                    <motion.span
-                      animate={{ scale: modelPickerOpen ? 1.05 : 1 }}
-                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 dark:bg-indigo-950/70 dark:text-indigo-400"
-                    >
-                      <activeModel.icon className="h-3.5 w-3.5" />
-                    </motion.span>
-
-                    <span className="min-w-0 max-w-[72px] text-left sm:max-w-[160px]">
-                      <span className="block truncate text-[11px] font-bold text-zinc-800 dark:text-zinc-100">
-                        {activeModel.name}
-                      </span>
-                      <span className="hidden sm:block truncate text-[9px] font-medium text-zinc-400 dark:text-zinc-500">
-                        {activeModel.vision ? 'VISION' : 'CHAT'} · GROQ
-                      </span>
+                    <span className="max-w-[190px] truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:text-sm">
+                      {activeModel.name}
                     </span>
-
-                    <motion.span
-                      animate={{ rotate: modelPickerOpen ? 180 : 0 }}
-                      transition={{ duration: 0.18 }}
-                      className="ml-auto shrink-0"
-                    >
-                      <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />
-                    </motion.span>
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
+                  
                   </motion.button>
 
                   <AnimatePresence>
@@ -1536,19 +2131,17 @@ export default function Chat({ user, onLogout }: Props) {
                         transition={{ duration: 0.16, ease: 'easeOut' }}
                         role="listbox"
                         aria-label="Select AI model"
-                        className="absolute bottom-[calc(100%+10px)] right-0 z-[99999] w-[min(390px,calc(100vw-16px))] max-w-[calc(100vw-16px)] overflow-hidden rounded-2xl border border-zinc-200/90 bg-white/95 p-2 shadow-2xl shadow-zinc-900/20 backdrop-blur-2xl dark:border-zinc-700/90 dark:bg-zinc-900/95 dark:shadow-black/50"
+                        className="fixed bottom-[calc(88px+env(safe-area-inset-bottom,0px))] right-2 z-[99999] w-[min(360px,calc(100vw-16px))] max-w-[calc(100vw-16px)] max-h-[min(360px,calc(100dvh-180px))] overflow-y-auto overflow-x-hidden rounded-xl border border-zinc-200/90 bg-white/95 p-1.5 shadow-2xl shadow-zinc-900/20 backdrop-blur-2xl dark:border-zinc-700/90 dark:bg-zinc-900/95 dark:shadow-black/50 sm:absolute sm:bottom-[calc(100%+8px)] sm:right-0 sm:w-[360px] sm:max-w-[calc(100vw-24px)] sm:max-h-[420px] sm:overflow-hidden sm:rounded-2xl sm:p-2"
                       >
                         <div className="px-2 pb-2 pt-1">
                           <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400 dark:text-zinc-500">
                             Select AI model
                           </p>
                         </div>
-
                         <div className="space-y-1">
                           {MODEL_OPTIONS.map(option => {
                             const Icon = option.icon;
                             const selected = option.id === selectedModel;
-
                             return (
                               <motion.button
                                 key={option.id}
@@ -1559,31 +2152,20 @@ export default function Chat({ user, onLogout }: Props) {
                                 whileHover={{ x: 2 }}
                                 whileTap={{ scale: 0.985 }}
                                 transition={{ type: 'spring', stiffness: 450, damping: 28 }}
-                                className={`flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-all ${selected ? 'border-indigo-300 bg-indigo-50 shadow-sm dark:border-indigo-500/60 dark:bg-indigo-950/40' : 'border-transparent hover:border-zinc-200 hover:bg-zinc-50 dark:hover:border-zinc-700 dark:hover:bg-zinc-800/80'}`}
+                                className={`flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-all ${selected ? 'border-zinc-500 bg-zinc-100 shadow-sm dark:border-zinc-500 dark:bg-zinc-950/40' : 'border-transparent hover:border-zinc-200 hover:bg-zinc-50 dark:hover:border-zinc-700 dark:hover:bg-zinc-800/80'}`}
                               >
-                                <span
-                                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${selected ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/25' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'}`}
-                                >
+                                <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${selected ? 'bg-black text-white shadow-md' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'}`}>
                                   <Icon className="h-4 w-4" />
                                 </span>
-
                                 <span className="min-w-0 flex-1">
                                   <span className="flex items-center gap-2">
-                                    <span className="truncate text-xs font-bold text-zinc-800 dark:text-zinc-100">
-                                      {option.name}
-                                    </span>
-                                    <span className="shrink-0 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500">
-                                      GROQ
-                                    </span>
+                                    <span className="truncate text-xs font-medium text-zinc-800 dark:text-zinc-100">{option.name}</span>
                                   </span>
                                   <span className="mt-0.5 block truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
                                     {option.description}{option.vision ? ' · Vision' : ''}
                                   </span>
                                 </span>
-
-                                {selected && (
-                                  <Check className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
-                                )}
+                                {selected && <Check className="h-4 w-4 shrink-0 text-zinc-600 dark:text-zinc-600 dark:text-zinc-300" />}
                               </motion.button>
                             );
                           })}
@@ -1592,34 +2174,11 @@ export default function Chat({ user, onLogout }: Props) {
                     )}
                   </AnimatePresence>
                 </div>
-
-                {/* Microphone */}
-                <motion.button
-                  type="button"
-                  onClick={toggleListening}
-                  disabled={isTyping && !isListening}
-                  aria-label={isListening ? 'Stop recording' : 'Voice input'}
-                  title={isListening ? 'Stop recording' : 'Voice input'}
-                  whileHover={{ scale: 1.04, y: -1 }}
-                  whileTap={{ scale: 0.94 }}
-                  transition={{ type: 'spring', stiffness: 450, damping: 25 }}
-                  className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 ${isListening ? 'border-red-300 bg-red-50 text-red-600 dark:border-red-500/50 dark:bg-red-950/30 dark:text-red-400' : 'border-zinc-300 bg-white text-zinc-600 hover:border-zinc-500 hover:text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-400 dark:hover:text-white'} disabled:cursor-not-allowed disabled:opacity-50`}
-                >
-                  {isListening ? (
-                    <span className="relative flex h-5 w-5 items-center justify-center">
-                      <span className="absolute h-5 w-5 animate-ping rounded-full bg-red-400/25" />
-                      <Square className="relative h-3.5 w-3.5 fill-current" />
-                    </span>
-                  ) : (
-                    <Mic className="h-5 w-5" strokeWidth={2} />
-                  )}
-                </motion.button>
-
                 {/* Send / Stop */}
                 <motion.button
                   type="button"
                   onClick={isTyping ? handleStopResponse : () => handleSendMessage()}
-                  disabled={!input.trim() && filePreviews.length === 0 && !isTyping || isListening}
+                  disabled={!input.trim() && (!Array.isArray(filePreviews) || filePreviews.length === 0) && !isTyping}
                   aria-label={isTyping ? 'Stop response' : 'Send message'}
                   title={isTyping ? 'Stop response' : 'Send message'}
                   whileHover={{
@@ -1628,14 +2187,11 @@ export default function Chat({ user, onLogout }: Props) {
                   }}
                   whileTap={{ scale: 0.92 }}
                   transition={{ type: 'spring', stiffness: 450, damping: 25 }}
-                  className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 ${isTyping ? 'border-indigo-400 bg-white dark:border-indigo-500 dark:bg-zinc-800' : input.trim() || filePreviews.length ? 'border-zinc-300 bg-white hover:border-indigo-400 dark:border-zinc-600 dark:bg-zinc-800 dark:hover:border-indigo-500' : 'border-zinc-200 bg-zinc-50 text-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-500'}`}
+                  className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isTyping ? 'border-[#ec6aa8] bg-[#ec6aa8] text-white shadow-[#ec6aa8]/20' : input.trim() || filePreviews.length ? 'border-zinc-300 bg-white hover:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-800 dark:hover:border-zinc-500' : 'border-zinc-200 bg-zinc-50 text-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-500'}`}
                 >
                   {isTyping ? (
                     <span className="relative flex h-full w-full items-center justify-center">
-                      <svg className="absolute inset-0 h-full w-full animate-spin" viewBox="0 0 40 40">
-                        <circle cx="20" cy="20" r="16" fill="none" stroke="#6366f1" strokeWidth="3" strokeDasharray="55 45" strokeLinecap="round" />
-                      </svg>
-                      <span className="relative z-10 h-3 w-3 rounded-sm bg-zinc-800 dark:bg-zinc-200" />
+                      <span className="h-3.5 w-3.5 rounded-[3px] bg-white shadow-sm" />
                     </span>
                   ) : (
                     <motion.span
@@ -1652,14 +2208,78 @@ export default function Chat({ user, onLogout }: Props) {
 
             </div>
             <p className="mt-2.5 px-2 text-center text-[10px] sm:text-[11px] leading-relaxed font-medium text-zinc-500/60 dark:text-zinc-400/60">
-              Nexus AI is AI and can make mistakes. Please double-check responses.
+              Twinkle is AI and can make mistakes. Please double-check responses.
             </p>
           </div>
         </div>
       </main>
 
-      <ConfirmationModal isOpen={modalType === 'delete-single'} onClose={() => setModalType('none')} onConfirm={confirmDeleteSession} title="Delete Chat" message="This action cannot be undone." confirmText="Delete" />
-      <ConfirmationModal isOpen={modalType === 'delete-all'} onClose={() => setModalType('none')} onConfirm={confirmClearAll} title="Clear All Chats" message="All chats will be permanently deleted." confirmText="Clear All" />
+      <AnimatePresence>
+        {previewFile && previewUrl && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[12000] flex items-center justify-center bg-black/70 p-3 sm:p-6 backdrop-blur-sm"
+            onMouseDown={(e) => { if (e.target === e.currentTarget) closeFilePreview(); }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 10 }}
+              className="relative flex h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-white shadow-2xl dark:bg-zinc-900"
+            >
+              <div className="flex shrink-0 items-center gap-3 border-b border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-600 dark:text-zinc-300">
+                  {previewFile.type.startsWith('image/') ? <Eye className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-bold text-zinc-900 dark:text-zinc-100">{previewFile.name}</p>
+                  <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">{previewFile.type === 'application/pdf' ? 'PDF preview' : previewFile.type.startsWith('image/') ? 'Image preview' : /\.docx$/i.test(previewFile.name) ? 'DOCX preview' : 'Document preview'}</p>
+                </div>
+                <button type="button" onClick={closeFilePreview} aria-label="Close preview" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto bg-zinc-100 p-3 dark:bg-zinc-950 sm:p-5">
+                {previewFile.type.startsWith('image/') ? (
+                  <div className="flex min-h-full items-center justify-center"><img src={previewUrl} alt={previewFile.name} className="max-h-full max-w-full rounded-xl object-contain shadow-lg" /></div>
+                ) : previewFile.type === 'application/pdf' ? (
+                  <iframe src={`${previewUrl}#toolbar=1&navpanes=0&view=FitH`} title={`PDF preview: ${previewFile.name}`} className="h-full min-h-[70vh] w-full rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800" />
+                ) : previewText !== null ? (
+                  <pre className="mx-auto min-h-full max-w-4xl whitespace-pre-wrap break-words rounded-xl bg-white p-5 font-mono text-xs leading-relaxed text-zinc-800 shadow-sm dark:bg-zinc-900 dark:text-zinc-200">{previewText}</pre>
+                ) : (
+                  <div className="flex min-h-full items-center justify-center"><div className="max-w-md rounded-2xl bg-white p-8 text-center shadow-sm dark:bg-zinc-900"><FileText className="mx-auto mb-4 h-12 w-12 text-zinc-900 dark:text-zinc-100" /><h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100">{previewFile.name}</h3><p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">This document is attached and ready for AI analysis. The browser cannot render this legacy Office format directly.</p></div></div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <ConfirmationModal
+        isOpen={modalType === 'delete-single'}
+        onClose={() => setModalType('none')}
+        onConfirm={confirmDeleteSession}
+        title="Delete chat?"
+        message={
+          <>
+            This will delete{' '}
+            <strong className="font-bold">
+              {sessionToDelete?.sessionName || 'this chat'}
+            </strong>.
+          </>
+        }
+        confirmText="Delete"
+      />
+      <ConfirmationModal
+        isOpen={modalType === 'delete-all'}
+        onClose={() => setModalType('none')}
+        onConfirm={confirmClearAll}
+        title="Clear all chats?"
+        message="All chats will be permanently deleted."
+        confirmText="Clear All"
+      />
     </div>
   );
 }
