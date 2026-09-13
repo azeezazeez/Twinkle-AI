@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.time.Instant;
 
 @Service
 @Slf4j
@@ -168,6 +169,75 @@ public class GeminiService {
      * This is intentionally separate from normal chat so transcription does not
      * create a chat message/session.
      */
+    /**
+     * Creates a short-lived Gemini Live API token constrained to live speech
+     * transcription. The browser uses this token to open a WebSocket directly
+     * to Gemini without exposing the long-lived Gemini API key.
+     */
+    public String createLiveTranscriptionToken() {
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("x-goog-api-key", apiKey);
+
+            Instant now = Instant.now();
+            Map<String, Object> inputAudioTranscription = new LinkedHashMap<>();
+            inputAudioTranscription.put("languageCodes", List.of());
+            inputAudioTranscription.put("mode", "SMART");
+
+            Map<String, Object> config = new LinkedHashMap<>();
+            config.put("responseModalities", List.of("TEXT"));
+            config.put("inputAudioTranscription", inputAudioTranscription);
+
+            Map<String, Object> liveConnectConstraints = new LinkedHashMap<>();
+            liveConnectConstraints.put("model", "models/gemini-3.5-transcribe-live");
+            liveConnectConstraints.put("config", config);
+
+            Map<String, Object> requestBody = new LinkedHashMap<>();
+            requestBody.put("uses", 1);
+            requestBody.put("expireTime", now.plusSeconds(30 * 60L).toString());
+            requestBody.put("newSessionExpireTime", now.plusSeconds(60).toString());
+            requestBody.put("liveConnectConstraints", liveConnectConstraints);
+
+            HttpEntity<Map<String, Object>> entity =
+                    new HttpEntity<>(requestBody, headers);
+
+            String endpoint = apiUrl.replaceAll("/+$", "") + "/auth_tokens";
+            ResponseEntity<Map> response = restTemplate.postForEntity(
+                    endpoint,
+                    entity,
+                    Map.class
+            );
+
+            Object token = response.getBody() == null
+                    ? null
+                    : response.getBody().get("name");
+
+            if (token == null || token.toString().isBlank()) {
+                throw new AIServiceException("Gemini did not return a live transcription token.");
+            }
+
+            return token.toString().trim();
+        } catch (HttpClientErrorException e) {
+            String message = extractApiError(e.getResponseBodyAsString());
+            log.error("Gemini live token error. status={}, message={}",
+                    e.getStatusCode().value(), message);
+            throw new AIServiceException(
+                    "Gemini live transcription token error " + e.getStatusCode().value() + ": " + message,
+                    e
+            );
+        } catch (Exception e) {
+            log.error("Unable to create Gemini live transcription token: {}", e.getMessage(), e);
+            if (e instanceof AIServiceException aiServiceException) {
+                throw aiServiceException;
+            }
+            throw new AIServiceException(
+                    "Unable to create live voice transcription session.",
+                    e
+            );
+        }
+    }
+
     public String transcribeAudio(byte[] audioBytes, String mimeType) {
         if (audioBytes == null || audioBytes.length == 0) {
             throw new IllegalArgumentException("Audio recording is empty.");
