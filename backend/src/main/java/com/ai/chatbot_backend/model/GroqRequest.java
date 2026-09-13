@@ -5,30 +5,13 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Request model for the Groq / OpenAI-compatible chat completions API.
- *
- * Serializes to:
- * {
- *   "model":    "llama3-8b-8192",
- *   "messages": [ {"role": "user", "content": "Hello"}, ... ],
- *   "stream":   false
- * }
- */
 public class GroqRequest {
 
     private String model;
 
-    /**
-     * Conversation history + current user message.
-     * Each entry must have "role" ("system" | "user" | "assistant")
-     * and "content" keys.
-     */
     private List<Map<String, String>> messages;
 
     private boolean stream;
-
-    // ── Constructors ────────────────────────────────────────────────────────
 
     public GroqRequest() {}
 
@@ -38,7 +21,6 @@ public class GroqRequest {
         this.stream   = stream;
     }
 
-    // ── Getters & Setters ────────────────────────────────────────────────────
 
     @JsonProperty("model")
     public String getModel() {
