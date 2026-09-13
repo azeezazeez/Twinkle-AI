@@ -534,13 +534,15 @@ export default function Chat({ user, onLogout }: Props) {
   // Voice input
   const [isListening, setIsListening] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  const speechRecognitionRef = useRef<any>(null);
-  const speechLiveTextRef = useRef('');
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const processorNodeRef = useRef<ScriptProcessorNode | null>(null);
+  const liveSocketRef = useRef<WebSocket | null>(null);
   const isListeningRef = useRef(false);
   const speechBaseRef = useRef('');
+  const finalTranscriptRef = useRef('');
+  const interimTranscriptRef = useRef('');
 
   // Theme
   const [isDark, setIsDark] = useState<boolean>(() => {
@@ -609,38 +611,94 @@ export default function Chat({ user, onLogout }: Props) {
     };
   }, []);
 
-  const getSupportedAudioMimeType = useCallback(() => {
-    if (typeof MediaRecorder === 'undefined') return '';
+  const downsampleTo16k = useCallback((buffer: Float32Array, inputSampleRate: number) => {
+    if (inputSampleRate === 16000) return buffer;
 
-    const candidates = [
-      'audio/webm;codecs=opus',
-      'audio/webm',
-      'audio/mp4',
-      'audio/ogg;codecs=opus',
-    ];
+    const ratio = inputSampleRate / 16000;
+    const newLength = Math.round(buffer.length / ratio);
+    const result = new Float32Array(newLength);
+    let offsetResult = 0;
+    let offsetBuffer = 0;
 
-    return candidates.find(type => MediaRecorder.isTypeSupported(type)) || '';
+    while (offsetResult < result.length) {
+      const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+      let accum = 0;
+      let count = 0;
+
+      for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i += 1) {
+        accum += buffer[i];
+        count += 1;
+      }
+
+      result[offsetResult] = count > 0 ? accum / count : 0;
+      offsetResult += 1;
+      offsetBuffer = nextOffsetBuffer;
+    }
+
+    return result;
+  }, []);
+
+  const float32ToBase64Pcm = useCallback((samples: Float32Array) => {
+    const pcm = new Int16Array(samples.length);
+    for (let i = 0; i < samples.length; i += 1) {
+      const sample = Math.max(-1, Math.min(1, samples[i]));
+      pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+    }
+
+    const bytes = new Uint8Array(pcm.buffer);
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + chunkSize, bytes.length)));
+    }
+    return btoa(binary);
+  }, []);
+
+  const cleanupVoiceResources = useCallback(() => {
+    const processor = processorNodeRef.current;
+    if (processor) {
+      processor.onaudioprocess = null;
+      try { processor.disconnect(); } catch {}
+    }
+    processorNodeRef.current = null;
+
+    const source = sourceNodeRef.current;
+    if (source) {
+      try { source.disconnect(); } catch {}
+    }
+    sourceNodeRef.current = null;
+
+    const context = audioContextRef.current;
+    audioContextRef.current = null;
+    if (context) {
+      try { void context.close(); } catch {}
+    }
+
+    const stream = mediaStreamRef.current;
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+    }
+    mediaStreamRef.current = null;
   }, []);
 
   const stopListening = useCallback(() => {
     isListeningRef.current = false;
+    setIsListening(false);
 
-    // Stop live browser speech recognition first. The final recognition result
-    // is kept in speechLiveTextRef and is already shown in the composer.
-    const recognition = speechRecognitionRef.current;
-    speechRecognitionRef.current = null;
-    if (recognition) {
-      try { recognition.stop(); } catch {}
+    const socket = liveSocketRef.current;
+    liveSocketRef.current = null;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      try {
+        socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
+      } catch {}
+      window.setTimeout(() => {
+        try { socket.close(); } catch {}
+      }, 700);
     }
 
-    const recorder = mediaRecorderRef.current;
-    if (recorder && recorder.state !== 'inactive') {
-      try { recorder.requestData(); } catch {}
-      recorder.stop();
-    } else {
-      setIsListening(false);
-    }
-  }, []);
+    cleanupVoiceResources();
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }, [cleanupVoiceResources]);
 
   const startListening = useCallback(async () => {
     if (isListening || isTranscribing) return;
@@ -650,189 +708,155 @@ export default function Chat({ user, onLogout }: Props) {
       return;
     }
 
-    if (typeof MediaRecorder === 'undefined') {
-      alert('Your browser does not support microphone recording. Please use a current Chrome, Edge, or Safari browser.');
-      return;
-    }
-
-    const mimeType = getSupportedAudioMimeType();
-    if (!mimeType) {
-      alert('This browser does not provide a supported audio recording format.');
-      return;
-    }
-
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, { mimeType });
+      setIsTranscribing(true);
 
-      audioChunksRef.current = [];
+      const token = await chatApi.getLiveTranscriptionToken();
+      if (!token) {
+        throw new Error('Could not create a live voice session.');
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextCtor) {
+        stream.getTracks().forEach(track => track.stop());
+        throw new Error('Your browser does not support live microphone transcription.');
+      }
+
+      const socket = new WebSocket(
+        `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}`
+      );
+
+      liveSocketRef.current = socket;
       mediaStreamRef.current = stream;
-      mediaRecorderRef.current = recorder;
       speechBaseRef.current = inputRef.current?.value || input;
-      speechLiveTextRef.current = '';
+      finalTranscriptRef.current = '';
+      interimTranscriptRef.current = '';
       isListeningRef.current = true;
 
-      recorder.ondataavailable = (event: BlobEvent) => {
-        if (event.data && event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
+      socket.onopen = () => {
+        socket.send(JSON.stringify({
+          setup: {
+            model: 'models/gemini-3.5-transcribe-live',
+            generationConfig: {
+              responseModalities: ['TEXT'],
+            },
+            inputAudioTranscription: {
+              languageCodes: [],
+              mode: 'SMART',
+            },
+          },
+        }));
+
+        const context = new AudioContextCtor();
+        audioContextRef.current = context;
+        const source = context.createMediaStreamSource(stream);
+        const processor = context.createScriptProcessor(4096, 1, 1);
+
+        sourceNodeRef.current = source;
+        processorNodeRef.current = processor;
+
+        processor.onaudioprocess = (event: AudioProcessingEvent) => {
+          if (!isListeningRef.current || socket.readyState !== WebSocket.OPEN) return;
+
+          const inputData = event.inputBuffer.getChannelData(0);
+          const pcm16k = downsampleTo16k(inputData, context.sampleRate);
+          if (pcm16k.length === 0) return;
+
+          try {
+            socket.send(JSON.stringify({
+              realtimeInput: {
+                audio: {
+                  data: float32ToBase64Pcm(pcm16k),
+                  mimeType: 'audio/pcm;rate=16000',
+                },
+              },
+            }));
+          } catch (error) {
+            console.error('Live voice audio send failed:', error);
+          }
+        };
+
+        source.connect(processor);
+        processor.connect(context.destination);
+        if (context.state === 'suspended') void context.resume();
+
+        setIsTranscribing(false);
+        setIsListening(true);
+        inputRef.current?.focus();
       };
 
-      recorder.onerror = (event: Event) => {
-        console.error('Microphone recording error:', event);
-        isListeningRef.current = false;
-        setIsListening(false);
-        mediaRecorderRef.current = null;
-        mediaStreamRef.current?.getTracks().forEach(track => track.stop());
-        mediaStreamRef.current = null;
-        const recognition = speechRecognitionRef.current;
-        speechRecognitionRef.current = null;
-        if (recognition) {
-          try { recognition.abort(); } catch {}
-        }
-        alert('The microphone recording failed. Please try again.');
-      };
-
-      recorder.onstop = async () => {
-        setIsListening(false);
-        mediaRecorderRef.current = null;
-        mediaStreamRef.current?.getTracks().forEach(track => track.stop());
-        mediaStreamRef.current = null;
-
-        const liveTranscript = speechLiveTextRef.current.trim();
-
-        // Live SpeechRecognition is the primary path. When Chrome/Edge gives
-        // us the spoken text, do not wait for the Gemini upload at all.
-        // This also prevents the composer from getting stuck after Stop.
-        if (liveTranscript) {
-          setIsTranscribing(false);
-          speechBaseRef.current = `${speechBaseRef.current.trim()} ${liveTranscript}`.trim();
-          speechLiveTextRef.current = '';
-          setTimeout(() => inputRef.current?.focus(), 50);
-          return;
-        }
-
-        const chunks = audioChunksRef.current;
-        audioChunksRef.current = [];
-        if (chunks.length === 0) {
-          setIsTranscribing(false);
-          alert('No speech was detected. Please try again.');
-          return;
-        }
-
-        const normalizedMimeType = mimeType.split(';')[0].trim() || 'audio/webm';
-        const audioBlob = new Blob(chunks, { type: normalizedMimeType });
-        if (audioBlob.size === 0) {
-          setIsTranscribing(false);
-          alert('No speech was detected. Please try again.');
-          return;
-        }
-
-        setIsTranscribing(true);
+      socket.onmessage = (event) => {
         try {
-          const transcriptionTimeout = new Promise<string>((_, reject) => {
-            window.setTimeout(() => reject(new Error('Voice transcription timed out. Please try again.')), 30000);
-          });
+          const response = JSON.parse(event.data);
+          const content = response?.serverContent;
+          if (!content) return;
 
-          const transcript = await Promise.race([
-            chatApi.transcribeAudio(audioBlob),
-            transcriptionTimeout,
-          ]);
-
-          if (transcript && transcript.trim()) {
+          if (content.interimInputTranscription?.text) {
+            interimTranscriptRef.current = content.interimInputTranscription.text.trim();
             const base = speechBaseRef.current.trim();
-            const combined = base ? `${base} ${transcript.trim()}`.trim() : transcript.trim();
-            setInput(combined);
-            speechBaseRef.current = combined;
-          } else {
-            alert('No speech was detected. Please try again.');
+            const committed = finalTranscriptRef.current.trim();
+            const interim = interimTranscriptRef.current;
+            setInput([base, committed, interim].filter(Boolean).join(' ').trim());
           }
-        } catch (error: any) {
-          console.error('Voice transcription failed:', error);
-          alert(
-            typeof error?.message === 'string' && error.message.trim()
-              ? error.message
-              : 'Voice transcription failed. Please try again.'
-          );
-        } finally {
-          setIsTranscribing(false);
-          setTimeout(() => inputRef.current?.focus(), 50);
+
+          if (content.inputTranscription?.text) {
+            const finalText = content.inputTranscription.text.trim();
+            if (finalText) {
+              finalTranscriptRef.current = `${finalTranscriptRef.current} ${finalText}`.trim();
+              interimTranscriptRef.current = '';
+              const base = speechBaseRef.current.trim();
+              const committed = finalTranscriptRef.current.trim();
+              setInput([base, committed].filter(Boolean).join(' ').trim());
+            }
+          }
+        } catch (error) {
+          console.error('Live voice response parse failed:', error);
         }
       };
 
-      // Browser speech recognition provides live/interim text while the
-      // MediaRecorder keeps a reliable audio fallback for browsers where live
-      // recognition is unavailable.
-      const SpeechRecognition =
-        (window as any).SpeechRecognition ||
-        (window as any).webkitSpeechRecognition;
-
-      if (SpeechRecognition) {
-        const recognition = new SpeechRecognition();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = navigator.language || 'en-US';
-        recognition.maxAlternatives = 1;
-
-        recognition.onresult = (event: any) => {
-          let transcript = '';
-          for (let i = 0; i < event.results.length; i += 1) {
-            transcript += event.results[i][0]?.transcript || '';
-          }
-
-          transcript = transcript.trim();
-          speechLiveTextRef.current = transcript;
-
-          const base = speechBaseRef.current.trim();
-          setInput(base ? `${base} ${transcript}`.trim() : transcript);
-        };
-
-        recognition.onerror = (event: any) => {
-          // Keep MediaRecorder running. If live recognition is unavailable on
-          // this browser/network, the recorded audio will be sent to Gemini
-          // when the user stops the microphone.
-          if (event?.error !== 'aborted' && event?.error !== 'no-speech') {
-            console.warn('Live speech recognition unavailable:', event?.error);
-          }
-        };
-
-        recognition.onend = () => {
-          // Chrome can end recognition after a period of silence even though
-          // the microphone is still recording. Restart it until the user stops.
-          if (isListeningRef.current && speechRecognitionRef.current === recognition) {
-            try { recognition.start(); } catch {}
-          }
-        };
-
-        speechRecognitionRef.current = recognition;
-        try {
-          recognition.start();
-        } catch (error) {
-          console.warn('Unable to start live speech recognition:', error);
-          speechRecognitionRef.current = null;
+      socket.onerror = (event) => {
+        console.error('Live voice WebSocket error:', event);
+        setIsTranscribing(false);
+        if (isListeningRef.current) {
+          isListeningRef.current = false;
+          setIsListening(false);
+          cleanupVoiceResources();
+          alert('Live voice transcription connection failed. Please try again.');
         }
-      }
+      };
 
-      recorder.start(250);
-      setIsListening(true);
-      inputRef.current?.focus();
+      socket.onclose = () => {
+        liveSocketRef.current = null;
+        if (isListeningRef.current) {
+          isListeningRef.current = false;
+          setIsListening(false);
+          cleanupVoiceResources();
+          setIsTranscribing(false);
+        }
+      };
     } catch (error: any) {
-      console.error('Microphone access failed:', error);
+      console.error('Live voice transcription failed:', error);
       isListeningRef.current = false;
-      mediaRecorderRef.current = null;
-      mediaStreamRef.current?.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-      speechRecognitionRef.current = null;
-
-      if (error?.name === 'NotAllowedError' || error?.name === 'SecurityError') {
-        alert('Microphone access was denied. Please allow microphone access for this site and try again.');
-      } else if (error?.name === 'NotFoundError') {
-        alert('No microphone was found on this device.');
-      } else {
-        alert('Unable to start the microphone. Please check your browser permissions and try again.');
-      }
+      setIsListening(false);
+      setIsTranscribing(false);
+      cleanupVoiceResources();
+      liveSocketRef.current = null;
+      alert(
+        typeof error?.message === 'string' && error.message.trim()
+          ? error.message
+          : 'Unable to start live voice transcription. Please try again.'
+      );
     }
-  }, [getSupportedAudioMimeType, input, isListening, isTranscribing]);
+  }, [downsampleTo16k, float32ToBase64Pcm, cleanupVoiceResources, input, isListening, isTranscribing]);
 
   const toggleListening = useCallback(() => {
     if (isListening) stopListening();
@@ -842,19 +866,15 @@ export default function Chat({ user, onLogout }: Props) {
   useEffect(() => {
     return () => {
       isListeningRef.current = false;
-      const recognition = speechRecognitionRef.current;
-      speechRecognitionRef.current = null;
-      if (recognition) {
-        try { recognition.abort(); } catch {}
+      const socket = liveSocketRef.current;
+      liveSocketRef.current = null;
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        try { socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } })); } catch {}
+        try { socket.close(); } catch {}
       }
-
-      const recorder = mediaRecorderRef.current;
-      if (recorder && recorder.state !== 'inactive') recorder.stop();
-      mediaStreamRef.current?.getTracks().forEach(track => track.stop());
-      mediaRecorderRef.current = null;
-      mediaStreamRef.current = null;
+      cleanupVoiceResources();
     };
-  }, []);
+  }, [cleanupVoiceResources]);
 
   // Load sessions & messages
   const loadSessions = useCallback(async () => {
