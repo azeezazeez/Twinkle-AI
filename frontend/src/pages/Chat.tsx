@@ -173,7 +173,7 @@ const fileToDataUrl = (file: File): Promise<string> =>
     reader.readAsDataURL(file);
   });
 
-const attachmentNameStorageKey = 'nexus-ai-attachment-names';
+const attachmentNameStorageKey = 'Twinkle-ai-attachment-names';
 
 const getAttachmentStorageId = (value: string): string => {
   // Small deterministic hash so localStorage keys never contain the entire
@@ -338,7 +338,7 @@ const MODEL_OPTIONS: ModelOption[] = [
   { id: 'gemini-3.8-flash', name: 'Twinkle Vision', description: 'Advanced image & file understanding', icon: Eye, vision: true, documents: true },
 ];
 
-const MODEL_STORAGE_KEY = 'nexus_selected_model';
+const MODEL_STORAGE_KEY = 'Twinkle_selected_model';
 
 const RESPONSE_STATUS_MESSAGES = [
   'Preparing your response…',
@@ -1314,10 +1314,10 @@ const normalizeTwinkleIdentity = (content: string): string => {
   const normalized = content.trim();
 
   // Replace the old default identity response with a clearer Twinkle AI
-  // introduction. Keep this narrowly scoped so documents mentioning Nexus
+  // introduction. Keep this narrowly scoped so documents mentioning Twinkle
   // are not rewritten accidentally.
   if (
-    /^I['’]m\s+Nexus\s+AI,\s+a\s+helpful\s+assistant\s+designed\s+to\s+help\s+you\s+with\s+information,\s+analysis,\s+and\s+more\.?$/i.test(normalized)
+    /^I['’]m\s+Twinkle\s+AI,\s+a\s+helpful\s+assistant\s+designed\s+to\s+help\s+you\s+with\s+information,\s+analysis,\s+and\s+more\.?$/i.test(normalized)
   ) {
     return `Hi! I’m Twinkle AI, a professional AI assistant designed to help you understand information, solve problems, work with files, write and analyze content, develop software, and accomplish tasks efficiently.
 
