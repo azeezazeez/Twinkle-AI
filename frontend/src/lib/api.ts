@@ -16,7 +16,7 @@ type ApiError = Error & {
 export interface ProcessedFile {
   id: string;
   name: string;
-  type: 'image' | 'text'; 
+  type: 'image' | 'text';
   content: string;
   mimeType: string;
   size: number;
