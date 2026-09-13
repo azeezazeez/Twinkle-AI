@@ -151,6 +151,30 @@ public class ChatController {
 
 
     // =========================================================
+    // LIVE VOICE TRANSCRIPTION TOKEN
+    // =========================================================
+
+    @GetMapping("/live-transcription-token")
+    public ResponseEntity<?> createLiveTranscriptionToken(HttpSession session) {
+        try {
+            if (getCurrentUser(session) == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
+                        "error", "Authentication required."
+                ));
+            }
+
+            String token = geminiService.createLiveTranscriptionToken();
+            return ResponseEntity.ok(Map.of("token", token));
+        } catch (Exception e) {
+            log.error("Live transcription token creation failed: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of(
+                    "error", "Unable to start live voice transcription."
+            ));
+        }
+    }
+
+
+    // =========================================================
     // VOICE-TO-TEXT TRANSCRIPTION
     // =========================================================
 
