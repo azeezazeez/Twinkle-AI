@@ -163,6 +163,48 @@ public class GeminiService {
         return callGemini(requestBody);
     }
 
+    /**
+     * Transcribes a short audio recording using Gemini's native audio input.
+     * This is intentionally separate from normal chat so transcription does not
+     * create a chat message/session.
+     */
+    public String transcribeAudio(byte[] audioBytes, String mimeType) {
+        if (audioBytes == null || audioBytes.length == 0) {
+            throw new IllegalArgumentException("Audio recording is empty.");
+        }
+
+        String resolvedMimeType = mimeType == null || mimeType.isBlank()
+                ? "audio/wav"
+                : mimeType.trim().toLowerCase();
+
+        if (!resolvedMimeType.startsWith("audio/")) {
+            throw new IllegalArgumentException("Unsupported audio format: " + resolvedMimeType);
+        }
+
+        Map<String, Object> inlineData = new LinkedHashMap<>();
+        inlineData.put("mime_type", resolvedMimeType);
+        inlineData.put("data", Base64.getEncoder().encodeToString(audioBytes));
+
+        List<Map<String, Object>> parts = new ArrayList<>();
+        parts.add(Map.of("text",
+                "Transcribe the attached audio recording. Return ONLY the spoken words as plain text. "
+                        + "Preserve the speaker's language and meaning, add normal punctuation when clear, "
+                        + "and do not add labels, explanations, quotes, or commentary. If there is no intelligible speech, return an empty string."));
+        parts.add(Map.of("inline_data", inlineData));
+
+        Map<String, Object> requestBody = new LinkedHashMap<>();
+        requestBody.put("contents", List.of(Map.of(
+                "role", "user",
+                "parts", parts
+        )));
+
+        Map<String, Object> generationConfig = new LinkedHashMap<>();
+        generationConfig.put("maxOutputTokens", 2048);
+        requestBody.put("generationConfig", generationConfig);
+
+        return callGemini(requestBody);
+    }
+
     private String callGemini(Map<String, Object> requestBody) {
         int attempt = 0;
 
