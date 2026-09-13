@@ -10,6 +10,7 @@ import com.ai.chatbot_backend.dto.User;
 import com.ai.chatbot_backend.service.RedisEventService;
 import com.ai.chatbot_backend.service.ChatHistoryService;
 import com.ai.chatbot_backend.service.GroqService;
+import com.ai.chatbot_backend.service.GeminiService;
 import com.ai.chatbot_backend.service.UserService;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -51,14 +52,12 @@ import java.util.stream.Collectors;
 @Slf4j
 public class ChatController {
 
-    private static final String VISION_MODEL =
-            "qwen/qwen3.8-27b";
-
     private static final int MAX_IMAGES_PER_MESSAGE = 3;
     private static final long MAX_TOTAL_IMAGE_BYTES = 15L * 1024L * 1024L;
     private static final long MAX_TOTAL_ATTACHMENT_BYTES = 25L * 1024L * 1024L;
 
     private final GroqService groqService;
+    private final GeminiService geminiService;
     private final ChatHistoryService chatHistoryService;
     private final UserService userService;
     private final RedisEventService redisEventService;
@@ -148,6 +147,55 @@ public class ChatController {
                 || lower.contains("no such session")
                 || lower.contains("could not find")
                 || lower.contains("unable to find");
+    }
+
+
+    // =========================================================
+    // VOICE-TO-TEXT TRANSCRIPTION
+    // =========================================================
+
+    @PostMapping(
+            value = "/transcribe",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE
+    )
+    public ResponseEntity<?> transcribeAudio(
+            @RequestPart("audio") MultipartFile audio) {
+
+        try {
+            if (audio == null || audio.isEmpty()) {
+                throw new IllegalArgumentException("Audio recording is empty.");
+            }
+
+            // Keep voice input intentionally small so the endpoint remains a
+            // quick transcription operation rather than a general file upload.
+            if (audio.getSize() > 10L * 1024L * 1024L) {
+                throw new IllegalArgumentException("Voice recording is too large. Keep it under 10MB.");
+            }
+
+            String mime = audio.getContentType();
+            if (mime == null || mime.isBlank()) {
+                mime = "audio/wav";
+            }
+
+            String text = geminiService.transcribeAudio(
+                    audio.getBytes(),
+                    mime
+            );
+
+            Map<String, String> response = new HashMap<>();
+            response.put("text", text == null ? "" : text.trim());
+            return ResponseEntity.ok(response);
+
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", e.getMessage()
+            ));
+        } catch (Exception e) {
+            log.error("Voice transcription failed: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of(
+                    "error", "Voice transcription failed. Please try again."
+            ));
+        }
     }
 
 
@@ -357,8 +405,14 @@ public class ChatController {
 
 
                     // =================================================
-                    // DOCUMENT
+                    // DOCUMENT FALLBACK
                     // =================================================
+                    // Gemini natively understands PDF, images, audio, video,
+                    // and supported text formats. Office/OpenDocument formats
+                    // are extracted with Tika and sent to Gemini as text.
+                    if (isGeminiNativeMimeType(mime)) {
+                        continue;
+                    }
 
                     String text =
                             extractText(
@@ -431,7 +485,7 @@ public class ChatController {
             // =====================================================
 
             if (userMessage.isBlank()
-                    && imageBase64.isEmpty()) {
+                    && attachmentUrls.isEmpty()) {
 
                 throw new IllegalArgumentException(
                         "Message or at least one supported file is required"
@@ -439,11 +493,14 @@ public class ChatController {
             }
 
 
-            if (userMessage.isBlank()) {
+            if (userMessage.isBlank() && !attachmentUrls.isEmpty()) {
 
                 userMessage =
-                        "Analyse the attached image(s) carefully "
-                        + "and answer using the information visible in them.";
+                        "The user uploaded file(s) but did not provide a question or instruction. "
+                        + "Analyze the uploaded file(s) carefully. For documents, return the complete actual source content "
+                        + "in clean, readable Markdown without summarizing, shortening, or inventing information. "
+                        + "For images, audio, or video, describe and extract the relevant information actually present in the media. "
+                        + "Do not add unnecessary introduction or conclusion.";
             }
 
 
@@ -698,6 +755,22 @@ log.warn(
         );
 
 
+        // Audio
+        extensions.put(".mp3", "audio/mpeg");
+        extensions.put(".wav", "audio/wav");
+        extensions.put(".ogg", "audio/ogg");
+        extensions.put(".flac", "audio/flac");
+        extensions.put(".aac", "audio/aac");
+        extensions.put(".m4a", "audio/mp4");
+
+        // Video
+        extensions.put(".mp4", "video/mp4");
+        extensions.put(".webm", "video/webm");
+        extensions.put(".mov", "video/quicktime");
+        extensions.put(".avi", "video/x-msvideo");
+        extensions.put(".mkv", "video/x-matroska");
+
+
         // Images
         extensions.put(
                 ".png",
@@ -769,6 +842,26 @@ log.warn(
                 "Unsupported or unknown file type: "
                         + filename
         );
+    }
+
+
+    private boolean isGeminiNativeMimeType(String mime) {
+        if (mime == null || mime.isBlank()) {
+            return false;
+        }
+
+        String normalized = mime.toLowerCase(Locale.ROOT);
+
+        if (normalized.startsWith("image/")
+                || normalized.startsWith("audio/")
+                || normalized.startsWith("video/")) {
+            return true;
+        }
+
+        return "application/pdf".equals(normalized)
+                || normalized.startsWith("text/")
+                || "application/json".equals(normalized)
+                || "application/xml".equals(normalized);
     }
 
 
@@ -1095,17 +1188,11 @@ log.warn(
         // AVAILABLE MODELS
         // =====================================================
 
-        List<String>
-                availableModels =
-                groqService.getAvailableModels();
+        List<String> groqModels = groqService.getAvailableModels();
+        String geminiModel = geminiService.getModel();
 
-
-        if (availableModels == null
-                || availableModels.isEmpty()) {
-
-            throw new IllegalStateException(
-                    "No Groq models are configured."
-            );
+        if (groqModels == null || groqModels.isEmpty()) {
+            throw new IllegalStateException("No Groq models are configured.");
         }
 
 
@@ -1114,24 +1201,20 @@ log.warn(
         // =====================================================
 
         String requestedModel =
-                model == null
-                        || model.isBlank()
-                        ? availableModels.get(0)
+                model == null || model.isBlank()
+                        ? groqModels.get(0)
                         : model.trim();
 
+        boolean geminiRequested =
+                geminiService.isGeminiModel(requestedModel);
 
-        if (!availableModels.contains(
-                requestedModel
-        )) {
-
+        if (!geminiRequested && !groqModels.contains(requestedModel)) {
             log.warn(
                     "Requested model '{}' is unavailable. Falling back to '{}'.",
                     requestedModel,
-                    availableModels.get(0)
+                    groqModels.get(0)
             );
-
-            requestedModel =
-                    availableModels.get(0);
+            requestedModel = groqModels.get(0);
         }
 
 
@@ -1141,42 +1224,28 @@ log.warn(
 
         String aiResponse;
 
+        // Any attachment is routed to Gemini 3.8 Flash. This keeps Groq
+        // exclusively responsible for normal text chat.
+        if (attachmentUrls != null && !attachmentUrls.isEmpty()) {
+            aiResponse = geminiService.generateResponse(
+                    message,
+                    conversationHistory,
+                    attachmentUrls
+            );
 
-        if (imageBase64 != null
-                && !imageBase64.isEmpty()) {
-
-            /*
-             * Images are supported only by:
-             *
-             * qwen/qwen3.8-27b
-             */
-            if (!VISION_MODEL.equals(
-                    requestedModel
-            )) {
-
-                throw new IllegalArgumentException(
-                        "Image uploads are supported only by Qwen Vision Pro."
-                );
-            }
-
-
-            aiResponse =
-                    groqService.generateResponseWithImages(
-                            message,
-                            conversationHistory,
-                            imageBase64,
-                            imageMimeTypes,
-                            requestedModel
-                    );
+        } else if (geminiRequested) {
+            aiResponse = geminiService.generateResponse(
+                    message,
+                    conversationHistory,
+                    List.of()
+            );
 
         } else {
-
-            aiResponse =
-                    groqService.generateResponse(
-                            message,
-                            conversationHistory,
-                            requestedModel
-                    );
+            aiResponse = groqService.generateResponse(
+                    message,
+                    conversationHistory,
+                    requestedModel
+            );
         }
 
 
@@ -1273,6 +1342,11 @@ log.warn(
                 new ArrayList<>(
                         groqService.getAvailableModels()
                 );
+
+        String geminiModel = geminiService.getModel();
+        if (!models.contains(geminiModel)) {
+            models.add(geminiModel);
+        }
 
 
         response.put(
