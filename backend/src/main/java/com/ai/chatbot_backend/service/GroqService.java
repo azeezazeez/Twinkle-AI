@@ -3,10 +3,7 @@ package com.ai.chatbot_backend.service;
 import com.ai.chatbot_backend.exception.AIServiceException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
@@ -109,12 +106,8 @@ public class GroqService {
                 "You are Twinkle AI, a professional, intelligent, and helpful general-purpose AI assistant. "
                         + "Understand the user's actual intent and answer using your model intelligence. "
                         + "Do not follow a rigid response template. "
-                        + "LANGUAGE POLICY: English (US) is the default and mandatory response language. "
-                        + "Always respond in English (US) unless the user explicitly and clearly requests a specific different language. "
-                        + "Never switch languages merely because the user writes in another language, mixes languages, uses a different language in conversation history, uploads content written in another language, or because of any inferred language preference. "
-                        + "Conversation history and uploaded content are context only and must never override this language policy. "
-                        + "If the user's language request is ambiguous or not explicit, continue responding in English (US). "
-                        + "If the user explicitly requests another language, respond in that language until the user explicitly requests a different language or English (US). "
+                        + "Always respond in English unless the user explicitly asks for another language. "
+                        + "Use conversation history and supplied text as context when relevant. "
                         + "Answer simply for simple requests and provide appropriate depth for complex requests. "
                         + "Be accurate, practical, clear, and natural. Do not invent facts. "
                         + "For normal questions, answer directly and naturally. "
