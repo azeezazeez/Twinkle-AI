@@ -622,6 +622,8 @@ export default function Chat({ user, onLogout }: Props) {
   const stopListening = useCallback(() => {
     const recorder = mediaRecorderRef.current;
     if (recorder && recorder.state !== 'inactive') {
+      // Ask the browser to flush the final audio chunk before stopping.
+      try { recorder.requestData(); } catch {}
       recorder.stop();
     } else {
       setIsListening(false);
@@ -681,17 +683,36 @@ export default function Chat({ user, onLogout }: Props) {
         audioChunksRef.current = [];
         if (chunks.length === 0) return;
 
-        const audioBlob = new Blob(chunks, { type: mimeType });
-        if (audioBlob.size === 0) return;
+        // Gemini expects a normal audio MIME type. Some browsers report
+        // codec parameters (for example audio/webm;codecs=opus), which can
+        // cause the backend/model to reject otherwise valid recordings.
+        const normalizedMimeType = mimeType.split(';')[0].trim() || 'audio/webm';
+        const audioBlob = new Blob(chunks, { type: normalizedMimeType });
+        if (audioBlob.size === 0) {
+          setIsTranscribing(false);
+          return;
+        }
 
         setIsTranscribing(true);
         try {
-          const transcript = await chatApi.transcribeAudio(audioBlob);
-          if (transcript) {
+          // Never leave the composer stuck in the transcribing state if the
+          // network/backend hangs.
+          const transcriptionTimeout = new Promise<string>((_, reject) => {
+            window.setTimeout(() => reject(new Error('Voice transcription timed out. Please try again.')), 30000);
+          });
+
+          const transcript = await Promise.race([
+            chatApi.transcribeAudio(audioBlob),
+            transcriptionTimeout,
+          ]);
+
+          if (transcript && transcript.trim()) {
             const base = speechBaseRef.current.trim();
-            const combined = base ? `${base} ${transcript}`.trim() : transcript.trim();
+            const combined = base ? `${base} ${transcript.trim()}`.trim() : transcript.trim();
             setInput(combined);
             speechBaseRef.current = combined;
+          } else {
+            alert('No speech was detected. Please try again.');
           }
         } catch (error: any) {
           console.error('Voice transcription failed:', error);
