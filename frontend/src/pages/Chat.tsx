@@ -537,6 +537,9 @@ export default function Chat({ user, onLogout }: Props) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const speechRecognitionRef = useRef<any>(null);
+  const speechLiveTextRef = useRef('');
+  const isListeningRef = useRef(false);
   const speechBaseRef = useRef('');
 
   // Theme
@@ -620,9 +623,18 @@ export default function Chat({ user, onLogout }: Props) {
   }, []);
 
   const stopListening = useCallback(() => {
+    isListeningRef.current = false;
+
+    // Stop live browser speech recognition first. The final recognition result
+    // is kept in speechLiveTextRef and is already shown in the composer.
+    const recognition = speechRecognitionRef.current;
+    speechRecognitionRef.current = null;
+    if (recognition) {
+      try { recognition.stop(); } catch {}
+    }
+
     const recorder = mediaRecorderRef.current;
     if (recorder && recorder.state !== 'inactive') {
-      // Ask the browser to flush the final audio chunk before stopping.
       try { recorder.requestData(); } catch {}
       recorder.stop();
     } else {
@@ -657,6 +669,8 @@ export default function Chat({ user, onLogout }: Props) {
       mediaStreamRef.current = stream;
       mediaRecorderRef.current = recorder;
       speechBaseRef.current = inputRef.current?.value || input;
+      speechLiveTextRef.current = '';
+      isListeningRef.current = true;
 
       recorder.ondataavailable = (event: BlobEvent) => {
         if (event.data && event.data.size > 0) {
@@ -666,10 +680,16 @@ export default function Chat({ user, onLogout }: Props) {
 
       recorder.onerror = (event: Event) => {
         console.error('Microphone recording error:', event);
+        isListeningRef.current = false;
         setIsListening(false);
         mediaRecorderRef.current = null;
         mediaStreamRef.current?.getTracks().forEach(track => track.stop());
         mediaStreamRef.current = null;
+        const recognition = speechRecognitionRef.current;
+        speechRecognitionRef.current = null;
+        if (recognition) {
+          try { recognition.abort(); } catch {}
+        }
         alert('The microphone recording failed. Please try again.');
       };
 
@@ -679,24 +699,37 @@ export default function Chat({ user, onLogout }: Props) {
         mediaStreamRef.current?.getTracks().forEach(track => track.stop());
         mediaStreamRef.current = null;
 
+        const liveTranscript = speechLiveTextRef.current.trim();
+
+        // Live SpeechRecognition is the primary path. When Chrome/Edge gives
+        // us the spoken text, do not wait for the Gemini upload at all.
+        // This also prevents the composer from getting stuck after Stop.
+        if (liveTranscript) {
+          setIsTranscribing(false);
+          speechBaseRef.current = `${speechBaseRef.current.trim()} ${liveTranscript}`.trim();
+          speechLiveTextRef.current = '';
+          setTimeout(() => inputRef.current?.focus(), 50);
+          return;
+        }
+
         const chunks = audioChunksRef.current;
         audioChunksRef.current = [];
-        if (chunks.length === 0) return;
+        if (chunks.length === 0) {
+          setIsTranscribing(false);
+          alert('No speech was detected. Please try again.');
+          return;
+        }
 
-        // Gemini expects a normal audio MIME type. Some browsers report
-        // codec parameters (for example audio/webm;codecs=opus), which can
-        // cause the backend/model to reject otherwise valid recordings.
         const normalizedMimeType = mimeType.split(';')[0].trim() || 'audio/webm';
         const audioBlob = new Blob(chunks, { type: normalizedMimeType });
         if (audioBlob.size === 0) {
           setIsTranscribing(false);
+          alert('No speech was detected. Please try again.');
           return;
         }
 
         setIsTranscribing(true);
         try {
-          // Never leave the composer stuck in the transcribing state if the
-          // network/backend hangs.
           const transcriptionTimeout = new Promise<string>((_, reject) => {
             window.setTimeout(() => reject(new Error('Voice transcription timed out. Please try again.')), 30000);
           });
@@ -727,14 +760,69 @@ export default function Chat({ user, onLogout }: Props) {
         }
       };
 
-      recorder.start();
+      // Browser speech recognition provides live/interim text while the
+      // MediaRecorder keeps a reliable audio fallback for browsers where live
+      // recognition is unavailable.
+      const SpeechRecognition =
+        (window as any).SpeechRecognition ||
+        (window as any).webkitSpeechRecognition;
+
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = navigator.language || 'en-US';
+        recognition.maxAlternatives = 1;
+
+        recognition.onresult = (event: any) => {
+          let transcript = '';
+          for (let i = 0; i < event.results.length; i += 1) {
+            transcript += event.results[i][0]?.transcript || '';
+          }
+
+          transcript = transcript.trim();
+          speechLiveTextRef.current = transcript;
+
+          const base = speechBaseRef.current.trim();
+          setInput(base ? `${base} ${transcript}`.trim() : transcript);
+        };
+
+        recognition.onerror = (event: any) => {
+          // Keep MediaRecorder running. If live recognition is unavailable on
+          // this browser/network, the recorded audio will be sent to Gemini
+          // when the user stops the microphone.
+          if (event?.error !== 'aborted' && event?.error !== 'no-speech') {
+            console.warn('Live speech recognition unavailable:', event?.error);
+          }
+        };
+
+        recognition.onend = () => {
+          // Chrome can end recognition after a period of silence even though
+          // the microphone is still recording. Restart it until the user stops.
+          if (isListeningRef.current && speechRecognitionRef.current === recognition) {
+            try { recognition.start(); } catch {}
+          }
+        };
+
+        speechRecognitionRef.current = recognition;
+        try {
+          recognition.start();
+        } catch (error) {
+          console.warn('Unable to start live speech recognition:', error);
+          speechRecognitionRef.current = null;
+        }
+      }
+
+      recorder.start(250);
       setIsListening(true);
       inputRef.current?.focus();
     } catch (error: any) {
       console.error('Microphone access failed:', error);
+      isListeningRef.current = false;
       mediaRecorderRef.current = null;
       mediaStreamRef.current?.getTracks().forEach(track => track.stop());
       mediaStreamRef.current = null;
+      speechRecognitionRef.current = null;
 
       if (error?.name === 'NotAllowedError' || error?.name === 'SecurityError') {
         alert('Microphone access was denied. Please allow microphone access for this site and try again.');
@@ -753,6 +841,13 @@ export default function Chat({ user, onLogout }: Props) {
 
   useEffect(() => {
     return () => {
+      isListeningRef.current = false;
+      const recognition = speechRecognitionRef.current;
+      speechRecognitionRef.current = null;
+      if (recognition) {
+        try { recognition.abort(); } catch {}
+      }
+
       const recorder = mediaRecorderRef.current;
       if (recorder && recorder.state !== 'inactive') recorder.stop();
       mediaStreamRef.current?.getTracks().forEach(track => track.stop());
