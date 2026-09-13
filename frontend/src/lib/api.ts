@@ -804,6 +804,17 @@ export const chatApi = {
      MULTIPART FILE CHAT
      ======================================================= */
 
+  getLiveTranscriptionToken: async (): Promise<string> => {
+    const response = await fetchWithAuth(
+      `${API_BASE}/chat/live-transcription-token`,
+      { method: 'GET' },
+      2
+    );
+
+    const data = response as { token?: string };
+    return typeof data?.token === 'string' ? data.token.trim() : '';
+  },
+
   transcribeAudio: async (audio: Blob): Promise<string> => {
     const formData = new FormData();
     const extension =
