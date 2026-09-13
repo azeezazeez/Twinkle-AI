@@ -804,6 +804,23 @@ export const chatApi = {
      MULTIPART FILE CHAT
      ======================================================= */
 
+  transcribeAudio: async (audio: Blob): Promise<string> => {
+    const formData = new FormData();
+    formData.append('audio', audio, 'voice-input.wav');
+
+    const response = await fetchWithAuth(
+      `${API_BASE}/chat/transcribe`,
+      {
+        method: 'POST',
+        body: formData,
+      },
+      2
+    );
+
+    const data = response as { text?: string };
+    return typeof data?.text === 'string' ? data.text.trim() : '';
+  },
+
   sendMessageWithFiles: async (
     message: string,
     sessionId: number | null,
