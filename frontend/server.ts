@@ -124,7 +124,7 @@ async function startServer(): Promise<void> {
 
   // CORS
   const ALLOWED_ORIGINS = new Set([
-    "https://nexus-smart-ai.vercel.app",
+    "https://Twinkle-smart-ai.vercel.app",
     "http://localhost:5173",
     "http://localhost:3000",
     "http://127.0.0.1:5173",
@@ -434,7 +434,7 @@ async function startServer(): Promise<void> {
     }
 
     const frontendUrl =
-      process.env.FRONTEND_URL ?? "https://nexus-smart-ai.vercel.app";
+      process.env.FRONTEND_URL ?? "https://Twinkle-smart-ai.vercel.app";
 
     res.json({ shareUrl: `${frontendUrl}/share/${session.shareToken}` });
   });
