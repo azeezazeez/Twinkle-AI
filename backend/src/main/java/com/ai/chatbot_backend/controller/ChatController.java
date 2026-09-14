@@ -1887,9 +1887,11 @@ log.warn(
 
             String prompt =
                     String.format(
-                            "Generate a very short, concise title (maximum 5-7 words) for a "
-                                    + "conversation that starts with: \"%s\". "
-                                    + "Return ONLY the title, no quotes, no explanation.",
+                            "Generate a concise, professional sidebar title (2-6 words) that captures the main topic or intent of the conversation. "
+                                    + "Use the user's first message as context: \"%s\". "
+                                    + "Write it naturally like a ChatGPT conversation title. "
+                                    + "Do not use generic words such as Chat, Question, Request, or Conversation. "
+                                    + "Return ONLY the title, with no quotes, punctuation, or explanation.",
                             truncated
                     );
 
