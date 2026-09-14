@@ -1,6 +1,6 @@
 package com.ai.chatbot_backend.repository;
 
-import com.ai.chatbot_backend.model.OTP;
+import com.ai.chatbot_backend.dto.OTP;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
