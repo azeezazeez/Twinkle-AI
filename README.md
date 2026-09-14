@@ -10,9 +10,6 @@
 
 🌐 **Live Demo:** https://twinkleai.vercel.app
 
-
-💻 **GitHub:** https://github.com/azeezazeez/Twinkle-AI
-
 </div>
 
 ---
