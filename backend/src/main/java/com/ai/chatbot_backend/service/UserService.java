@@ -45,20 +45,26 @@ public class UserService {
 
             user.setVerified(true);
 
-            user.setOtp(null);
-            user.setOtpExpiry(null);
+            /*
+             * IMPORTANT:
+             * OTP is stored in the otps table now.
+             * Do NOT use:
+             *
+             * user.setOtp(...)
+             * user.setOtpExpiry(...)
+             */
 
             userRepository.save(user);
 
             log.info(
-                    "User verified: {}",
+                    "User verified successfully: {}",
                     normalizedEmail
             );
 
         } catch (DataAccessException e) {
 
             log.error(
-                    "Database error marking verified: {}",
+                    "Database error marking user verified: {}",
                     e.getMessage(),
                     e
             );
@@ -74,9 +80,7 @@ public class UserService {
     // FIND BY EMAIL
     // ============================================================
 
-    public Optional<User> findByEmail(
-            String email
-    ) {
+    public Optional<User> findByEmail(String email) {
 
         try {
 
@@ -109,8 +113,14 @@ public class UserService {
 
         try {
 
+            if (username == null ||
+                    username.trim().isEmpty()) {
+
+                return Optional.empty();
+            }
+
             return userRepository.findByUsername(
-                    username
+                    username.trim()
             );
 
         } catch (DataAccessException e) {
@@ -138,8 +148,26 @@ public class UserService {
 
         try {
 
-            return userRepository.findByEmailOrUsername(
-                    emailOrUsername
+            if (emailOrUsername == null ||
+                    emailOrUsername.trim().isEmpty()) {
+
+                return Optional.empty();
+            }
+
+            String value =
+                    emailOrUsername.trim();
+
+            Optional<User> byEmail =
+                    userRepository.findByEmail(
+                            value.toLowerCase()
+                    );
+
+            if (byEmail.isPresent()) {
+                return byEmail;
+            }
+
+            return userRepository.findByUsername(
+                    value
             );
 
         } catch (DataAccessException e) {
@@ -158,12 +186,10 @@ public class UserService {
 
 
     // ============================================================
-    // EXISTS EMAIL
+    // EXISTS BY EMAIL
     // ============================================================
 
-    public boolean existsByEmail(
-            String email
-    ) {
+    public boolean existsByEmail(String email) {
 
         try {
 
@@ -187,17 +213,21 @@ public class UserService {
 
 
     // ============================================================
-    // EXISTS USERNAME
+    // EXISTS BY USERNAME
     // ============================================================
 
-    public boolean existsByUsername(
-            String username
-    ) {
+    public boolean existsByUsername(String username) {
 
         try {
 
+            if (username == null ||
+                    username.trim().isEmpty()) {
+
+                return false;
+            }
+
             return userRepository.existsByUsername(
-                    username
+                    username.trim()
             );
 
         } catch (DataAccessException e) {
@@ -219,9 +249,7 @@ public class UserService {
     // DELETE USER BY EMAIL
     // ============================================================
 
-    public void deleteByEmail(
-            String email
-    ) {
+    public void deleteByEmail(String email) {
 
         try {
 
@@ -258,6 +286,14 @@ public class UserService {
             String normalizedEmail =
                     normalizeEmail(email);
 
+            if (newPassword == null ||
+                    newPassword.isEmpty()) {
+
+                throw new AIServiceException(
+                        "New password is required"
+                );
+            }
+
             User user =
                     userRepository.findByEmail(
                             normalizedEmail
@@ -269,13 +305,15 @@ public class UserService {
 
             user.setPassword(newPassword);
 
-            user.setOtp(null);
-            user.setOtpExpiry(null);
+            /*
+             * OTP data is NOT stored on users.
+             * OTP verification is handled by OTPService.
+             */
 
             userRepository.save(user);
 
             log.info(
-                    "Password updated for: {}",
+                    "Password updated successfully for: {}",
                     normalizedEmail
             );
 
@@ -311,7 +349,6 @@ public class UserService {
                 );
             }
 
-
             String username =
                     request.getUsername();
 
@@ -326,7 +363,6 @@ public class UserService {
             username =
                     username.trim();
 
-
             if (username.contains("@")) {
 
                 throw new AIServiceException(
@@ -334,12 +370,10 @@ public class UserService {
                 );
             }
 
-
             String email =
                     normalizeEmail(
                             request.getEmail()
                     );
-
 
             if (request.getPassword() == null ||
                     request.getPassword().isEmpty()) {
@@ -384,8 +418,6 @@ public class UserService {
                             .email(email)
                             .password(request.getPassword())
                             .verified(false)
-                            .otp(null)
-                            .otpExpiry(null)
                             .build();
 
 
@@ -394,10 +426,11 @@ public class UserService {
 
 
             log.info(
-                    "User created - ID: {}, username: {}, email: {}",
+                    "User created - ID: {}, username: {}, email: {}, verified: {}",
                     user.getId(),
                     user.getUsername(),
-                    user.getEmail()
+                    user.getEmail(),
+                    user.isVerified()
             );
 
 
@@ -423,7 +456,6 @@ public class UserService {
             response.setCreatedAt(
                     user.getCreatedAt()
             );
-
 
             return response;
 
@@ -496,6 +528,10 @@ public class UserService {
                             .trim();
 
 
+            // ----------------------------------------------------
+            // FIND USER
+            // ----------------------------------------------------
+
             User user =
                     userRepository.findByEmail(
                             login.toLowerCase()
@@ -519,9 +555,14 @@ public class UserService {
             }
 
 
-            if (!user.getPassword().equals(
-                    request.getPassword()
-            )) {
+            // ----------------------------------------------------
+            // PASSWORD CHECK
+            // ----------------------------------------------------
+
+            if (user.getPassword() == null ||
+                    !user.getPassword().equals(
+                            request.getPassword()
+                    )) {
 
                 throw new AIServiceException(
                         "Invalid credentials"
@@ -566,12 +607,10 @@ public class UserService {
 
 
     // ============================================================
-    // GET USER
+    // GET USER BY ID
     // ============================================================
 
-    public User getUserById(
-            Long id
-    ) {
+    public User getUserById(Long id) {
 
         try {
 
@@ -601,9 +640,7 @@ public class UserService {
     // NORMALIZE EMAIL
     // ============================================================
 
-    private String normalizeEmail(
-            String email
-    ) {
+    private String normalizeEmail(String email) {
 
         if (email == null ||
                 email.trim().isEmpty()) {
