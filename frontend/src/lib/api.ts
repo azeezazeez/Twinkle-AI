@@ -803,13 +803,6 @@ export const chatApi = {
   /* =======================================================
      MULTIPART FILE CHAT
      ======================================================= */
-      2
-    );
-
-    const data = response as { text?: string };
-    return typeof data?.text === 'string' ? data.text.trim() : '';
-  },
-
   sendMessageWithFiles: async (
     message: string,
     sessionId: number | null,
