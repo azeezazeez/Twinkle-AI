@@ -2,12 +2,14 @@ package com.ai.chatbot_backend.service;
 
 import com.ai.chatbot_backend.dto.LoginRequest;
 import com.ai.chatbot_backend.dto.RegisterRequest;
-import com.ai.chatbot_backend.dto.UserResponse;
 import com.ai.chatbot_backend.dto.User;
+import com.ai.chatbot_backend.dto.UserResponse;
 import com.ai.chatbot_backend.exception.AIServiceException;
 import com.ai.chatbot_backend.repository.UserRepository;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
@@ -17,174 +19,585 @@ import java.util.Optional;
 @RequiredArgsConstructor
 @Slf4j
 public class UserService {
+
     private final UserRepository userRepository;
 
+
+    // ============================================================
+    // MARK USER AS VERIFIED
+    // ============================================================
+
     public void markAsVerified(String email) {
+
         try {
-            User user = userRepository.findByEmail(email)
-                    .orElseThrow(() -> new AIServiceException("User not found"));
+
+            String normalizedEmail =
+                    normalizeEmail(email);
+
+            User user = userRepository.findByEmail(normalizedEmail)
+                    .orElseThrow(() ->
+                            new AIServiceException("User not found")
+                    );
+
             user.setVerified(true);
+
+            // Clear OTP data after successful verification
+            user.setOtp(null);
+            user.setOtpExpiry(null);
+
             userRepository.save(user);
-            log.info("✅ User marked as verified: {}", email);
+
+            log.info(
+                    "User marked as verified: {}",
+                    normalizedEmail
+            );
+
         } catch (DataAccessException e) {
-            log.error("Database error marking verified: {}", e.getMessage(), e);
-            throw new AIServiceException("Server error, please try again later");
+
+            log.error(
+                    "Database error marking user verified: {}",
+                    e.getMessage(),
+                    e
+            );
+
+            throw new AIServiceException(
+                    "Server error, please try again later"
+            );
         }
     }
+
+
+    // ============================================================
+    // FIND BY EMAIL
+    // ============================================================
 
     public Optional<User> findByEmail(String email) {
+
         try {
-            log.debug("Finding user by email: {}", email);
-            return userRepository.findByEmail(email);
+
+            String normalizedEmail =
+                    normalizeEmail(email);
+
+            return userRepository.findByEmail(
+                    normalizedEmail
+            );
+
         } catch (DataAccessException e) {
-            log.error("Database error finding by email: {}", e.getMessage(), e);
-            throw new AIServiceException("Server error, please try again later");
+
+            log.error(
+                    "Database error finding user by email: {}",
+                    e.getMessage(),
+                    e
+            );
+
+            throw new AIServiceException(
+                    "Server error, please try again later"
+            );
         }
     }
+
+
+    // ============================================================
+    // FIND BY USERNAME
+    // ============================================================
 
     public Optional<User> findByUsername(String username) {
+
         try {
-            log.debug("Finding user by username: {}", username);
-            return userRepository.findByUsername(username);
+
+            return userRepository.findByUsername(
+                    username
+            );
+
         } catch (DataAccessException e) {
-            log.error("Database error finding by username: {}", e.getMessage(), e);
-            throw new AIServiceException("Server error, please try again later");
+
+            log.error(
+                    "Database error finding user by username: {}",
+                    e.getMessage(),
+                    e
+            );
+
+            throw new AIServiceException(
+                    "Server error, please try again later"
+            );
         }
     }
 
-    public Optional<User> findByEmailOrUsername(String emailOrUsername) {
+
+    // ============================================================
+    // FIND BY EMAIL OR USERNAME
+    // ============================================================
+
+    public Optional<User> findByEmailOrUsername(
+            String emailOrUsername
+    ) {
+
         try {
-            log.debug("Finding user by email or username: {}", emailOrUsername);
-            return userRepository.findByEmailOrUsername(emailOrUsername);
+
+            return userRepository.findByEmailOrUsername(
+                    emailOrUsername
+            );
+
         } catch (DataAccessException e) {
-            log.error("Database error finding by email/username: {}", e.getMessage(), e);
-            throw new AIServiceException("Server error, please try again later");
+
+            log.error(
+                    "Database error finding user: {}",
+                    e.getMessage(),
+                    e
+            );
+
+            throw new AIServiceException(
+                    "Server error, please try again later"
+            );
         }
     }
+
+
+    // ============================================================
+    // CHECK EMAIL
+    // ============================================================
 
     public boolean existsByEmail(String email) {
+
         try {
-            return userRepository.existsByEmail(email);
+
+            return userRepository.existsByEmail(
+                    normalizeEmail(email)
+            );
+
         } catch (DataAccessException e) {
-            log.error("Database error checking email existence: {}", e.getMessage(), e);
-            throw new AIServiceException("Server error, please try again later");
+
+            log.error(
+                    "Database error checking email: {}",
+                    e.getMessage(),
+                    e
+            );
+
+            throw new AIServiceException(
+                    "Server error, please try again later"
+            );
         }
     }
+
+
+    // ============================================================
+    // CHECK USERNAME
+    // ============================================================
 
     public boolean existsByUsername(String username) {
+
         try {
-            return userRepository.existsByUsername(username);
+
+            return userRepository.existsByUsername(
+                    username
+            );
+
         } catch (DataAccessException e) {
-            log.error("Database error checking username existence: {}", e.getMessage(), e);
-            throw new AIServiceException("Server error, please try again later");
+
+            log.error(
+                    "Database error checking username: {}",
+                    e.getMessage(),
+                    e
+            );
+
+            throw new AIServiceException(
+                    "Server error, please try again later"
+            );
         }
     }
 
-    public void updatePassword(String email, String newPassword) {
+
+    // ============================================================
+    // UPDATE PASSWORD
+    // ============================================================
+
+    public void updatePassword(
+            String email,
+            String newPassword
+    ) {
+
         try {
-            User user = userRepository.findByEmail(email)
-                    .orElseThrow(() -> new AIServiceException("User not found"));
+
+            String normalizedEmail =
+                    normalizeEmail(email);
+
+            User user = userRepository.findByEmail(
+                    normalizedEmail
+            ).orElseThrow(() ->
+                    new AIServiceException("User not found")
+            );
+
             user.setPassword(newPassword);
+
+            // Password reset is successful, so OTP is no longer needed
+            user.setOtp(null);
+            user.setOtpExpiry(null);
+
             userRepository.save(user);
-            log.info("Password updated for user: {}", email);
+
+            log.info(
+                    "Password updated for user: {}",
+                    normalizedEmail
+            );
+
         } catch (DataAccessException e) {
-            log.error("Database error updating password: {}", e.getMessage(), e);
-            throw new AIServiceException("Server error, please try again later");
+
+            log.error(
+                    "Database error updating password: {}",
+                    e.getMessage(),
+                    e
+            );
+
+            throw new AIServiceException(
+                    "Server error, please try again later"
+            );
         }
     }
 
-    public UserResponse register(RegisterRequest request) {
+
+    // ============================================================
+    // REGISTER USER
+    // ============================================================
+    //
+    // IMPORTANT:
+    // User is created BEFORE OTP verification.
+    //
+    // verified = false
+    //
+    // OTPService will later put:
+    //
+    // users.otp
+    // users.otp_expiry
+    //
+    // ============================================================
+
+    public UserResponse register(
+            RegisterRequest request
+    ) {
+
         log.info("=== REGISTER ATTEMPT ===");
-        log.info("Username received: '{}'", request.getUsername());
-        log.info("Email received: '{}'", request.getEmail());
-        log.info("FullName received: '{}'", request.getFullName());
 
         try {
-            if (request.getUsername() == null || request.getUsername().trim().isEmpty()) {
-                throw new AIServiceException("Username is required");
-            }
-            if (request.getUsername().contains("@")) {
-                log.warn("Username contains @ symbol - invalid");
-                throw new AIServiceException("Username cannot be an email address. Please choose a different username");
+
+            // ----------------------------------------------------
+            // Validate username
+            // ----------------------------------------------------
+
+            if (request == null) {
+                throw new AIServiceException(
+                        "Registration request is required"
+                );
             }
 
-            boolean usernameExists = userRepository.existsByUsername(request.getUsername());
-            if (usernameExists) {
-                throw new AIServiceException("Username already exists");
+            if (request.getUsername() == null ||
+                    request.getUsername().trim().isEmpty()) {
+
+                throw new AIServiceException(
+                        "Username is required"
+                );
             }
 
-            boolean emailExists = userRepository.existsByEmail(request.getEmail());
-            if (emailExists) {
-                throw new AIServiceException("Email already exists");
+            String username =
+                    request.getUsername().trim();
+
+            if (username.contains("@")) {
+
+                throw new AIServiceException(
+                        "Username cannot be an email address. Please choose a different username"
+                );
             }
+
+
+            // ----------------------------------------------------
+            // Validate email
+            // ----------------------------------------------------
+
+            String email =
+                    normalizeEmail(request.getEmail());
+
+
+            // ----------------------------------------------------
+            // Validate password
+            // ----------------------------------------------------
+
+            if (request.getPassword() == null ||
+                    request.getPassword().isEmpty()) {
+
+                throw new AIServiceException(
+                        "Password is required"
+                );
+            }
+
+
+            // ----------------------------------------------------
+            // Check duplicate username
+            // ----------------------------------------------------
+
+            if (userRepository.existsByUsername(username)) {
+
+                throw new AIServiceException(
+                        "Username already exists"
+                );
+            }
+
+
+            // ----------------------------------------------------
+            // Check duplicate email
+            // ----------------------------------------------------
+
+            if (userRepository.existsByEmail(email)) {
+
+                throw new AIServiceException(
+                        "Email already exists"
+                );
+            }
+
+
+            // ----------------------------------------------------
+            // CREATE USER
+            // ----------------------------------------------------
 
             User user = User.builder()
-                    .username(request.getUsername().trim())
-                    .email(request.getEmail().trim().toLowerCase())
+                    .username(username)
+                    .email(email)
                     .password(request.getPassword())
-                    .fullName(request.getFullName())
                     .verified(false)
+                    .otp(null)
+                    .otpExpiry(null)
                     .build();
 
-            user = userRepository.save(user);
-            log.info("✅ User saved successfully - ID: {}, Username: {}, Email: {}",
-                    user.getId(), user.getUsername(), user.getEmail());
 
-            UserResponse response = new UserResponse();
+            user = userRepository.save(user);
+
+
+            log.info(
+                    "User created successfully - ID: {}, Username: {}, Email: {}",
+                    user.getId(),
+                    user.getUsername(),
+                    user.getEmail()
+            );
+
+
+            // ----------------------------------------------------
+            // BUILD RESPONSE
+            // ----------------------------------------------------
+
+            UserResponse response =
+                    new UserResponse();
+
             response.setId(user.getId());
             response.setUsername(user.getUsername());
             response.setEmail(user.getEmail());
-            response.setFullName(user.getFullName());
             response.setCreatedAt(user.getCreatedAt());
 
             return response;
+
+
         } catch (DataAccessException e) {
-            log.error("❌ Database error during registration: {}", e.getMessage(), e);
-            throw new AIServiceException("Server error, please try again later");
+
+            log.error(
+                    "Database error during registration: {}",
+                    e.getMessage(),
+                    e
+            );
+
+            throw new AIServiceException(
+                    "Server error, please try again later"
+            );
+
         } catch (AIServiceException e) {
+
             throw e;
+
         } catch (Exception e) {
-            log.error("❌ REGISTER FAILED - Error: {}", e.getMessage(), e);
-            throw new AIServiceException("Registration failed: " + e.getMessage());
+
+            log.error(
+                    "REGISTER FAILED: {}",
+                    e.getMessage(),
+                    e
+            );
+
+            throw new AIServiceException(
+                    "Registration failed: " +
+                            e.getMessage()
+            );
         }
     }
+
+
+    // ============================================================
+    // LOGIN
+    // ============================================================
 
     public User login(LoginRequest request) {
+
         log.info("=== LOGIN ATTEMPT ===");
-        log.info("Login input: '{}'", request.getUsername());
 
         try {
-            User user = userRepository.findByEmail(request.getUsername()).orElse(null);
-            if (user == null) {
-                log.info("User not found by email, trying username...");
-                user = userRepository.findByUsername(request.getUsername()).orElse(null);
-            }
-            if (user == null) {
-                log.error("❌ User not found with: {}", request.getUsername());
-                throw new AIServiceException("Invalid credentials");
+
+            if (request == null ||
+                    request.getUsername() == null ||
+                    request.getUsername().trim().isEmpty()) {
+
+                throw new AIServiceException(
+                        "Email or username is required"
+                );
             }
 
-            log.info("✅ Found user - Username: {}, Email: {}", user.getUsername(), user.getEmail());
-            if (!user.getPassword().equals(request.getPassword())) {
-                log.error("❌ Password mismatch for user: {}", user.getUsername());
-                throw new AIServiceException("Invalid credentials");
+            if (request.getPassword() == null ||
+                    request.getPassword().isEmpty()) {
+
+                throw new AIServiceException(
+                        "Password is required"
+                );
             }
 
-            log.info("✅ LOGIN SUCCESS for user: {}", user.getUsername());
+
+            String login =
+                    request.getUsername().trim();
+
+
+            // ----------------------------------------------------
+            // Try email first
+            // ----------------------------------------------------
+
+            User user =
+                    userRepository.findByEmail(
+                            login.toLowerCase()
+                    ).orElse(null);
+
+
+            // ----------------------------------------------------
+            // Try username
+            // ----------------------------------------------------
+
+            if (user == null) {
+
+                user =
+                        userRepository.findByUsername(
+                                login
+                        ).orElse(null);
+            }
+
+
+            if (user == null) {
+
+                log.warn(
+                        "User not found with: {}",
+                        login
+                );
+
+                throw new AIServiceException(
+                        "Invalid credentials"
+                );
+            }
+
+
+            // ----------------------------------------------------
+            // Password check
+            // ----------------------------------------------------
+
+            if (!user.getPassword().equals(
+                    request.getPassword()
+            )) {
+
+                log.warn(
+                        "Password mismatch for user: {}",
+                        user.getUsername()
+                );
+
+                throw new AIServiceException(
+                        "Invalid credentials"
+                );
+            }
+
+
+            // ----------------------------------------------------
+            // EMAIL VERIFICATION CHECK
+            // ----------------------------------------------------
+
+            if (!user.isVerified()) {
+
+                log.warn(
+                        "Login rejected - email not verified: {}",
+                        user.getEmail()
+                );
+
+                throw new AIServiceException(
+                        "Please verify your email before logging in"
+                );
+            }
+
+
+            log.info(
+                    "LOGIN SUCCESS for user: {}",
+                    user.getUsername()
+            );
+
             return user;
+
+
         } catch (DataAccessException e) {
-            log.error("Database error during login: {}", e.getMessage(), e);
-            throw new AIServiceException("Server error, please try again later");
+
+            log.error(
+                    "Database error during login: {}",
+                    e.getMessage(),
+                    e
+            );
+
+            throw new AIServiceException(
+                    "Server error, please try again later"
+            );
         }
     }
 
+
+    // ============================================================
+    // GET USER BY ID
+    // ============================================================
+
     public User getUserById(Long id) {
+
         try {
+
             return userRepository.findById(id)
-                    .orElseThrow(() -> new AIServiceException("User not found"));
+                    .orElseThrow(() ->
+                            new AIServiceException(
+                                    "User not found"
+                            )
+                    );
+
         } catch (DataAccessException e) {
-            log.error("Database error fetching user by id: {}", e.getMessage(), e);
-            throw new AIServiceException("Server error, please try again later");
+
+            log.error(
+                    "Database error fetching user by id: {}",
+                    e.getMessage(),
+                    e
+            );
+
+            throw new AIServiceException(
+                    "Server error, please try again later"
+            );
         }
+    }
+
+
+    // ============================================================
+    // NORMALIZE EMAIL
+    // ============================================================
+
+    private String normalizeEmail(String email) {
+
+        if (email == null ||
+                email.trim().isEmpty()) {
+
+            throw new AIServiceException(
+                    "Email is required"
+            );
+        }
+
+        return email
+                .trim()
+                .toLowerCase();
     }
 }
