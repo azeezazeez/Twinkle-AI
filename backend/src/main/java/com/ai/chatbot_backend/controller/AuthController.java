@@ -48,7 +48,12 @@ public class AuthController {
 
         try {
 
+            // ----------------------------------------------------
+            // VALIDATION
+            // ----------------------------------------------------
+
             if (request == null) {
+
                 return badRequest(
                         "Login request is required"
                 );
@@ -75,9 +80,25 @@ public class AuthController {
             }
 
 
+            // ----------------------------------------------------
+            // LOGIN
+            // ----------------------------------------------------
+
             User user =
                     userService.login(request);
 
+
+            if (user == null) {
+
+                return unauthorized(
+                        "Invalid credentials"
+                );
+            }
+
+
+            // ----------------------------------------------------
+            // CREATE SESSION
+            // ----------------------------------------------------
 
             HttpSession session =
                     httpRequest.getSession(true);
@@ -88,11 +109,16 @@ public class AuthController {
                     user
             );
 
+
             session.setAttribute(
                     "userId",
                     user.getId()
             );
 
+
+            // ----------------------------------------------------
+            // RESPONSE
+            // ----------------------------------------------------
 
             Map<String, Object> response =
                     new HashMap<>();
@@ -103,14 +129,22 @@ public class AuthController {
                     true
             );
 
+
             response.put(
                     "message",
                     "Login successful"
             );
 
+
             response.put(
                     "user",
                     buildUserData(user)
+            );
+
+
+            log.info(
+                    "Login successful for username: {}",
+                    user.getUsername()
             );
 
 
@@ -127,11 +161,46 @@ public class AuthController {
                     e
             );
 
-            return unauthorized(
-                    e.getMessage() != null
-                            ? e.getMessage()
-                            : "Invalid credentials"
-            );
+
+            /*
+             * IMPORTANT:
+             *
+             * Do NOT convert every exception into 401.
+             *
+             * 401 should represent authentication failure.
+             * Database/server errors should be 500.
+             */
+
+            String message =
+                    e.getMessage();
+
+
+            if (message != null &&
+                    (
+                            message.equalsIgnoreCase(
+                                    "Invalid credentials"
+                            )
+                            ||
+                            message.equalsIgnoreCase(
+                                    "Please verify your email before logging in"
+                            )
+                    )) {
+
+                return unauthorized(
+                        message
+                );
+            }
+
+
+            return ResponseEntity
+                    .status(
+                            HttpStatus.INTERNAL_SERVER_ERROR
+                    )
+                    .body(
+                            errorResponse(
+                                    "Unable to login. Please try again."
+                            )
+                    );
         }
     }
 
@@ -146,7 +215,13 @@ public class AuthController {
             HttpServletRequest httpRequest
     ) {
 
+        String email = null;
+
         try {
+
+            // ----------------------------------------------------
+            // VALIDATION
+            // ----------------------------------------------------
 
             if (request == null) {
 
@@ -156,7 +231,7 @@ public class AuthController {
             }
 
 
-            String email =
+            email =
                     normalizeEmail(
                             request.getEmail()
                     );
@@ -197,7 +272,7 @@ public class AuthController {
 
 
             // ----------------------------------------------------
-            // DUPLICATE CHECK
+            // DUPLICATE EMAIL
             // ----------------------------------------------------
 
             if (userService.existsByEmail(email)) {
@@ -207,6 +282,10 @@ public class AuthController {
                 );
             }
 
+
+            // ----------------------------------------------------
+            // DUPLICATE USERNAME
+            // ----------------------------------------------------
 
             if (userService.existsByUsername(username)) {
 
@@ -221,7 +300,7 @@ public class AuthController {
 
 
             // ----------------------------------------------------
-            // CREATE USER FIRST
+            // CREATE USER
             // ----------------------------------------------------
 
             UserResponse userResponse;
@@ -242,6 +321,7 @@ public class AuthController {
                         email
                 );
 
+
                 return badRequest(
                         "Email or username already registered"
                 );
@@ -249,7 +329,7 @@ public class AuthController {
 
 
             // ----------------------------------------------------
-            // CREATE SESSION
+            // CREATE PENDING REGISTRATION SESSION
             // ----------------------------------------------------
 
             HttpSession session =
@@ -263,7 +343,7 @@ public class AuthController {
 
 
             // ----------------------------------------------------
-            // GENERATE / SAVE / SEND OTP
+            // GENERATE + SAVE + SEND OTP
             // ----------------------------------------------------
 
             try {
@@ -284,10 +364,26 @@ public class AuthController {
                 );
 
 
-                // Delete incomplete user
-                userService.deleteByEmail(
-                        email
-                );
+                /*
+                 * User was created but OTP could not be delivered.
+                 * Remove the incomplete registration.
+                 */
+
+                try {
+
+                    userService.deleteByEmail(
+                            email
+                    );
+
+                } catch (Exception deleteException) {
+
+                    log.error(
+                            "Failed to delete incomplete user {}: {}",
+                            email,
+                            deleteException.getMessage(),
+                            deleteException
+                    );
+                }
 
 
                 clearPendingRegistration(
@@ -307,6 +403,10 @@ public class AuthController {
             }
 
 
+            // ----------------------------------------------------
+            // SUCCESS
+            // ----------------------------------------------------
+
             Map<String, Object> response =
                     new HashMap<>();
 
@@ -316,10 +416,12 @@ public class AuthController {
                     true
             );
 
+
             response.put(
                     "message",
                     "OTP sent successfully. Please verify your email."
             );
+
 
             response.put(
                     "email",
@@ -335,10 +437,12 @@ public class AuthController {
         } catch (Exception e) {
 
             log.error(
-                    "Signup failed: {}",
+                    "Signup failed for {}: {}",
+                    email,
                     e.getMessage(),
                     e
             );
+
 
             return ResponseEntity
                     .status(
@@ -366,6 +470,10 @@ public class AuthController {
         String email = null;
 
         try {
+
+            // ----------------------------------------------------
+            // VALIDATION
+            // ----------------------------------------------------
 
             if (request == null) {
 
@@ -428,10 +536,17 @@ public class AuthController {
                     );
 
 
-            if (pendingEmail == null ||
-                    !email.equals(
-                            normalizeEmail(pendingEmail)
-                    )) {
+            if (pendingEmail == null) {
+
+                return badRequest(
+                        "Registration session expired. Please sign up again."
+                );
+            }
+
+
+            if (!email.equals(
+                    normalizeEmail(pendingEmail)
+            )) {
 
                 return badRequest(
                         "Email verification mismatch. Please sign up again."
@@ -461,6 +576,10 @@ public class AuthController {
                     userOptional.get();
 
 
+            // ----------------------------------------------------
+            // CHECK ALREADY VERIFIED
+            // ----------------------------------------------------
+
             if (user.isVerified()) {
 
                 return badRequest(
@@ -489,7 +608,28 @@ public class AuthController {
 
 
             // ----------------------------------------------------
-            // RELOAD VERIFIED USER
+            // MARK USER VERIFIED
+            // ----------------------------------------------------
+
+            /*
+             * IMPORTANT:
+             *
+             * OTP is stored in the otps table.
+             *
+             * User verification state is stored in:
+             *
+             * users.is_verified
+             *
+             * Do NOT store OTP inside users.
+             */
+
+            userService.markAsVerified(
+                    email
+            );
+
+
+            // ----------------------------------------------------
+            // LOAD VERIFIED USER
             // ----------------------------------------------------
 
             User authenticatedUser =
@@ -503,7 +643,7 @@ public class AuthController {
 
 
             // ----------------------------------------------------
-            // CLEAR PENDING SESSION DATA
+            // CLEAR PENDING REGISTRATION
             // ----------------------------------------------------
 
             clearPendingRegistration(
@@ -519,6 +659,7 @@ public class AuthController {
                     "user",
                     authenticatedUser
             );
+
 
             session.setAttribute(
                     "userId",
@@ -539,10 +680,12 @@ public class AuthController {
                     true
             );
 
+
             response.put(
                     "message",
                     "Email verified and registration complete!"
             );
+
 
             response.put(
                     "user",
@@ -572,6 +715,7 @@ public class AuthController {
                     e
             );
 
+
             return ResponseEntity
                     .status(
                             HttpStatus.INTERNAL_SERVER_ERROR
@@ -591,7 +735,8 @@ public class AuthController {
 
     @PostMapping("/resend-otp")
     public ResponseEntity<Map<String, Object>> resendOtp(
-            @RequestBody Map<String, String> request
+            @RequestBody Map<String, String> request,
+            HttpServletRequest httpRequest
     ) {
 
         try {
@@ -618,6 +763,10 @@ public class AuthController {
             }
 
 
+            // ----------------------------------------------------
+            // CHECK USER
+            // ----------------------------------------------------
+
             Optional<User> userOptional =
                     userService.findByEmail(
                             email
@@ -636,6 +785,10 @@ public class AuthController {
                     userOptional.get();
 
 
+            // ----------------------------------------------------
+            // ALREADY VERIFIED
+            // ----------------------------------------------------
+
             if (user.isVerified()) {
 
                 return badRequest(
@@ -644,10 +797,32 @@ public class AuthController {
             }
 
 
+            // ----------------------------------------------------
+            // GENERATE / SEND NEW OTP
+            // ----------------------------------------------------
+
             otpService.resendOtp(
                     email
             );
 
+
+            // ----------------------------------------------------
+            // UPDATE SESSION
+            // ----------------------------------------------------
+
+            HttpSession session =
+                    httpRequest.getSession(true);
+
+
+            session.setAttribute(
+                    PENDING_REGISTRATION_EMAIL,
+                    email
+            );
+
+
+            // ----------------------------------------------------
+            // RESPONSE
+            // ----------------------------------------------------
 
             Map<String, Object> response =
                     new HashMap<>();
@@ -658,10 +833,12 @@ public class AuthController {
                     true
             );
 
+
             response.put(
                     "message",
                     "OTP resent successfully"
             );
+
 
             response.put(
                     "email",
@@ -679,10 +856,11 @@ public class AuthController {
         ) {
 
             log.error(
-                    "Resend OTP failed: {}",
+                    "Resend OTP delivery failed: {}",
                     e.getMessage(),
                     e
             );
+
 
             return ResponseEntity
                     .status(
@@ -694,6 +872,7 @@ public class AuthController {
                             )
                     );
 
+
         } catch (Exception e) {
 
             log.error(
@@ -701,6 +880,7 @@ public class AuthController {
                     e.getMessage(),
                     e
             );
+
 
             return ResponseEntity
                     .status(
@@ -776,6 +956,7 @@ public class AuthController {
                     e
             );
 
+
             return ResponseEntity
                     .status(
                             HttpStatus.INTERNAL_SERVER_ERROR
@@ -805,6 +986,7 @@ public class AuthController {
 
 
             if (session != null) {
+
                 session.invalidate();
             }
 
@@ -817,6 +999,7 @@ public class AuthController {
                     "success",
                     true
             );
+
 
             response.put(
                     "message",
@@ -836,6 +1019,7 @@ public class AuthController {
                     e.getMessage(),
                     e
             );
+
 
             return ResponseEntity
                     .status(
@@ -898,6 +1082,7 @@ public class AuthController {
                     true
             );
 
+
             response.put(
                     "user",
                     buildUserData(user)
@@ -916,6 +1101,7 @@ public class AuthController {
                     e.getMessage(),
                     e
             );
+
 
             return ResponseEntity
                     .status(
@@ -963,6 +1149,10 @@ public class AuthController {
             }
 
 
+            // ----------------------------------------------------
+            // FIND USER
+            // ----------------------------------------------------
+
             Optional<User> user =
                     userService.findByEmail(
                             email
@@ -983,11 +1173,19 @@ public class AuthController {
             }
 
 
+            // ----------------------------------------------------
+            // SEND RESET OTP
+            // ----------------------------------------------------
+
             otpService
                     .generateAndSendPasswordResetOtp(
                             email
                     );
 
+
+            // ----------------------------------------------------
+            // RESPONSE
+            // ----------------------------------------------------
 
             Map<String, Object> response =
                     new HashMap<>();
@@ -998,10 +1196,12 @@ public class AuthController {
                     true
             );
 
+
             response.put(
                     "message",
                     "Password reset OTP sent to your email"
             );
+
 
             response.put(
                     "email",
@@ -1024,6 +1224,7 @@ public class AuthController {
                     e
             );
 
+
             return ResponseEntity
                     .status(
                             HttpStatus.BAD_GATEWAY
@@ -1034,6 +1235,7 @@ public class AuthController {
                             )
                     );
 
+
         } catch (Exception e) {
 
             log.error(
@@ -1041,6 +1243,7 @@ public class AuthController {
                     e.getMessage(),
                     e
             );
+
 
             return ResponseEntity
                     .status(
@@ -1118,6 +1321,10 @@ public class AuthController {
                     otpCode.trim();
 
 
+            // ----------------------------------------------------
+            // VALIDATE RESET OTP
+            // ----------------------------------------------------
+
             boolean isValid =
                     otpService.validatePasswordResetOtp(
                             email,
@@ -1133,11 +1340,19 @@ public class AuthController {
             }
 
 
+            // ----------------------------------------------------
+            // UPDATE PASSWORD
+            // ----------------------------------------------------
+
             userService.updatePassword(
                     email,
                     newPassword
             );
 
+
+            // ----------------------------------------------------
+            // RESPONSE
+            // ----------------------------------------------------
 
             Map<String, Object> response =
                     new HashMap<>();
@@ -1147,6 +1362,7 @@ public class AuthController {
                     "success",
                     true
             );
+
 
             response.put(
                     "message",
@@ -1166,6 +1382,7 @@ public class AuthController {
                     e.getMessage(),
                     e
             );
+
 
             return ResponseEntity
                     .status(
@@ -1193,6 +1410,7 @@ public class AuthController {
 
 
         if (user == null) {
+
             return userData;
         }
 
@@ -1202,6 +1420,7 @@ public class AuthController {
                 user.getId()
         );
 
+
         userData.put(
                 "username",
                 safeString(
@@ -1209,12 +1428,14 @@ public class AuthController {
                 )
         );
 
+
         userData.put(
                 "email",
                 safeString(
                         user.getEmail()
                 )
         );
+
 
         userData.put(
                 "verified",
@@ -1235,8 +1456,10 @@ public class AuthController {
     ) {
 
         if (email == null) {
+
             return "";
         }
+
 
         return email
                 .trim()
@@ -1253,8 +1476,10 @@ public class AuthController {
     ) {
 
         if (session == null) {
+
             return;
         }
+
 
         session.removeAttribute(
                 PENDING_REGISTRATION_EMAIL
@@ -1273,15 +1498,18 @@ public class AuthController {
         Map<String, Object> response =
                 new HashMap<>();
 
+
         response.put(
                 "success",
                 false
         );
 
+
         response.put(
                 "message",
                 message
         );
+
 
         return response;
     }
