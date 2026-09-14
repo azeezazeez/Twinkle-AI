@@ -130,6 +130,7 @@ export default function Signup({ onSignup }: Props) {
               className="w-full px-4 md:px-5 py-3 md:py-4 bg-[--surface] border border-[--border] rounded-xl md:rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm md:text-base text-[--text-main] placeholder:text-[--text-muted]/30"
               placeholder="username"
               autoComplete="username"
+              data-1p-ignore="true"
               required
             />
           </div>
