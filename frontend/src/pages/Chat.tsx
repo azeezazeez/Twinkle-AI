@@ -1502,23 +1502,24 @@ const cleanMessageContent = (content: unknown): string => {
         onMobileClose={() => setMobileOpen(false)}
       />
       <main className="relative flex h-full min-h-0 min-w-0 w-full max-w-full flex-1 flex-col overflow-hidden bg-transparent">
-        {/* Mobile header: hamburger, centered Twinkle, new-chat */}
-        <header className="lg:hidden absolute top-0 inset-x-0 z-[10000] h-14 flex items-center justify-between px-3 bg-white/95 dark:bg-zinc-950/95 border-b border-zinc-200/80 dark:border-zinc-800/80 backdrop-blur-xl">
+        <header
+          className="lg:hidden absolute top-0 inset-x-0 z-[9997] h-14 flex items-center justify-between px-3 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800"
+        >
           <button
             type="button"
             onClick={() => setMobileOpen(true)}
             aria-label="Open sidebar"
-            className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-100 dark:active:bg-zinc-800 transition-colors"
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-700 dark:text-zinc-200"
           >
             <span className="sr-only">Open sidebar</span>
-            <span className="flex flex-col gap-[4px] items-center justify-center" aria-hidden="true">
-              <span className="block w-[18px] h-[1.5px] rounded-full bg-current" />
-              <span className="block w-[18px] h-[1.5px] rounded-full bg-current" />
-              <span className="block w-[18px] h-[1.5px] rounded-full bg-current" />
+            <span className="flex flex-col gap-1" aria-hidden="true">
+              <span className="w-[18px] h-[2px] bg-current rounded-full" />
+              <span className="w-[18px] h-[2px] bg-current rounded-full" />
+              <span className="w-[18px] h-[2px] bg-current rounded-full" />
             </span>
           </button>
 
-          <span className="absolute left-1/2 -translate-x-1/2 pointer-events-none text-base font-medium tracking-tight text-zinc-900/90 dark:text-white/90">
+          <span className="absolute left-1/2 -translate-x-1/2 pointer-events-none text-base font-medium text-zinc-900 dark:text-white">
             Twinkle
           </span>
 
@@ -1529,12 +1530,11 @@ const cleanMessageContent = (content: unknown): string => {
               setMobileOpen(false);
             }}
             aria-label="New chat"
-            className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-100 dark:active:bg-zinc-800 transition-colors"
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-700 dark:text-zinc-200"
           >
-            <Edit2 className="w-[20px] h-[20px]" strokeWidth={1.7} />
+            <Edit2 className="w-5 h-5" strokeWidth={1.7} />
           </button>
         </header>
-
         {/* Messages */}
         <div
           className="min-h-0 min-w-0 flex-1 w-full max-w-full overflow-x-hidden overflow-y-auto overscroll-contain scroll-hide pb-32 pt-0 md:pb-36"
