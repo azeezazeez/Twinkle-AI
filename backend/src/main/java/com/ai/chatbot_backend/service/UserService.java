@@ -24,7 +24,7 @@ public class UserService {
 
 
     // ============================================================
-    // MARK USER AS VERIFIED
+    // MARK USER VERIFIED
     // ============================================================
 
     public void markAsVerified(String email) {
@@ -34,28 +34,31 @@ public class UserService {
             String normalizedEmail =
                     normalizeEmail(email);
 
-            User user = userRepository.findByEmail(normalizedEmail)
-                    .orElseThrow(() ->
-                            new AIServiceException("User not found")
+            User user =
+                    userRepository.findByEmail(
+                            normalizedEmail
+                    ).orElseThrow(() ->
+                            new AIServiceException(
+                                    "User not found"
+                            )
                     );
 
             user.setVerified(true);
 
-            // Clear OTP data after successful verification
             user.setOtp(null);
             user.setOtpExpiry(null);
 
             userRepository.save(user);
 
             log.info(
-                    "User marked as verified: {}",
+                    "User verified: {}",
                     normalizedEmail
             );
 
         } catch (DataAccessException e) {
 
             log.error(
-                    "Database error marking user verified: {}",
+                    "Database error marking verified: {}",
                     e.getMessage(),
                     e
             );
@@ -71,21 +74,20 @@ public class UserService {
     // FIND BY EMAIL
     // ============================================================
 
-    public Optional<User> findByEmail(String email) {
+    public Optional<User> findByEmail(
+            String email
+    ) {
 
         try {
 
-            String normalizedEmail =
-                    normalizeEmail(email);
-
             return userRepository.findByEmail(
-                    normalizedEmail
+                    normalizeEmail(email)
             );
 
         } catch (DataAccessException e) {
 
             log.error(
-                    "Database error finding user by email: {}",
+                    "Database error finding email: {}",
                     e.getMessage(),
                     e
             );
@@ -101,7 +103,9 @@ public class UserService {
     // FIND BY USERNAME
     // ============================================================
 
-    public Optional<User> findByUsername(String username) {
+    public Optional<User> findByUsername(
+            String username
+    ) {
 
         try {
 
@@ -112,7 +116,7 @@ public class UserService {
         } catch (DataAccessException e) {
 
             log.error(
-                    "Database error finding user by username: {}",
+                    "Database error finding username: {}",
                     e.getMessage(),
                     e
             );
@@ -154,10 +158,12 @@ public class UserService {
 
 
     // ============================================================
-    // CHECK EMAIL
+    // EXISTS EMAIL
     // ============================================================
 
-    public boolean existsByEmail(String email) {
+    public boolean existsByEmail(
+            String email
+    ) {
 
         try {
 
@@ -181,10 +187,12 @@ public class UserService {
 
 
     // ============================================================
-    // CHECK USERNAME
+    // EXISTS USERNAME
     // ============================================================
 
-    public boolean existsByUsername(String username) {
+    public boolean existsByUsername(
+            String username
+    ) {
 
         try {
 
@@ -196,6 +204,35 @@ public class UserService {
 
             log.error(
                     "Database error checking username: {}",
+                    e.getMessage(),
+                    e
+            );
+
+            throw new AIServiceException(
+                    "Server error, please try again later"
+            );
+        }
+    }
+
+
+    // ============================================================
+    // DELETE USER BY EMAIL
+    // ============================================================
+
+    public void deleteByEmail(
+            String email
+    ) {
+
+        try {
+
+            userRepository.deleteByEmail(
+                    normalizeEmail(email)
+            );
+
+        } catch (DataAccessException e) {
+
+            log.error(
+                    "Database error deleting user: {}",
                     e.getMessage(),
                     e
             );
@@ -221,22 +258,24 @@ public class UserService {
             String normalizedEmail =
                     normalizeEmail(email);
 
-            User user = userRepository.findByEmail(
-                    normalizedEmail
-            ).orElseThrow(() ->
-                    new AIServiceException("User not found")
-            );
+            User user =
+                    userRepository.findByEmail(
+                            normalizedEmail
+                    ).orElseThrow(() ->
+                            new AIServiceException(
+                                    "User not found"
+                            )
+                    );
 
             user.setPassword(newPassword);
 
-            // Password reset is successful, so OTP is no longer needed
             user.setOtp(null);
             user.setOtpExpiry(null);
 
             userRepository.save(user);
 
             log.info(
-                    "Password updated for user: {}",
+                    "Password updated for: {}",
                     normalizedEmail
             );
 
@@ -258,67 +297,49 @@ public class UserService {
     // ============================================================
     // REGISTER USER
     // ============================================================
-    //
-    // IMPORTANT:
-    // User is created BEFORE OTP verification.
-    //
-    // verified = false
-    //
-    // OTPService will later put:
-    //
-    // users.otp
-    // users.otp_expiry
-    //
-    // ============================================================
 
     public UserResponse register(
             RegisterRequest request
     ) {
 
-        log.info("=== REGISTER ATTEMPT ===");
-
         try {
 
-            // ----------------------------------------------------
-            // Validate username
-            // ----------------------------------------------------
-
             if (request == null) {
+
                 throw new AIServiceException(
                         "Registration request is required"
                 );
             }
 
-            if (request.getUsername() == null ||
-                    request.getUsername().trim().isEmpty()) {
+
+            String username =
+                    request.getUsername();
+
+            if (username == null ||
+                    username.trim().isEmpty()) {
 
                 throw new AIServiceException(
                         "Username is required"
                 );
             }
 
-            String username =
-                    request.getUsername().trim();
+            username =
+                    username.trim();
+
 
             if (username.contains("@")) {
 
                 throw new AIServiceException(
-                        "Username cannot be an email address. Please choose a different username"
+                        "Username cannot be an email address"
                 );
             }
 
 
-            // ----------------------------------------------------
-            // Validate email
-            // ----------------------------------------------------
-
             String email =
-                    normalizeEmail(request.getEmail());
+                    normalizeEmail(
+                            request.getEmail()
+                    );
 
-
-            // ----------------------------------------------------
-            // Validate password
-            // ----------------------------------------------------
 
             if (request.getPassword() == null ||
                     request.getPassword().isEmpty()) {
@@ -330,10 +351,12 @@ public class UserService {
 
 
             // ----------------------------------------------------
-            // Check duplicate username
+            // DUPLICATE CHECK
             // ----------------------------------------------------
 
-            if (userRepository.existsByUsername(username)) {
+            if (userRepository.existsByUsername(
+                    username
+            )) {
 
                 throw new AIServiceException(
                         "Username already exists"
@@ -341,11 +364,9 @@ public class UserService {
             }
 
 
-            // ----------------------------------------------------
-            // Check duplicate email
-            // ----------------------------------------------------
-
-            if (userRepository.existsByEmail(email)) {
+            if (userRepository.existsByEmail(
+                    email
+            )) {
 
                 throw new AIServiceException(
                         "Email already exists"
@@ -357,21 +378,23 @@ public class UserService {
             // CREATE USER
             // ----------------------------------------------------
 
-            User user = User.builder()
-                    .username(username)
-                    .email(email)
-                    .password(request.getPassword())
-                    .verified(false)
-                    .otp(null)
-                    .otpExpiry(null)
-                    .build();
+            User user =
+                    User.builder()
+                            .username(username)
+                            .email(email)
+                            .password(request.getPassword())
+                            .verified(false)
+                            .otp(null)
+                            .otpExpiry(null)
+                            .build();
 
 
-            user = userRepository.save(user);
+            user =
+                    userRepository.save(user);
 
 
             log.info(
-                    "User created successfully - ID: {}, Username: {}, Email: {}",
+                    "User created - ID: {}, username: {}, email: {}",
                     user.getId(),
                     user.getUsername(),
                     user.getEmail()
@@ -379,16 +402,28 @@ public class UserService {
 
 
             // ----------------------------------------------------
-            // BUILD RESPONSE
+            // RESPONSE
             // ----------------------------------------------------
 
             UserResponse response =
                     new UserResponse();
 
-            response.setId(user.getId());
-            response.setUsername(user.getUsername());
-            response.setEmail(user.getEmail());
-            response.setCreatedAt(user.getCreatedAt());
+            response.setId(
+                    user.getId()
+            );
+
+            response.setUsername(
+                    user.getUsername()
+            );
+
+            response.setEmail(
+                    user.getEmail()
+            );
+
+            response.setCreatedAt(
+                    user.getCreatedAt()
+            );
+
 
             return response;
 
@@ -412,7 +447,7 @@ public class UserService {
         } catch (Exception e) {
 
             log.error(
-                    "REGISTER FAILED: {}",
+                    "Registration failed: {}",
                     e.getMessage(),
                     e
             );
@@ -429,20 +464,23 @@ public class UserService {
     // LOGIN
     // ============================================================
 
-    public User login(LoginRequest request) {
-
-        log.info("=== LOGIN ATTEMPT ===");
+    public User login(
+            LoginRequest request
+    ) {
 
         try {
 
             if (request == null ||
                     request.getUsername() == null ||
-                    request.getUsername().trim().isEmpty()) {
+                    request.getUsername()
+                            .trim()
+                            .isEmpty()) {
 
                 throw new AIServiceException(
                         "Email or username is required"
                 );
             }
+
 
             if (request.getPassword() == null ||
                     request.getPassword().isEmpty()) {
@@ -454,22 +492,15 @@ public class UserService {
 
 
             String login =
-                    request.getUsername().trim();
+                    request.getUsername()
+                            .trim();
 
-
-            // ----------------------------------------------------
-            // Try email first
-            // ----------------------------------------------------
 
             User user =
                     userRepository.findByEmail(
                             login.toLowerCase()
                     ).orElse(null);
 
-
-            // ----------------------------------------------------
-            // Try username
-            // ----------------------------------------------------
 
             if (user == null) {
 
@@ -482,30 +513,16 @@ public class UserService {
 
             if (user == null) {
 
-                log.warn(
-                        "User not found with: {}",
-                        login
-                );
-
                 throw new AIServiceException(
                         "Invalid credentials"
                 );
             }
 
-
-            // ----------------------------------------------------
-            // Password check
-            // ----------------------------------------------------
 
             if (!user.getPassword().equals(
                     request.getPassword()
             )) {
 
-                log.warn(
-                        "Password mismatch for user: {}",
-                        user.getUsername()
-                );
-
                 throw new AIServiceException(
                         "Invalid credentials"
                 );
@@ -513,15 +530,10 @@ public class UserService {
 
 
             // ----------------------------------------------------
-            // EMAIL VERIFICATION CHECK
+            // EMAIL VERIFICATION
             // ----------------------------------------------------
 
             if (!user.isVerified()) {
-
-                log.warn(
-                        "Login rejected - email not verified: {}",
-                        user.getEmail()
-                );
 
                 throw new AIServiceException(
                         "Please verify your email before logging in"
@@ -530,9 +542,10 @@ public class UserService {
 
 
             log.info(
-                    "LOGIN SUCCESS for user: {}",
+                    "Login successful: {}",
                     user.getUsername()
             );
+
 
             return user;
 
@@ -553,10 +566,12 @@ public class UserService {
 
 
     // ============================================================
-    // GET USER BY ID
+    // GET USER
     // ============================================================
 
-    public User getUserById(Long id) {
+    public User getUserById(
+            Long id
+    ) {
 
         try {
 
@@ -570,7 +585,7 @@ public class UserService {
         } catch (DataAccessException e) {
 
             log.error(
-                    "Database error fetching user by id: {}",
+                    "Database error fetching user: {}",
                     e.getMessage(),
                     e
             );
@@ -586,7 +601,9 @@ public class UserService {
     // NORMALIZE EMAIL
     // ============================================================
 
-    private String normalizeEmail(String email) {
+    private String normalizeEmail(
+            String email
+    ) {
 
         if (email == null ||
                 email.trim().isEmpty()) {
