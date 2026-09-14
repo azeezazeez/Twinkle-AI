@@ -1,8 +1,3 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 package com.ai.chatbot_backend.controller;
 
 import com.ai.chatbot_backend.dto.LoginRequest;
@@ -34,14 +29,12 @@ import java.util.Optional;
 @Slf4j
 public class AuthController {
 
-    private static final String PENDING_REGISTRATION =
-            "pending_registration";
-
     private static final String PENDING_REGISTRATION_EMAIL =
             "pending_registration_email";
 
     private final UserService userService;
     private final OTPService otpService;
+
 
     // ============================================================
     // LOGIN
@@ -61,13 +54,17 @@ public class AuthController {
                 );
             }
 
+
             if (request.getUsername() == null ||
-                    request.getUsername().trim().isEmpty()) {
+                    request.getUsername()
+                            .trim()
+                            .isEmpty()) {
 
                 return badRequest(
                         "Email or username is required"
                 );
             }
+
 
             if (request.getPassword() == null ||
                     request.getPassword().isEmpty()) {
@@ -77,21 +74,14 @@ public class AuthController {
                 );
             }
 
-            log.info(
-                    "Login request received for: {}",
-                    request.getUsername()
-            );
 
-            User user = userService.login(request);
+            User user =
+                    userService.login(request);
 
-            if (user == null) {
-                return unauthorized(
-                        "Invalid credentials"
-                );
-            }
 
             HttpSession session =
                     httpRequest.getSession(true);
+
 
             session.setAttribute(
                     "user",
@@ -103,8 +93,10 @@ public class AuthController {
                     user.getId()
             );
 
+
             Map<String, Object> response =
                     new HashMap<>();
+
 
             response.put(
                     "success",
@@ -121,12 +113,11 @@ public class AuthController {
                     buildUserData(user)
             );
 
-            log.info(
-                    "Login successful for user: {}",
-                    user.getUsername()
+
+            return ResponseEntity.ok(
+                    response
             );
 
-            return ResponseEntity.ok(response);
 
         } catch (Exception e) {
 
@@ -137,10 +128,13 @@ public class AuthController {
             );
 
             return unauthorized(
-                    "Invalid credentials"
+                    e.getMessage() != null
+                            ? e.getMessage()
+                            : "Invalid credentials"
             );
         }
     }
+
 
     // ============================================================
     // SIGNUP
@@ -154,38 +148,23 @@ public class AuthController {
 
         try {
 
-            // ----------------------------------------------------
-            // Basic request validation
-            // ----------------------------------------------------
-
             if (request == null) {
+
                 return badRequest(
                         "Registration request is required"
                 );
             }
 
-            // ----------------------------------------------------
-            // EMAIL
-            // ----------------------------------------------------
 
             String email =
                     normalizeEmail(
                             request.getEmail()
                     );
 
-            if (email.isEmpty()) {
-
-                return badRequest(
-                        "Email is required"
-                );
-            }
-
-            // ----------------------------------------------------
-            // USERNAME
-            // ----------------------------------------------------
 
             String username =
                     request.getUsername();
+
 
             if (username == null ||
                     username.trim().isEmpty()) {
@@ -195,11 +174,10 @@ public class AuthController {
                 );
             }
 
-            username = username.trim();
 
-            // ----------------------------------------------------
-            // PASSWORD
-            // ----------------------------------------------------
+            username =
+                    username.trim();
+
 
             if (request.getPassword() == null ||
                     request.getPassword().isEmpty()) {
@@ -209,9 +187,6 @@ public class AuthController {
                 );
             }
 
-            // ----------------------------------------------------
-            // USERNAME CANNOT BE EMAIL
-            // ----------------------------------------------------
 
             if (username.contains("@")) {
 
@@ -220,86 +195,82 @@ public class AuthController {
                 );
             }
 
-            log.info(
-                    "Signup request received - email: {}, username: {}",
-                    email,
-                    username
-            );
 
             // ----------------------------------------------------
-            // CHECK IF EMAIL ALREADY EXISTS
+            // DUPLICATE CHECK
             // ----------------------------------------------------
 
             if (userService.existsByEmail(email)) {
-
-                log.info(
-                        "Signup rejected - email already registered: {}",
-                        email
-                );
 
                 return badRequest(
                         "Email already registered"
                 );
             }
 
-            // ----------------------------------------------------
-            // CHECK IF USERNAME ALREADY EXISTS
-            // ----------------------------------------------------
 
             if (userService.existsByUsername(username)) {
-
-                log.info(
-                        "Signup rejected - username already exists: {}",
-                        username
-                );
 
                 return badRequest(
                         "Username already taken"
                 );
             }
 
-            // ----------------------------------------------------
-            // NORMALIZE REQUEST
-            // ----------------------------------------------------
 
             request.setEmail(email);
             request.setUsername(username);
 
+
             // ----------------------------------------------------
-            // CREATE / UPDATE PENDING REGISTRATION
-            //
-            // IMPORTANT:
-            // We intentionally DO NOT reject a session simply
-            // because it already contains a pending registration.
-            //
-            // This allows:
-            //
-            // User A -> signup -> leaves page
-            // User A -> enters another email -> signup
-            //
-            // The latest pending registration replaces the old one.
+            // CREATE USER FIRST
+            // ----------------------------------------------------
+
+            UserResponse userResponse;
+
+            try {
+
+                userResponse =
+                        userService.register(
+                                request
+                        );
+
+            } catch (
+                    DataIntegrityViolationException e
+            ) {
+
+                log.warn(
+                        "Duplicate registration blocked: {}",
+                        email
+                );
+
+                return badRequest(
+                        "Email or username already registered"
+                );
+            }
+
+
+            // ----------------------------------------------------
+            // CREATE SESSION
             // ----------------------------------------------------
 
             HttpSession session =
                     httpRequest.getSession(true);
 
-            session.setAttribute(
-                    PENDING_REGISTRATION,
-                    request
-            );
 
             session.setAttribute(
                     PENDING_REGISTRATION_EMAIL,
                     email
             );
 
+
             // ----------------------------------------------------
-            // SEND OTP
+            // GENERATE / SAVE / SEND OTP
             // ----------------------------------------------------
 
             try {
 
-                otpService.generateAndSendOtp(email);
+                otpService.generateAndSendOtp(
+                        email
+                );
 
             } catch (
                     OTPService.OTPDeliveryException e
@@ -312,11 +283,22 @@ public class AuthController {
                         e
                 );
 
-                // Remove pending registration if OTP failed
-                clearPendingRegistration(session);
+
+                // Delete incomplete user
+                userService.deleteByEmail(
+                        email
+                );
+
+
+                clearPendingRegistration(
+                        session
+                );
+
 
                 return ResponseEntity
-                        .status(HttpStatus.BAD_GATEWAY)
+                        .status(
+                                HttpStatus.BAD_GATEWAY
+                        )
                         .body(
                                 errorResponse(
                                         "Unable to send verification email. Please try again."
@@ -324,12 +306,10 @@ public class AuthController {
                         );
             }
 
-            // ----------------------------------------------------
-            // SUCCESS
-            // ----------------------------------------------------
 
             Map<String, Object> response =
                     new HashMap<>();
+
 
             response.put(
                     "success",
@@ -346,12 +326,11 @@ public class AuthController {
                     email
             );
 
-            log.info(
-                    "Signup OTP successfully sent to: {}",
-                    email
+
+            return ResponseEntity.ok(
+                    response
             );
 
-            return ResponseEntity.ok(response);
 
         } catch (Exception e) {
 
@@ -362,7 +341,9 @@ public class AuthController {
             );
 
             return ResponseEntity
-                    .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .status(
+                            HttpStatus.INTERNAL_SERVER_ERROR
+                    )
                     .body(
                             errorResponse(
                                     "Unable to complete signup. Please try again."
@@ -370,6 +351,7 @@ public class AuthController {
                     );
         }
     }
+
 
     // ============================================================
     // VERIFY OTP
@@ -392,17 +374,16 @@ public class AuthController {
                 );
             }
 
+
             email =
                     normalizeEmail(
                             request.get("email")
                     );
 
+
             String otpCode =
                     request.get("otpCode");
 
-            // ----------------------------------------------------
-            // VALIDATE EMAIL
-            // ----------------------------------------------------
 
             if (email.isEmpty()) {
 
@@ -411,9 +392,6 @@ public class AuthController {
                 );
             }
 
-            // ----------------------------------------------------
-            // VALIDATE OTP
-            // ----------------------------------------------------
 
             if (otpCode == null ||
                     otpCode.trim().isEmpty()) {
@@ -423,19 +401,18 @@ public class AuthController {
                 );
             }
 
-            otpCode = otpCode.trim();
 
-            log.info(
-                    "OTP verification request for: {}",
-                    email
-            );
+            otpCode =
+                    otpCode.trim();
+
 
             // ----------------------------------------------------
-            // GET EXISTING SESSION
+            // SESSION CHECK
             // ----------------------------------------------------
 
             HttpSession session =
                     httpRequest.getSession(false);
+
 
             if (session == null) {
 
@@ -444,47 +421,53 @@ public class AuthController {
                 );
             }
 
-            // ----------------------------------------------------
-            // GET PENDING REGISTRATION
-            // ----------------------------------------------------
-
-            Object pendingObject =
-                    session.getAttribute(
-                            PENDING_REGISTRATION
-                    );
-
-            if (!(pendingObject
-                    instanceof RegisterRequest)) {
-
-                return badRequest(
-                        "Registration session expired. Please sign up again."
-                );
-            }
-
-            RegisterRequest registerRequest =
-                    (RegisterRequest) pendingObject;
-
-            // ----------------------------------------------------
-            // CHECK SESSION EMAIL
-            // ----------------------------------------------------
 
             String pendingEmail =
-                    normalizeEmail(
-                            registerRequest.getEmail()
+                    (String) session.getAttribute(
+                            PENDING_REGISTRATION_EMAIL
                     );
 
-            if (!email.equals(pendingEmail)) {
 
-                log.warn(
-                        "OTP email mismatch. Session: {}, Request: {}",
-                        pendingEmail,
-                        email
-                );
+            if (pendingEmail == null ||
+                    !email.equals(
+                            normalizeEmail(pendingEmail)
+                    )) {
 
                 return badRequest(
                         "Email verification mismatch. Please sign up again."
                 );
             }
+
+
+            // ----------------------------------------------------
+            // FIND USER
+            // ----------------------------------------------------
+
+            Optional<User> userOptional =
+                    userService.findByEmail(
+                            email
+                    );
+
+
+            if (userOptional.isEmpty()) {
+
+                return badRequest(
+                        "Registration not found. Please sign up again."
+                );
+            }
+
+
+            User user =
+                    userOptional.get();
+
+
+            if (user.isVerified()) {
+
+                return badRequest(
+                        "Email is already verified"
+                );
+            }
+
 
             // ----------------------------------------------------
             // VALIDATE OTP
@@ -496,176 +479,40 @@ public class AuthController {
                             otpCode
                     );
 
-            if (!isValid) {
 
-                log.warn(
-                        "Invalid or expired OTP for: {}",
-                        email
-                );
+            if (!isValid) {
 
                 return badRequest(
                         "Invalid or expired OTP"
                 );
             }
 
-            // ----------------------------------------------------
-            // CRITICAL DUPLICATE CHECK
-            //
-            // We check again immediately before inserting.
-            // ----------------------------------------------------
-
-            if (userService.existsByEmail(email)) {
-
-                log.warn(
-                        "OTP verification rejected - email already registered: {}",
-                        email
-                );
-
-                clearPendingRegistration(session);
-
-                return badRequest(
-                        "Email already registered"
-                );
-            }
 
             // ----------------------------------------------------
-            // CHECK USERNAME AGAIN
-            // ----------------------------------------------------
-
-            String username =
-                    registerRequest.getUsername();
-
-            if (username != null) {
-
-                username =
-                        username.trim();
-
-                if (userService.existsByUsername(
-                        username
-                )) {
-
-                    log.warn(
-                            "OTP verification rejected - username already taken: {}",
-                            username
-                    );
-
-                    return badRequest(
-                            "Username already taken"
-                    );
-                }
-            }
-
-            // ----------------------------------------------------
-            // CREATE USER
-            // ----------------------------------------------------
-
-            UserResponse userResponse;
-
-            try {
-
-                userResponse =
-                        userService.register(
-                                registerRequest
-                        );
-
-            } catch (
-                    DataIntegrityViolationException e
-            ) {
-
-                /*
-                 * This protects against a race condition:
-                 *
-                 * Request A checks email -> available
-                 * Request B checks email -> available
-                 * Request A inserts
-                 * Request B tries to insert
-                 *
-                 * Database unique constraint rejects B.
-                 */
-
-                log.warn(
-                        "Duplicate registration blocked by database for: {}",
-                        email
-                );
-
-                clearPendingRegistration(session);
-
-                return badRequest(
-                        "Email already registered"
-                );
-
-            } catch (IllegalArgumentException e) {
-
-                log.warn(
-                        "Registration rejected for {}: {}",
-                        email,
-                        e.getMessage()
-                );
-
-                return badRequest(
-                        e.getMessage()
-                );
-            }
-
-            if (userResponse == null) {
-
-                log.error(
-                        "User registration returned null for: {}",
-                        email
-                );
-
-                return ResponseEntity
-                        .status(
-                                HttpStatus.INTERNAL_SERVER_ERROR
-                        )
-                        .body(
-                                errorResponse(
-                                        "Registration failed. Please try again."
-                                )
-                        );
-            }
-
-            // ----------------------------------------------------
-            // MARK EMAIL AS VERIFIED
-            // ----------------------------------------------------
-
-            userService.markAsVerified(email);
-
-            // ----------------------------------------------------
-            // CLEAR PENDING REGISTRATION
-            // ----------------------------------------------------
-
-            clearPendingRegistration(session);
-
-            // ----------------------------------------------------
-            // LOAD USER
+            // RELOAD VERIFIED USER
             // ----------------------------------------------------
 
             User authenticatedUser =
-                    userService.getUserById(
-                            userResponse.getId()
+                    userService.findByEmail(
+                            email
+                    ).orElseThrow(() ->
+                            new IllegalStateException(
+                                    "Verified user could not be loaded"
+                            )
                     );
 
-            if (authenticatedUser == null) {
-
-                log.error(
-                        "Registered user could not be loaded: {}",
-                        email
-                );
-
-                return ResponseEntity
-                        .status(
-                                HttpStatus.INTERNAL_SERVER_ERROR
-                        )
-                        .body(
-                                errorResponse(
-                                        "Registration completed, but login session could not be created."
-                                )
-                        );
-            }
 
             // ----------------------------------------------------
-            // AUTHENTICATE
+            // CLEAR PENDING SESSION DATA
+            // ----------------------------------------------------
+
+            clearPendingRegistration(
+                    session
+            );
+
+
+            // ----------------------------------------------------
+            // CREATE AUTHENTICATED SESSION
             // ----------------------------------------------------
 
             session.setAttribute(
@@ -678,17 +525,14 @@ public class AuthController {
                     authenticatedUser.getId()
             );
 
-            // ----------------------------------------------------
-            // RESPONSE USER DATA
-            // ----------------------------------------------------
 
-            Map<String, Object> userData =
-                    buildUserData(
-                            authenticatedUser
-                    );
+            // ----------------------------------------------------
+            // RESPONSE
+            // ----------------------------------------------------
 
             Map<String, Object> response =
                     new HashMap<>();
+
 
             response.put(
                     "success",
@@ -702,15 +546,22 @@ public class AuthController {
 
             response.put(
                     "user",
-                    userData
+                    buildUserData(
+                            authenticatedUser
+                    )
             );
 
+
             log.info(
-                    "Registration and verification successful for: {}",
+                    "Registration and verification successful: {}",
                     email
             );
 
-            return ResponseEntity.ok(response);
+
+            return ResponseEntity.ok(
+                    response
+            );
+
 
         } catch (Exception e) {
 
@@ -733,6 +584,7 @@ public class AuthController {
         }
     }
 
+
     // ============================================================
     // RESEND OTP
     // ============================================================
@@ -745,15 +597,18 @@ public class AuthController {
         try {
 
             if (request == null) {
+
                 return badRequest(
                         "Request is required"
                 );
             }
 
+
             String email =
                     normalizeEmail(
                             request.get("email")
                     );
+
 
             if (email.isEmpty()) {
 
@@ -762,54 +617,41 @@ public class AuthController {
                 );
             }
 
-            log.info(
-                    "Resend OTP request for: {}",
+
+            Optional<User> userOptional =
+                    userService.findByEmail(
+                            email
+                    );
+
+
+            if (userOptional.isEmpty()) {
+
+                return badRequest(
+                        "Registration not found. Please sign up first."
+                );
+            }
+
+
+            User user =
+                    userOptional.get();
+
+
+            if (user.isVerified()) {
+
+                return badRequest(
+                        "Email is already verified"
+                );
+            }
+
+
+            otpService.resendOtp(
                     email
             );
 
-            // ----------------------------------------------------
-            // ALREADY REGISTERED
-            // ----------------------------------------------------
-
-            if (userService.existsByEmail(email)) {
-
-                return badRequest(
-                        "Email is already registered"
-                );
-            }
-
-            // ----------------------------------------------------
-            // RESEND
-            // ----------------------------------------------------
-
-            try {
-
-                otpService.resendOtp(email);
-
-            } catch (
-                    OTPService.OTPDeliveryException e
-            ) {
-
-                log.error(
-                        "Failed to resend OTP to {}: {}",
-                        email,
-                        e.getMessage(),
-                        e
-                );
-
-                return ResponseEntity
-                        .status(
-                                HttpStatus.BAD_GATEWAY
-                        )
-                        .body(
-                                errorResponse(
-                                        "Unable to send OTP. Please try again."
-                                )
-                        );
-            }
 
             Map<String, Object> response =
                     new HashMap<>();
+
 
             response.put(
                     "success",
@@ -826,7 +668,31 @@ public class AuthController {
                     email
             );
 
-            return ResponseEntity.ok(response);
+
+            return ResponseEntity.ok(
+                    response
+            );
+
+
+        } catch (
+                OTPService.OTPDeliveryException e
+        ) {
+
+            log.error(
+                    "Resend OTP failed: {}",
+                    e.getMessage(),
+                    e
+            );
+
+            return ResponseEntity
+                    .status(
+                            HttpStatus.BAD_GATEWAY
+                    )
+                    .body(
+                            errorResponse(
+                                    "Unable to send OTP. Please try again."
+                            )
+                    );
 
         } catch (Exception e) {
 
@@ -848,6 +714,7 @@ public class AuthController {
         }
     }
 
+
     // ============================================================
     // AUTH STATUS
     // ============================================================
@@ -862,22 +729,27 @@ public class AuthController {
             HttpSession session =
                     request.getSession(false);
 
+
             boolean authenticated =
                     session != null &&
                             session.getAttribute("user") != null;
 
+
             Map<String, Object> response =
                     new HashMap<>();
+
 
             response.put(
                     "authenticated",
                     authenticated
             );
 
+
             if (authenticated) {
 
                 Object sessionUser =
                         session.getAttribute("user");
+
 
                 if (sessionUser instanceof User) {
 
@@ -890,12 +762,16 @@ public class AuthController {
                 }
             }
 
-            return ResponseEntity.ok(response);
+
+            return ResponseEntity.ok(
+                    response
+            );
+
 
         } catch (Exception e) {
 
             log.error(
-                    "Failed to retrieve authentication status: {}",
+                    "Failed to retrieve auth status: {}",
                     e.getMessage(),
                     e
             );
@@ -912,6 +788,7 @@ public class AuthController {
         }
     }
 
+
     // ============================================================
     // LOGOUT
     // ============================================================
@@ -926,12 +803,15 @@ public class AuthController {
             HttpSession session =
                     request.getSession(false);
 
+
             if (session != null) {
                 session.invalidate();
             }
 
+
             Map<String, Object> response =
                     new HashMap<>();
+
 
             response.put(
                     "success",
@@ -943,7 +823,11 @@ public class AuthController {
                     "Logged out successfully"
             );
 
-            return ResponseEntity.ok(response);
+
+            return ResponseEntity.ok(
+                    response
+            );
+
 
         } catch (Exception e) {
 
@@ -965,6 +849,7 @@ public class AuthController {
         }
     }
 
+
     // ============================================================
     // CURRENT USER
     // ============================================================
@@ -979,6 +864,7 @@ public class AuthController {
             HttpSession session =
                     request.getSession(false);
 
+
             if (session == null) {
 
                 return unauthorized(
@@ -986,8 +872,10 @@ public class AuthController {
                 );
             }
 
+
             Object sessionUser =
                     session.getAttribute("user");
+
 
             if (!(sessionUser instanceof User)) {
 
@@ -996,11 +884,14 @@ public class AuthController {
                 );
             }
 
+
             User user =
                     (User) sessionUser;
 
+
             Map<String, Object> response =
                     new HashMap<>();
+
 
             response.put(
                     "authenticated",
@@ -1012,7 +903,11 @@ public class AuthController {
                     buildUserData(user)
             );
 
-            return ResponseEntity.ok(response);
+
+            return ResponseEntity.ok(
+                    response
+            );
+
 
         } catch (Exception e) {
 
@@ -1034,6 +929,7 @@ public class AuthController {
         }
     }
 
+
     // ============================================================
     // FORGOT PASSWORD
     // ============================================================
@@ -1046,15 +942,18 @@ public class AuthController {
         try {
 
             if (request == null) {
+
                 return badRequest(
                         "Request is required"
                 );
             }
 
+
             String email =
                     normalizeEmail(
                             request.get("email")
                     );
+
 
             if (email.isEmpty()) {
 
@@ -1063,18 +962,19 @@ public class AuthController {
                 );
             }
 
-            log.info(
-                    "Forgot password request for: {}",
-                    email
-            );
 
             Optional<User> user =
-                    userService.findByEmail(email);
+                    userService.findByEmail(
+                            email
+                    );
+
 
             if (user.isEmpty()) {
 
                 return ResponseEntity
-                        .status(HttpStatus.NOT_FOUND)
+                        .status(
+                                HttpStatus.NOT_FOUND
+                        )
                         .body(
                                 errorResponse(
                                         "Email not found"
@@ -1082,35 +982,16 @@ public class AuthController {
                         );
             }
 
-            try {
 
-                otpService
-                        .generateAndSendPasswordResetOtp(
-                                email
-                        );
+            otpService
+                    .generateAndSendPasswordResetOtp(
+                            email
+                    );
 
-            } catch (
-                    OTPService.OTPDeliveryException e
-            ) {
-
-                log.error(
-                        "Password reset OTP delivery failed for {}: {}",
-                        email,
-                        e.getMessage(),
-                        e
-                );
-
-                return ResponseEntity
-                        .status(HttpStatus.BAD_GATEWAY)
-                        .body(
-                                errorResponse(
-                                        "Unable to send password reset email. Please try again."
-                                )
-                        );
-            }
 
             Map<String, Object> response =
                     new HashMap<>();
+
 
             response.put(
                     "success",
@@ -1127,7 +1008,31 @@ public class AuthController {
                     email
             );
 
-            return ResponseEntity.ok(response);
+
+            return ResponseEntity.ok(
+                    response
+            );
+
+
+        } catch (
+                OTPService.OTPDeliveryException e
+        ) {
+
+            log.error(
+                    "Password reset OTP delivery failed: {}",
+                    e.getMessage(),
+                    e
+            );
+
+            return ResponseEntity
+                    .status(
+                            HttpStatus.BAD_GATEWAY
+                    )
+                    .body(
+                            errorResponse(
+                                    "Unable to send password reset email. Please try again."
+                            )
+                    );
 
         } catch (Exception e) {
 
@@ -1149,6 +1054,7 @@ public class AuthController {
         }
     }
 
+
     // ============================================================
     // RESET PASSWORD
     // ============================================================
@@ -1161,21 +1067,26 @@ public class AuthController {
         try {
 
             if (request == null) {
+
                 return badRequest(
                         "Request is required"
                 );
             }
+
 
             String email =
                     normalizeEmail(
                             request.get("email")
                     );
 
+
             String otpCode =
                     request.get("otpCode");
 
+
             String newPassword =
                     request.get("newPassword");
+
 
             if (email.isEmpty()) {
 
@@ -1183,6 +1094,7 @@ public class AuthController {
                         "Email is required"
                 );
             }
+
 
             if (otpCode == null ||
                     otpCode.trim().isEmpty()) {
@@ -1192,7 +1104,6 @@ public class AuthController {
                 );
             }
 
-            otpCode = otpCode.trim();
 
             if (newPassword == null ||
                     newPassword.isEmpty()) {
@@ -1202,16 +1113,17 @@ public class AuthController {
                 );
             }
 
-            log.info(
-                    "Password reset request for: {}",
-                    email
-            );
+
+            otpCode =
+                    otpCode.trim();
+
 
             boolean isValid =
                     otpService.validatePasswordResetOtp(
                             email,
                             otpCode
                     );
+
 
             if (!isValid) {
 
@@ -1220,13 +1132,16 @@ public class AuthController {
                 );
             }
 
+
             userService.updatePassword(
                     email,
                     newPassword
             );
 
+
             Map<String, Object> response =
                     new HashMap<>();
+
 
             response.put(
                     "success",
@@ -1238,7 +1153,11 @@ public class AuthController {
                     "Password reset successfully"
             );
 
-            return ResponseEntity.ok(response);
+
+            return ResponseEntity.ok(
+                    response
+            );
+
 
         } catch (Exception e) {
 
@@ -1260,37 +1179,10 @@ public class AuthController {
         }
     }
 
+
     // ============================================================
-    // HELPERS
+    // BUILD USER DATA
     // ============================================================
-
-    private String normalizeEmail(String email) {
-
-        if (email == null) {
-            return "";
-        }
-
-        return email
-                .trim()
-                .toLowerCase();
-    }
-
-    private void clearPendingRegistration(
-            HttpSession session
-    ) {
-
-        if (session == null) {
-            return;
-        }
-
-        session.removeAttribute(
-                PENDING_REGISTRATION
-        );
-
-        session.removeAttribute(
-                PENDING_REGISTRATION_EMAIL
-        );
-    }
 
     private Map<String, Object> buildUserData(
             User user
@@ -1299,9 +1191,11 @@ public class AuthController {
         Map<String, Object> userData =
                 new HashMap<>();
 
+
         if (user == null) {
             return userData;
         }
+
 
         userData.put(
                 "id",
@@ -1323,14 +1217,54 @@ public class AuthController {
         );
 
         userData.put(
-                "fullName",
-                safeString(
-                        user.getFullName()
-                )
+                "verified",
+                user.isVerified()
         );
+
 
         return userData;
     }
+
+
+    // ============================================================
+    // NORMALIZE EMAIL
+    // ============================================================
+
+    private String normalizeEmail(
+            String email
+    ) {
+
+        if (email == null) {
+            return "";
+        }
+
+        return email
+                .trim()
+                .toLowerCase();
+    }
+
+
+    // ============================================================
+    // CLEAR PENDING REGISTRATION
+    // ============================================================
+
+    private void clearPendingRegistration(
+            HttpSession session
+    ) {
+
+        if (session == null) {
+            return;
+        }
+
+        session.removeAttribute(
+                PENDING_REGISTRATION_EMAIL
+        );
+    }
+
+
+    // ============================================================
+    // ERROR RESPONSE
+    // ============================================================
 
     private Map<String, Object> errorResponse(
             String message
@@ -1352,29 +1286,50 @@ public class AuthController {
         return response;
     }
 
+
+    // ============================================================
+    // BAD REQUEST
+    // ============================================================
+
     private ResponseEntity<Map<String, Object>> badRequest(
             String message
     ) {
 
         return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
+                .status(
+                        HttpStatus.BAD_REQUEST
+                )
                 .body(
                         errorResponse(message)
                 );
     }
+
+
+    // ============================================================
+    // UNAUTHORIZED
+    // ============================================================
 
     private ResponseEntity<Map<String, Object>> unauthorized(
             String message
     ) {
 
         return ResponseEntity
-                .status(HttpStatus.UNAUTHORIZED)
+                .status(
+                        HttpStatus.UNAUTHORIZED
+                )
                 .body(
                         errorResponse(message)
                 );
     }
 
-    private String safeString(String value) {
+
+    // ============================================================
+    // SAFE STRING
+    // ============================================================
+
+    private String safeString(
+            String value
+    ) {
 
         return value != null
                 ? value
