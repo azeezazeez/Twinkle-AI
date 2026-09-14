@@ -1,19 +1,18 @@
 package com.ai.chatbot_backend.dto;
 
 import jakarta.persistence.*;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
+import lombok.*;
+
 import java.time.LocalDateTime;
 
+@Entity
+@Table(name = "otps")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-@Entity
-@Table(name = "otps")
 public class OTP {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -21,20 +20,22 @@ public class OTP {
     @Column(nullable = false)
     private String email;
 
-    @Column(nullable = false, name = "otp_code")
-    private String otpCode;  // ← Field name is "otpCode" (camelCase)
+    @Column(name = "otp_code", nullable = false)
+    private String otpCode;
 
-    @Column(nullable = false, name = "expiry_time")
+    @Column(name = "expiry_time", nullable = false)
     private LocalDateTime expiryTime;
 
     @Column(nullable = false)
     private boolean verified;
 
-    @Column(name = "created_at")
+    @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
+        if (createdAt == null) {
+            createdAt = LocalDateTime.now();
+        }
     }
 }
