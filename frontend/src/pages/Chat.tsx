@@ -1046,14 +1046,17 @@ export default function Chat({ user, onLogout }: Props) {
         return [...prev, aiMsg];
       });
 
-      // Generate and persist the chat title locally using deterministic rules.
-      // No AI model/API call is used for naming conversations.
+      // Generate and persist a professional AI-generated chat title.
       if ((isNewSession || regenerateTitle) && activeSessionId) {
         try {
-          const newTitle = generateProfessionalChatTitle(
-            finalMessage || 'File analysis',
-            currentRequestHasFiles
+          const titleResponse: any = await chatApi.generateTitle(
+            finalMessage || 'File analysis'
           );
+
+          const newTitle =
+            typeof titleResponse?.title === 'string' && titleResponse.title.trim()
+              ? titleResponse.title.trim()
+              : 'New Chat';
 
           await chatApi.renameSession(activeSessionId, newTitle);
 
@@ -1069,7 +1072,7 @@ export default function Chat({ user, onLogout }: Props) {
           // Confirm the saved server state.
           await loadSessions();
         } catch (renameErr) {
-          console.error('Deterministic Twinkle AI chat title save failed:', renameErr);
+          console.error('AI-generated Twinkle AI chat title save failed:', renameErr);
         }
       }
     } catch (err: any) {
