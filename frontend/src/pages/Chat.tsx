@@ -467,6 +467,7 @@ const getNextEmptyChatPrompt = (current: string): string => {
 
 export default function Chat({ user, onLogout }: Props) {
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [typingSessionTitle, setTypingSessionTitle] = useState<{ id: number; title: string } | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -498,6 +499,38 @@ export default function Chat({ user, onLogout }: Props) {
 
     return () => window.clearInterval(interval);
   }, [isTyping]);
+
+  const [typedSessionTitle, setTypedSessionTitle] = useState('');
+
+  // Reveal newly generated chat titles one character at a time in the Sidebar.
+  useEffect(() => {
+    if (!typingSessionTitle) {
+      setTypedSessionTitle('');
+      return;
+    }
+
+    setTypedSessionTitle('');
+    let index = 0;
+    const { title } = typingSessionTitle;
+
+    const interval = window.setInterval(() => {
+      index += 1;
+      setTypedSessionTitle(title.slice(0, index));
+
+      if (index >= title.length) {
+        window.clearInterval(interval);
+        setTypingSessionTitle(null);
+      }
+    }, 45);
+
+    return () => window.clearInterval(interval);
+  }, [typingSessionTitle]);
+
+  const sidebarSessions = sessions.map(session =>
+    typingSessionTitle?.id === session.id
+      ? { ...session, sessionName: typedSessionTitle }
+      : session
+  );
   const sessionToDelete = sessions.find(session => session.id === sessionIdToDelete);
   const [serverWaking, setServerWaking] = useState(false);
   const [requestHasFiles, setRequestHasFiles] = useState(false);
@@ -1059,6 +1092,7 @@ export default function Chat({ user, onLogout }: Props) {
               : 'New Chat';
 
           await chatApi.renameSession(activeSessionId, newTitle);
+          setTypingSessionTitle({ id: activeSessionId, title: newTitle });
 
           // Keep the Sidebar's sessions prop synchronized immediately.
           setSessions(prev =>
@@ -1486,7 +1520,7 @@ const cleanMessageContent = (content: unknown): string => {
 
       <Sidebar
         user={user}
-        sessions={sessions}
+        sessions={sidebarSessions}
         currentSessionId={currentSessionId}
         onSelectSession={(id) => {
           setCurrentSessionId(id);
