@@ -21,16 +21,17 @@ public class OTPService {
     private final OTPRepository otpRepository;
     private final EmailService emailService;
 
+    // ============================================================
+    // CONFIGURATION
+    // ============================================================
 
     @Value("${otp.length:6}")
     private int otpLength;
 
-
     @Value("${otp.expiration.minutes:10}")
-    private int expirationMinutes;
+    private int otpExpirationMinutes;
 
-
-    private static final SecureRandom RANDOM =
+    private static final SecureRandom SECURE_RANDOM =
             new SecureRandom();
 
 
@@ -38,49 +39,15 @@ public class OTPService {
     // GENERATE AND SEND REGISTRATION OTP
     // ============================================================
 
-    public String generateAndSendOtp(
-            String email
-    ) {
+    public String generateAndSendOtp(String email) {
 
-        return generateAndSendOtpInternal(
-                email,
-                false
-        );
-    }
-
-
-    // ============================================================
-    // GENERATE AND SEND PASSWORD RESET OTP
-    // ============================================================
-
-    public String generateAndSendPasswordResetOtp(
-            String email
-    ) {
-
-        return generateAndSendOtpInternal(
-                email,
-                true
-        );
-    }
-
-
-    // ============================================================
-    // GENERATE OTP
-    // ============================================================
-
-    private String generateAndSendOtpInternal(
-            String email,
-            boolean passwordReset
-    ) {
+        String normalizedEmail =
+                normalizeEmail(email);
 
         try {
 
-            String normalizedEmail =
-                    normalizeEmail(email);
-
-
             // ----------------------------------------------------
-            // DELETE OLD OTP
+            // REMOVE PREVIOUS OTP
             // ----------------------------------------------------
 
             otpRepository.deleteByEmail(
@@ -93,48 +60,81 @@ public class OTPService {
             // ----------------------------------------------------
 
             String otpCode =
-                    generateOtpCode();
+                    generateOtp();
 
 
             LocalDateTime expiryTime =
                     LocalDateTime.now()
                             .plusMinutes(
-                                    expirationMinutes
+                                    otpExpirationMinutes
                             );
 
 
             // ----------------------------------------------------
-            // SAVE OTP
+            // CREATE OTP RECORD
             // ----------------------------------------------------
 
             OTP otp =
-                    OTP.builder()
-                            .email(normalizedEmail)
-                            .otpCode(otpCode)
-                            .expiryTime(expiryTime)
-                            .verified(false)
-                            .createdAt(LocalDateTime.now())
-                            .build();
+                    new OTP();
 
+            otp.setEmail(
+                    normalizedEmail
+            );
+
+            otp.setOtpCode(
+                    otpCode
+            );
+
+            otp.setExpiryTime(
+                    expiryTime
+            );
+
+            otp.setVerified(
+                    false
+            );
+
+            otp.setCreatedAt(
+                    LocalDateTime.now()
+            );
+
+
+            // ----------------------------------------------------
+            // SAVE OTP TO DATABASE
+            // ----------------------------------------------------
 
             otpRepository.save(otp);
+
+
+            log.info(
+                    "OTP saved successfully for {}",
+                    normalizedEmail
+            );
 
 
             // ----------------------------------------------------
             // SEND EMAIL
             // ----------------------------------------------------
 
-            emailService.sendOtp(
+            /*
+             * IMPORTANT:
+             *
+             * EmailService expects:
+             *
+             * sendOTPEmail(String email, String otp)
+             *
+             * NOT:
+             *
+             * sendOtp(String email, OTP otp)
+             */
+
+            emailService.sendOTPEmail(
                     normalizedEmail,
-                    otp
+                    otpCode
             );
 
 
             log.info(
-                    "{} OTP generated and sent to {}",
-                    passwordReset
-                            ? "Password reset"
-                            : "Registration",
+                    "Registration OTP sent successfully to {}",
                     normalizedEmail
             );
 
@@ -142,19 +142,155 @@ public class OTPService {
             return otpCode;
 
 
-        } catch (Exception e) {
+        } catch (EmailService.EmailDeliveryException e) {
 
             log.error(
-                    "OTP generation/delivery failed for {}: {}",
-                    email,
+                    "OTP email delivery failed for {}: {}",
+                    normalizedEmail,
                     e.getMessage(),
                     e
             );
 
+
             throw new OTPDeliveryException(
-                    "Unable to send OTP",
+                    "Unable to send OTP email",
                     e
             );
+
+
+        } catch (Exception e) {
+
+            log.error(
+                    "OTP generation failed for {}: {}",
+                    normalizedEmail,
+                    e.getMessage(),
+                    e
+            );
+
+
+            throw e;
+        }
+    }
+
+
+    // ============================================================
+    // GENERATE AND SEND PASSWORD RESET OTP
+    // ============================================================
+
+    public String generateAndSendPasswordResetOtp(
+            String email
+    ) {
+
+        String normalizedEmail =
+                normalizeEmail(email);
+
+        try {
+
+            // ----------------------------------------------------
+            // REMOVE PREVIOUS OTP
+            // ----------------------------------------------------
+
+            otpRepository.deleteByEmail(
+                    normalizedEmail
+            );
+
+
+            // ----------------------------------------------------
+            // GENERATE OTP
+            // ----------------------------------------------------
+
+            String otpCode =
+                    generateOtp();
+
+
+            LocalDateTime expiryTime =
+                    LocalDateTime.now()
+                            .plusMinutes(
+                                    otpExpirationMinutes
+                            );
+
+
+            // ----------------------------------------------------
+            // CREATE OTP
+            // ----------------------------------------------------
+
+            OTP otp =
+                    new OTP();
+
+            otp.setEmail(
+                    normalizedEmail
+            );
+
+            otp.setOtpCode(
+                    otpCode
+            );
+
+            otp.setExpiryTime(
+                    expiryTime
+            );
+
+            otp.setVerified(
+                    false
+            );
+
+            otp.setCreatedAt(
+                    LocalDateTime.now()
+            );
+
+
+            // ----------------------------------------------------
+            // SAVE
+            // ----------------------------------------------------
+
+            otpRepository.save(otp);
+
+
+            // ----------------------------------------------------
+            // SEND RESET EMAIL
+            // ----------------------------------------------------
+
+            emailService.sendPasswordResetOTP(
+                    normalizedEmail,
+                    otpCode
+            );
+
+
+            log.info(
+                    "Password reset OTP sent successfully to {}",
+                    normalizedEmail
+            );
+
+
+            return otpCode;
+
+
+        } catch (EmailService.EmailDeliveryException e) {
+
+            log.error(
+                    "Password reset email delivery failed for {}: {}",
+                    normalizedEmail,
+                    e.getMessage(),
+                    e
+            );
+
+
+            throw new OTPDeliveryException(
+                    "Unable to send password reset OTP",
+                    e
+            );
+
+
+        } catch (Exception e) {
+
+            log.error(
+                    "Password reset OTP generation failed for {}: {}",
+                    normalizedEmail,
+                    e.getMessage(),
+                    e
+            );
+
+
+            throw e;
         }
     }
 
@@ -170,8 +306,7 @@ public class OTPService {
 
         return validateOtpInternal(
                 email,
-                otpCode,
-                false
+                otpCode
         );
     }
 
@@ -187,41 +322,44 @@ public class OTPService {
 
         return validateOtpInternal(
                 email,
-                otpCode,
-                true
+                otpCode
         );
     }
 
 
     // ============================================================
-    // VALIDATE OTP INTERNAL
+    // INTERNAL OTP VALIDATION
     // ============================================================
 
     private boolean validateOtpInternal(
             String email,
-            String otpCode,
-            boolean passwordReset
+            String otpCode
     ) {
+
+        String normalizedEmail =
+                normalizeEmail(email);
+
+
+        if (otpCode == null ||
+                otpCode.trim().isEmpty()) {
+
+            log.warn(
+                    "OTP validation failed: empty OTP for {}",
+                    normalizedEmail
+            );
+
+            return false;
+        }
+
+
+        String normalizedOtp =
+                otpCode.trim();
+
 
         try {
 
-            String normalizedEmail =
-                    normalizeEmail(email);
-
-
-            if (otpCode == null ||
-                    otpCode.trim().isEmpty()) {
-
-                return false;
-            }
-
-
-            String normalizedOtp =
-                    otpCode.trim();
-
-
             // ----------------------------------------------------
-            // FIND OTP
+            // FIND UNVERIFIED OTP
             // ----------------------------------------------------
 
             Optional<OTP> optionalOtp =
@@ -235,7 +373,7 @@ public class OTPService {
             if (optionalOtp.isEmpty()) {
 
                 log.warn(
-                        "No matching OTP found for {}",
+                        "Invalid OTP for {}",
                         normalizedEmail
                 );
 
@@ -248,8 +386,19 @@ public class OTPService {
 
 
             // ----------------------------------------------------
-            // EXPIRATION CHECK
+            // EXPIRY CHECK
             // ----------------------------------------------------
+
+            if (otp.getExpiryTime() == null) {
+
+                log.warn(
+                        "OTP has no expiry time for {}",
+                        normalizedEmail
+                );
+
+                return false;
+            }
+
 
             if (otp.getExpiryTime()
                     .isBefore(
@@ -269,16 +418,18 @@ public class OTPService {
             // MARK OTP VERIFIED
             // ----------------------------------------------------
 
-            otp.setVerified(true);
+            otp.setVerified(
+                    true
+            );
 
-            otpRepository.save(otp);
+
+            otpRepository.save(
+                    otp
+            );
 
 
             log.info(
-                    "{} OTP verified for {}",
-                    passwordReset
-                            ? "Password reset"
-                            : "Registration",
+                    "OTP verified successfully for {}",
                     normalizedEmail
             );
 
@@ -289,8 +440,8 @@ public class OTPService {
         } catch (Exception e) {
 
             log.error(
-                    "OTP validation failed for {}: {}",
-                    email,
+                    "OTP validation error for {}: {}",
+                    normalizedEmail,
                     e.getMessage(),
                     e
             );
@@ -304,25 +455,44 @@ public class OTPService {
     // RESEND OTP
     // ============================================================
 
-    public void resendOtp(
+    public String resendOtp(
             String email
     ) {
 
-        generateAndSendOtp(email);
+        return generateAndSendOtp(
+                email
+        );
     }
 
 
     // ============================================================
-    // GENERATE OTP CODE
+    // GENERATE OTP
     // ============================================================
 
-    private String generateOtpCode() {
+    private String generateOtp() {
+
+        if (otpLength <= 0) {
+
+            throw new IllegalStateException(
+                    "OTP length must be greater than zero"
+            );
+        }
+
+
+        if (otpLength > 9) {
+
+            throw new IllegalStateException(
+                    "OTP length cannot be greater than 9"
+            );
+        }
+
 
         int minimum =
                 (int) Math.pow(
                         10,
                         otpLength - 1
                 );
+
 
         int maximum =
                 (int) Math.pow(
@@ -331,14 +501,16 @@ public class OTPService {
                 ) - 1;
 
 
-        int value =
+        int otpNumber =
                 minimum +
-                        RANDOM.nextInt(
+                        SECURE_RANDOM.nextInt(
                                 maximum - minimum + 1
                         );
 
 
-        return String.valueOf(value);
+        return String.valueOf(
+                otpNumber
+        );
     }
 
 
@@ -358,6 +530,7 @@ public class OTPService {
             );
         }
 
+
         return email
                 .trim()
                 .toLowerCase();
@@ -370,6 +543,14 @@ public class OTPService {
 
     public static class OTPDeliveryException
             extends RuntimeException {
+
+        public OTPDeliveryException(
+                String message
+        ) {
+
+            super(message);
+        }
+
 
         public OTPDeliveryException(
                 String message,
