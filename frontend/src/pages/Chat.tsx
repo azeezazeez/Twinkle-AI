@@ -1502,6 +1502,7 @@ const cleanMessageContent = (content: unknown): string => {
         onMobileClose={() => setMobileOpen(false)}
       />
       <main className="relative flex h-full min-h-0 min-w-0 w-full max-w-full flex-1 flex-col overflow-hidden bg-transparent">
+        {/* Mobile header */}
         <header
           className="lg:hidden absolute top-0 inset-x-0 z-[9997] h-14 flex items-center justify-between px-3 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800"
         >
