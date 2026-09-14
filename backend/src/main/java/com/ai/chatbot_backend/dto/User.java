@@ -17,29 +17,66 @@ public class User implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    // ============================================================
+    // ID
+    // ============================================================
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(unique = true, nullable = false)
+
+    // ============================================================
+    // USERNAME
+    // ============================================================
+
+    @Column(
+            unique = true,
+            nullable = false
+    )
     private String username;
 
-    @Column(unique = true, nullable = false)
+
+    // ============================================================
+    // EMAIL
+    // ============================================================
+
+    @Column(
+            unique = true,
+            nullable = false
+    )
     private String email;
 
-    @Column(nullable = false)
+
+    // ============================================================
+    // PASSWORD
+    // ============================================================
+
+    @Column(
+            nullable = false
+    )
     private String password;
 
+
+    // ============================================================
+    // CREATED AT
+    // ============================================================
+
     @CreationTimestamp
-    @Column(name = "created_at", updatable = false)
+    @Column(
+            name = "created_at",
+            updatable = false
+    )
     private LocalDateTime createdAt;
 
-    @Column(name = "is_verified")
+
+    // ============================================================
+    // EMAIL VERIFICATION STATUS
+    // ============================================================
+
+    @Column(
+            name = "is_verified",
+            nullable = false
+    )
     private boolean verified;
-
-    @Column(name = "otp")
-    private String otp;
-
-    @Column(name = "otp_expiry")
-    private LocalDateTime otpExpiry;
 }
