@@ -6,7 +6,7 @@ import {
   MessageCircle, Sun, Moon, Sparkles,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import UserAvatar from './UserAvatar';
+import UserAvatar from './UserAvatar'; 
 import { chatApi } from '../lib/api';
 import StormLogo from './StormLogo';
 
