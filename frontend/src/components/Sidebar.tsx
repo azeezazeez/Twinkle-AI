@@ -654,43 +654,6 @@ export default function Sidebar({
           while closed, but its SessionList remains synchronized with the
           parent `sessions` prop.
       ═══════════════════════════════════════════════════ */}
-      {/* Mobile header: only the requested 3-line control */}
-      <div className="lg:hidden fixed top-0 inset-x-0 z-[10000] h-14 flex items-center justify-between px-3 bg-white/95 dark:bg-zinc-950/95 border-b border-zinc-200/80 dark:border-zinc-800/80 backdrop-blur-xl">
-        <button
-          type="button"
-          onClick={() => {
-            // The existing parent controls the drawer state.
-            const event = new CustomEvent('twinkle:open-mobile-sidebar');
-            window.dispatchEvent(event);
-          }}
-          aria-label="Open sidebar"
-          className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-100 dark:active:bg-zinc-800 transition-colors"
-        >
-          <span className="sr-only">Open sidebar</span>
-          <span className="flex flex-col gap-[4px] items-center justify-center" aria-hidden="true">
-            <span className="block w-[18px] h-[1.5px] rounded-full bg-current" />
-            <span className="block w-[18px] h-[1.5px] rounded-full bg-current" />
-            <span className="block w-[18px] h-[1.5px] rounded-full bg-current" />
-          </span>
-        </button>
-
-        <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 pointer-events-none">
-          <StormLogo className="w-6 h-6 text-zinc-900 dark:text-white" />
-          <span className="text-base font-medium tracking-tight text-zinc-900/90 dark:text-white/90">
-            Twinkle
-          </span>
-        </div>
-
-        <button
-          type="button"
-          onClick={onNewSession}
-          aria-label="New chat"
-          className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-100 dark:active:bg-zinc-800 transition-colors"
-        >
-          <SquarePen className="w-[20px] h-[20px]" strokeWidth={1.7} />
-        </button>
-      </div>
-
       <div
         className={`lg:hidden fixed inset-0 z-[9998] transition-opacity duration-200 ${
           mobileOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
