@@ -8,7 +8,7 @@ type Props = {
   open: boolean;
   onClose: () => void;
   /** Called after the final Live Talk data has been persisted. */
-  onSessionComplete?: (sessionId: number) => void;
+  onSessionComplete?: (sessionId: number) => void | Promise<void>;
 };
 
 type VoiceOption = {
@@ -643,32 +643,45 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
   const handleClose = () => {
     if (endingRef.current) return;
 
-    // Snapshot the final spoken exchange before cleanup clears the live
-    // connection. Cleanup happens FIRST so the microphone, queued audio,
-    // WebSocket and AudioContext stop immediately. Persistence continues in
-    // the background and never blocks the UI from closing.
+    // Capture whether the current spoken turn still needs to be persisted
+    // BEFORE cleanup changes any Live Talk state.
     const hasFinalTurn =
       Boolean(userTurnRef.current.trim()) ||
       Boolean(assistantTurnRef.current.trim());
 
-    // Always wait for the complete serialized save queue. If a previous
-    // Live Talk turn is still being persisted, ending the modal must not
-    // notify Chat.tsx before that database write has finished.
+    // Persist the final turn (or wait for the already-running save queue).
+    // The parent is notified only after the database write has completed.
     const savePromise = hasFinalTurn
       ? persistCompletedTurn()
       : (liveSavePromiseRef.current ?? Promise.resolve());
 
     cleanup();
-    onClose();
 
-    void savePromise.then(() => {
-      const sessionId = liveSessionIdRef.current;
-      if (sessionId != null) {
-        onSessionComplete?.(sessionId);
-      }
-    }).catch(error => {
-      console.error('Live Talk final persistence failed:', error);
-    });
+    void savePromise
+      .then(async () => {
+        const sessionId = Number(liveSessionIdRef.current);
+
+        if (!Number.isFinite(sessionId)) {
+          console.warn('Live Talk ended without a persisted session ID.');
+          onClose();
+          return;
+        }
+
+        try {
+          // Chat.tsx switches to this session and loads its authoritative
+          // database history here. Await it before closing the modal so the
+          // main chat is ready as soon as Live Talk disappears.
+          await onSessionComplete?.(sessionId);
+        } catch (error) {
+          console.error('Live Talk session handoff failed:', error);
+        } finally {
+          onClose();
+        }
+      })
+      .catch(error => {
+        console.error('Live Talk final persistence failed:', error);
+        onClose();
+      });
   };
 
   const selectedVoice = VOICES.find(voice => voice.name === voiceName) ?? VOICES[2];
