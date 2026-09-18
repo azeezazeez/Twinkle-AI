@@ -1911,31 +1911,16 @@ const cleanMessageContent = (content: unknown): string => {
    * Make that saved Live Talk session the active chat immediately so the
    * normal chat area displays the complete transcript without a refresh.
    */
-  const handleLiveSessionComplete = useCallback((rawSessionId: number) => {
-    const sessionId = Number(rawSessionId);
+  const handleLiveSessionComplete = useCallback((sessionId: number) => {
     if (!Number.isFinite(sessionId)) return;
 
-    // LiveTalkModal calls this only after its final turn has been written to
-    // the backend. Put the saved session into the parent state FIRST, then
-    // make it active. This prevents the session-validation effect from
-    // clearing the active session before it has been inserted.
-    const now = new Date().toISOString();
-
     setSessions(prev => {
-      const existing = prev.find(session => Number(session.id) === sessionId);
-
+      const existing = prev.find(session => session.id === sessionId);
       if (existing) {
-        return [
-          {
-            ...existing,
-            id: sessionId,
-            sessionName: existing.sessionName || 'Live Talk',
-            updatedAt: now,
-          },
-          ...prev.filter(session => Number(session.id) !== sessionId),
-        ];
+        return [existing, ...prev.filter(session => session.id !== sessionId)];
       }
 
+      const now = new Date().toISOString();
       return [
         {
           id: sessionId,
@@ -1948,24 +1933,13 @@ const cleanMessageContent = (content: unknown): string => {
       ];
     });
 
-    // Do not mark the Live Talk session as a normal newly-created chat.
-    // We explicitly load the persisted database history below.
-    skipMessageLoadRef.current = sessionId;
     setCurrentSessionId(sessionId);
     persistSessionId(sessionId);
     setMessages([]);
-    setMessageAttachments({});
     setEditingMessage(null);
+  }, [user.id]);
 
-    // Load the actual persisted Live Talk transcript immediately. The
-    // currentSessionId effect sees skipMessageLoadRef and therefore does not
-    // issue a second request.
-    void loadMessages(sessionId).finally(() => {
-      if (skipMessageLoadRef.current === sessionId) {
-        skipMessageLoadRef.current = null;
-      }
-    });
-  }, [user.id, loadMessages]);
+  if (loading) {
     return (
       <div className="flex items-center justify-center h-screen font-sans text-zinc-400 bg-white dark:bg-zinc-950 transition-colors duration-300">
         <motion.div
