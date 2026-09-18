@@ -1938,8 +1938,6 @@ const cleanMessageContent = (content: unknown): string => {
     setMessages([]);
     setEditingMessage(null);
   }, [user.id]);
-
-  if (loading) {
     return (
       <div className="flex items-center justify-center h-screen font-sans text-zinc-400 bg-white dark:bg-zinc-950 transition-colors duration-300">
         <motion.div
@@ -2532,7 +2530,7 @@ const cleanMessageContent = (content: unknown): string => {
 
               <div
                 ref={modelPickerRef}
-                className="twinkle-composer-row relative z-[200] flex min-w-0 items-center gap-1.5 px-2.5 py-2 sm:gap-2 sm:px-3 sm:py-2.5 md:px-4"
+                className="twinkle-composer-row relative z-[200] flex min-w-0 flex-wrap items-center gap-1.5 px-3 py-2.5 sm:gap-2 sm:px-4 sm:py-3 md:px-4"
               >
                 {/* Hidden file input */}
                 <input
@@ -2548,20 +2546,46 @@ const cleanMessageContent = (content: unknown): string => {
                 />
 
                 {/* + attachment button */}
-                <button
+                <motion.button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isTyping || isProcessingFiles}
                   aria-label="Attach files"
                   title="Attach files"
-                  className="group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                  whileHover={{ scale: 1.04 }}
+                  whileTap={{ scale: 0.94 }}
+                  transition={{
+                    type: 'spring',
+                    stiffness: 420,
+                    damping: 24,
+                    mass: 0.6,
+                  }}
+                  className="group relative order-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
                 >
-                  {isProcessingFiles ? (
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700 dark:border-zinc-600 dark:border-t-zinc-200" />
-                  ) : (
-                    <Plus className="h-[22px] w-[22px] stroke-[2.25]" />
-                  )}
-                </button>
+                  <motion.span
+                    className="pointer-events-none absolute inset-0 rounded-2xl bg-zinc-1000/0 blur-md"
+                    whileHover={{ scale: 1.15, opacity: 0.18 }}
+                    transition={{ duration: 0.25, ease: 'easeOut' }}
+                  />
+
+                  <motion.span
+                    className="relative z-10 flex items-center justify-center"
+                    animate={isProcessingFiles ? { opacity: [0.65, 1, 0.65] } : { opacity: 1 }}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.9 }}
+                    transition={{
+                      type: 'spring',
+                      stiffness: 500,
+                      damping: 22,
+                    }}
+                  >
+                    {isProcessingFiles ? (
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
+                    ) : (
+                      <Plus className="h-[22px] w-[22px] stroke-[2.25]" />
+                    )}
+                  </motion.span>
+                </motion.button>
 
                 {/* Composer text / speech-to-text mode */}
                 {voiceInputActive ? (
@@ -2622,7 +2646,7 @@ const cleanMessageContent = (content: unknown): string => {
                     </button>
                   </div>
                 ) : (
-                  <div className="relative min-w-0 flex-1 flex items-center">
+                  <div className="relative order-1 min-w-0 flex-1 basis-full flex items-center">
                     <textarea
                       ref={inputRef}
                       value={input}
@@ -2646,7 +2670,7 @@ const cleanMessageContent = (content: unknown): string => {
                 )}
 
                 {/* Think / model selector */}
-                <div className="relative shrink-0">
+                <div className="relative order-2 ml-auto shrink-0">
                   <motion.button
                     type="button"
                     onClick={() => setModelPickerOpen(prev => !prev)}
@@ -2727,14 +2751,15 @@ const cleanMessageContent = (content: unknown): string => {
                     title="Voice input"
                     whileHover={{ scale: 1.06 }}
                     whileTap={{ scale: 0.9 }}
-                    className="flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-9"
+                    className="order-2 flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-9"
                   >
                     <Mic className="h-[20px] w-[20px]" strokeWidth={2} />
                   </motion.button>
                 )}
 
                 {/* Live Talk / Send occupy the same action slot, like ChatGPT. */}
-                <AnimatePresence mode="wait" initial={false}>
+                <div className="order-2 shrink-0">
+                  <AnimatePresence mode="wait" initial={false}>
                   {!isTyping && !input.trim() && filePreviews.length === 0 ? (
                     <motion.button
                       key="live-talk"
@@ -2776,7 +2801,8 @@ const cleanMessageContent = (content: unknown): string => {
                       )}
                     </motion.button>
                   )}
-                </AnimatePresence>
+                  </AnimatePresence>
+                  </div>
               </div>
 
             </div>
