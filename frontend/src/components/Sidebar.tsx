@@ -4,7 +4,7 @@ import { Session, User } from '../types';
 import {
   LogOut, Trash2, X, Search, SquarePen,
   MoreHorizontal, Pin, PinOff, Edit3,
-  MessageCircle, Sun, Moon, Sparkles, Mic,
+  MessageCircle, Sun, Moon, Sparkles,
   Settings2, UserCircle2, ChevronRight, PanelLeft,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -443,32 +443,13 @@ function SessionList({
             aria-label="Search chats"
             className="w-full pl-10 pr-9 py-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs font-medium text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-zinc-400 transition-all"
           />
-          {searchQuery ? (
+          {searchQuery && (
             <button
               onClick={() => handleSearchChange('')}
               className="absolute inset-y-0 right-3 flex items-center text-zinc-400 hover:text-zinc-600"
               aria-label="Clear search"
             >
               <X className="w-3.5 h-3.5" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-                if (!SpeechRecognition) return;
-                const recognition = new SpeechRecognition();
-                recognition.lang = 'en-US';
-                recognition.interimResults = false;
-                recognition.maxAlternatives = 1;
-                recognition.onresult = (event: any) => handleSearchChange(event.results?.[0]?.[0]?.transcript || '');
-                recognition.start();
-              }}
-              className="absolute inset-y-0 right-2 flex w-7 items-center justify-center rounded-lg text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-              aria-label="Search by voice"
-              title="Search by voice"
-            >
-              <Mic className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
@@ -1057,14 +1038,19 @@ export default function Sidebar({
               className="twinkle-sidebar hidden lg:flex fixed inset-y-0 left-0 z-[2147483647] w-[360px] bg-white dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 flex-col h-full shadow-2xl"
               onClick={e => e.stopPropagation()}
             >
-              <div className="relative flex items-center px-5 pt-5 pb-2 shrink-0">
-                <h2 className="text-xl font-medium tracking-tight text-zinc-900/90 dark:text-white/90">Twinkle</h2>
+              <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 bg-transparent rounded-xl flex items-center justify-center p-1.5 shrink-0">
+                    <StormLogo className="w-full h-full text-zinc-900 dark:text-white" />
+                  </div>
+                  <h2 className="text-xl font-medium tracking-tight text-zinc-900/90 dark:text-white/90">Twinkle</h2>
+                </div>
                 <IconTooltip label="Close sidebar">
                   <button
                     onClick={collapseDesktop}
                     aria-label="Close sidebar"
                     title="Close sidebar"
-                    className="absolute right-3 top-4 flex h-10 w-10 items-center justify-center rounded-2xl text-zinc-600 transition-all hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-600 transition-all duration-200 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white"
                   >
                     <PanelLeft className="h-5 w-5" strokeWidth={1.8} />
                   </button>
