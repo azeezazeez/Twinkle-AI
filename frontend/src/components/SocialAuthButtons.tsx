@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { authApi } from '../lib/api';
+
+const GOOGLE_OAUTH_URL = '/api/auth/oauth/google';
 
 export default function SocialAuthButtons() {
   const [loading, setLoading] = useState(false);
@@ -9,12 +10,21 @@ export default function SocialAuthButtons() {
 
     setLoading(true);
 
-    try {
-      authApi.startGoogleOAuth();
-    } catch (error) {
-      console.error('[Twinkle Auth] Google OAuth failed:', error);
-      setLoading(false);
-    }
+    /*
+     * IMPORTANT:
+     * Do not use authApi here.
+     * OAuth is a browser navigation, not an API fetch.
+     *
+     * Browser:
+     *   /api/auth/oauth/google
+     *
+     * Vercel:
+     *   ↓ rewrite
+     *
+     * Render:
+     *   /api/auth/oauth/google
+     */
+    window.location.assign(GOOGLE_OAUTH_URL);
   };
 
   return (
@@ -23,19 +33,47 @@ export default function SocialAuthButtons() {
         type="button"
         onClick={handleGoogleLogin}
         disabled={loading}
-        className="w-full h-14 rounded-xl border border-black/20 bg-white/70
-                   flex items-center justify-center gap-3
-                   text-sm font-semibold text-black
-                   transition-all duration-200
-                   hover:bg-white hover:border-black/40
-                   disabled:opacity-60 disabled:cursor-not-allowed"
+        aria-label="Continue with Google"
+        className="
+          w-full
+          h-14
+          rounded-xl
+          border
+          border-black/20
+          bg-white/70
+          flex
+          items-center
+          justify-center
+          gap-3
+          text-sm
+          font-semibold
+          text-black
+          transition-all
+          duration-200
+          hover:bg-white
+          hover:border-black/40
+          disabled:opacity-60
+          disabled:cursor-not-allowed
+        "
       >
-        <span className="text-lg font-bold">
+        <span
+          className="
+            flex
+            items-center
+            justify-center
+            w-5
+            h-5
+            text-lg
+            font-bold
+          "
+        >
           G
         </span>
 
         <span>
-          {loading ? 'Opening...' : 'Continue with Google'}
+          {loading
+            ? 'Opening...'
+            : 'Continue with Google'}
         </span>
       </button>
     </div>
