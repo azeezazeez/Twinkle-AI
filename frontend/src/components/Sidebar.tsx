@@ -785,7 +785,7 @@ function AccountMenu({
             className={
               compact
                 ? "absolute bottom-0 left-full z-[10000] ml-3 w-[310px] origin-bottom-left overflow-hidden rounded-2xl border border-zinc-200 bg-white p-2 shadow-[0_18px_55px_rgba(0,0,0,.16)] dark:border-zinc-800 dark:bg-zinc-950"
-                : "absolute bottom-[calc(100%+10px)] left-0 z-[10000] w-[310px] origin-bottom-left overflow-hidden rounded-2xl border border-zinc-200 bg-white p-2 shadow-[0_18px_55px_rgba(0,0,0,.16)] dark:border-zinc-800 dark:bg-zinc-950"
+                : "absolute bottom-[calc(100%+10px)] left-1/2 z-[10000] w-[calc(100vw-32px)] max-w-[310px] -translate-x-1/2 origin-bottom overflow-hidden rounded-2xl border border-zinc-200 bg-white p-2 shadow-[0_18px_55px_rgba(0,0,0,.16)] dark:border-zinc-800 dark:bg-zinc-950 sm:left-0 sm:w-[310px] sm:max-w-none sm:translate-x-0 sm:origin-bottom-left"
             }
           >
             {/* Account header */}
