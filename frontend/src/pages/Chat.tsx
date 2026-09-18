@@ -1045,15 +1045,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     }
   }, [onLogout]);
 
-  // When Live Talk finishes, the conversation has already been persisted by
-  // LiveTalkModal. Make that saved session the active chat and load its real
-  // database history into the main chat area.
   const handleLiveSessionComplete = useCallback(async (sessionId: number) => {
     if (!Number.isFinite(sessionId)) return;
 
-    // The normal currentSessionId effect would also fetch this session. Mark
-    // it as a one-time skip so we control the fetch here and avoid duplicate
-    // history requests/races.
+  
     skipMessageLoadRef.current = sessionId;
     setCurrentSessionId(sessionId);
     persistSessionId(sessionId);
@@ -2797,6 +2792,7 @@ const cleanMessageContent = (content: unknown): string => {
         open={liveTalkOpen}
         userName={user.username || user.name}
         onClose={() => setLiveTalkOpen(false)}
+         onSessionComplete={handleLiveSessionComplete}
       />
 
       <AnimatePresence>
