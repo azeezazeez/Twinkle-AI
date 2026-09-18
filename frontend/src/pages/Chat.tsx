@@ -2636,7 +2636,7 @@ const cleanMessageContent = (content: unknown): string => {
 
               <div
                 ref={modelPickerRef}
-                className="twinkle-composer-row relative z-[200] flex min-w-0 items-center gap-1.5 px-2.5 py-2 sm:gap-2 sm:px-3 sm:py-2.5 md:px-4"
+                className="twinkle-composer-row relative z-[200] flex min-w-0 flex-col gap-1 px-2.5 py-2 sm:gap-2 sm:px-3 sm:py-2.5 md:flex-row md:items-center md:gap-2 md:px-4"
               >
                 {/* Hidden file input */}
                 <input
@@ -2651,52 +2651,12 @@ const cleanMessageContent = (content: unknown): string => {
                   }}
                 />
 
-                {/* + attachment button */}
-                <motion.button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isTyping || isProcessingFiles}
-                  aria-label="Attach files"
-                  title="Attach files"
-                  whileHover={{ scale: 1.04, y: -1 }}
-                  whileTap={{ scale: 0.94, y: 0 }}
-                  transition={{
-                    type: 'spring',
-                    stiffness: 420,
-                    damping: 24,
-                    mass: 0.6,
-                  }}
-                  className="group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-                >
-                  <motion.span
-                    className="pointer-events-none absolute inset-0 rounded-2xl bg-zinc-1000/0 blur-md"
-                    whileHover={{ scale: 1.15, opacity: 0.18 }}
-                    transition={{ duration: 0.25, ease: 'easeOut' }}
-                  />
-
-                  <motion.span
-                    className="relative z-10 flex items-center justify-center"
-                    animate={isProcessingFiles ? { rotate: 90 } : { rotate: 0 }}
-                    whileHover={{ scale: 1.12, rotate: 180 }}
-                    whileTap={{ scale: 0.9, rotate: 180 }}
-                    transition={{
-                      type: 'spring',
-                      stiffness: 500,
-                      damping: 22,
-                    }}
-                  >
-                    {isProcessingFiles ? (
-                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
-                    ) : (
-                      <Plus className="h-[22px] w-[22px] stroke-[2.25]" />
-                    )}
-                  </motion.span>
-                </motion.button>
-
-                {/* Composer text / speech-to-text mode */}
+                {/* Composer text / speech-to-text area.
+                    Mobile: full width on the first row.
+                    Desktop: stays in the main horizontal composer row. */}
                 {voiceInputActive ? (
                   <div
-                    className="relative flex min-w-0 flex-1 items-center gap-2 px-1 sm:gap-3"
+                    className="relative order-1 flex min-h-[42px] w-full min-w-0 items-center gap-2 px-1 sm:min-h-[46px] sm:gap-3 md:order-2 md:flex-1"
                     aria-live="polite"
                     aria-label="Listening for speech"
                   >
@@ -2711,6 +2671,7 @@ const cleanMessageContent = (content: unknown): string => {
                           const height = hasSpeech
                             ? 5 + ((index * 17) % 18)
                             : 3 + ((index * 7) % 5);
+
                           return (
                             <motion.span
                               key={index}
@@ -2730,29 +2691,9 @@ const cleanMessageContent = (content: unknown): string => {
                         })}
                       </div>
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={cancelVoiceInput}
-                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-800 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
-                      aria-label="Discard voice input"
-                      title="Discard"
-                    >
-                      <X className="h-5 w-5" strokeWidth={2.1} />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={commitVoiceInput}
-                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
-                      aria-label="Use voice input"
-                      title="Use voice input"
-                    >
-                      <Check className="h-5 w-5" strokeWidth={2.1} />
-                    </button>
                   </div>
                 ) : (
-                  <div className="relative min-w-0 flex-1 flex items-center">
+                  <div className="relative order-1 flex min-h-[42px] w-full min-w-0 items-center md:order-2 md:min-h-[46px] md:flex-1">
                     <textarea
                       ref={inputRef}
                       value={input}
@@ -2765,7 +2706,7 @@ const cleanMessageContent = (content: unknown): string => {
                       }}
                       placeholder="Ask Anything"
                       rows={1}
-                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent px-1 py-2 text-[15px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:min-h-[46px] sm:py-2.5"
+                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent px-1 py-1.5 text-[15px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:py-2.5"
                       onInput={(e) => {
                         const t = e.target as HTMLTextAreaElement;
                         t.style.height = 'auto';
@@ -2775,138 +2716,231 @@ const cleanMessageContent = (content: unknown): string => {
                   </div>
                 )}
 
-                {/* Think / model selector */}
-                <div className="relative shrink-0">
+                {/* Toolbar.
+                    Mobile: + on the left, model/mic/action on the right.
+                    Desktop: children become direct flex items so the original
+                    + -> input -> model -> mic -> action order is preserved. */}
+                <div className="order-2 flex w-full min-w-0 items-center justify-between gap-1 md:contents">
+                  {/* + attachment button */}
                   <motion.button
                     type="button"
-                    onClick={() => setModelPickerOpen(prev => !prev)}
-                    disabled={isTyping}
-                    aria-haspopup="listbox"
-                    aria-expanded={modelPickerOpen}
-                    whileHover={{ y: -1 }}
-                    whileTap={{ scale: 0.97 }}
-                    transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                    className="group relative inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border-0 bg-transparent px-2 text-black shadow-none outline-none transition-colors hover:bg-zinc-100/70 dark:bg-transparent dark:text-white dark:hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50 sm:px-2.5"
-                  >
-                    <span className="max-w-[190px] truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:text-sm">
-                      {activeModelName}
-                    </span>
-                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
-                  
-                  </motion.button>
-
-                  <AnimatePresence>
-                    {modelPickerOpen && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 8, scale: 0.97 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 8, scale: 0.97 }}
-                        transition={{ duration: 0.16, ease: 'easeOut' }}
-                        role="listbox"
-                        aria-label="Select AI model"
-                        className="fixed bottom-[calc(88px+env(safe-area-inset-bottom,0px))] right-2 z-[99999] w-[min(360px,calc(100vw-16px))] max-w-[calc(100vw-16px)] max-h-[min(360px,calc(100dvh-180px))] overflow-y-auto overflow-x-hidden rounded-xl border border-zinc-200/90 bg-white/95 p-1.5 shadow-2xl shadow-zinc-900/20 backdrop-blur-2xl dark:border-zinc-700/90 dark:bg-zinc-900/95 dark:shadow-black/50 sm:absolute sm:bottom-[calc(100%+8px)] sm:right-0 sm:w-[360px] sm:max-w-[calc(100vw-24px)] sm:max-h-[420px] sm:overflow-hidden sm:rounded-2xl sm:p-2"
-                      >
-                        <div className="px-2 pb-2 pt-1">
-                          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400 dark:text-zinc-500">
-                            Select AI model
-                          </p>
-                        </div>
-                        <div className="space-y-1">
-                          {MODEL_OPTIONS.map(option => {
-                            const Icon = option.icon;
-                            const selected = option.id === selectedModel;
-                            return (
-                              <motion.button
-                                key={option.id}
-                                type="button"
-                                role="option"
-                                aria-selected={selected}
-                                onClick={() => chooseModel(option.id)}
-                                whileHover={{ x: 2 }}
-                                whileTap={{ scale: 0.985 }}
-                                transition={{ type: 'spring', stiffness: 450, damping: 28 }}
-                                className={`flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-all ${selected ? 'border-zinc-500 bg-zinc-100 shadow-sm dark:border-zinc-500 dark:bg-zinc-950/40' : 'border-transparent hover:border-zinc-200 hover:bg-zinc-50 dark:hover:border-zinc-700 dark:hover:bg-zinc-800/80'}`}
-                              >
-                                <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${selected ? 'bg-black text-white shadow-md' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'}`}>
-                                  <Icon className="h-4 w-4" />
-                                </span>
-                                <span className="min-w-0 flex-1">
-                                  <span className="flex items-center gap-2">
-                                    <span className="truncate text-xs font-medium text-zinc-800 dark:text-zinc-100">{option.name}</span>
-                                  </span>
-                                  <span className="mt-0.5 block truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
-                                    {option.description}{option.vision ? ' · Vision' : ''}
-                                  </span>
-                                </span>
-                                {selected && <Check className="h-4 w-4 shrink-0 text-zinc-600 dark:text-zinc-600 dark:text-zinc-300" />}
-                              </motion.button>
-                            );
-                          })}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-
-                {!voiceInputActive && (
-                  <motion.button
-                    type="button"
-                    onClick={startVoiceInput}
+                    onClick={() => fileInputRef.current?.click()}
                     disabled={isTyping || isProcessingFiles}
-                    aria-label="Voice input"
-                    title="Voice input"
-                    whileHover={{ scale: 1.06 }}
-                    whileTap={{ scale: 0.9 }}
-                    className="flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-9"
+                    aria-label="Attach files"
+                    title="Attach files"
+                    whileHover={{ scale: 1.04, y: -1 }}
+                    whileTap={{ scale: 0.94, y: 0 }}
+                    transition={{
+                      type: 'spring',
+                      stiffness: 420,
+                      damping: 24,
+                      mass: 0.6,
+                    }}
+                    className="order-1 group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 md:order-1"
                   >
-                    <Mic className="h-[20px] w-[20px]" strokeWidth={2} />
-                  </motion.button>
-                )}
+                    <motion.span
+                      className="pointer-events-none absolute inset-0 rounded-2xl bg-zinc-1000/0 blur-md"
+                      whileHover={{ scale: 1.15, opacity: 0.18 }}
+                      transition={{ duration: 0.25, ease: 'easeOut' }}
+                    />
 
-                {/* Live Talk / Send occupy the same action slot, like ChatGPT. */}
-                <AnimatePresence mode="wait" initial={false}>
-                  {!isTyping && !input.trim() && filePreviews.length === 0 ? (
-                    <motion.button
-                      key="live-talk"
-                      type="button"
-                      onClick={() => setLiveTalkOpen(true)}
-                      aria-label="Open Live Talk"
-                      title="Live Talk"
-                      initial={{ opacity: 0, scale: 0.88, y: 2 }}
-                      animate={{ opacity: 1, scale: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.88, y: 2 }}
-                      whileHover={{ scale: 1.06 }}
-                      whileTap={{ scale: 0.92 }}
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#ec6aa8] text-white shadow-[0_8px_20px_rgba(236,106,168,.22)] transition hover:bg-[#e85f9f] sm:h-11 sm:w-11"
+                    <motion.span
+                      className="relative z-10 flex items-center justify-center"
+                      animate={isProcessingFiles ? { rotate: 90 } : { rotate: 0 }}
+                      whileHover={{ scale: 1.12, rotate: 180 }}
+                      whileTap={{ scale: 0.9, rotate: 180 }}
+                      transition={{
+                        type: 'spring',
+                        stiffness: 500,
+                        damping: 22,
+                      }}
                     >
-                      <AudioLines className="h-[19px] w-[19px]" strokeWidth={2.1} />
+                      {isProcessingFiles ? (
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
+                      ) : (
+                        <Plus className="h-[22px] w-[22px] stroke-[2.25]" />
+                      )}
+                    </motion.span>
+                  </motion.button>
+
+                  {/* Model selector */}
+                  <div className="order-2 relative ml-auto shrink-0 md:order-3 md:ml-0">
+                    <motion.button
+                      type="button"
+                      onClick={() => setModelPickerOpen(prev => !prev)}
+                      disabled={isTyping}
+                      aria-haspopup="listbox"
+                      aria-expanded={modelPickerOpen}
+                      whileHover={{ y: -1 }}
+                      whileTap={{ scale: 0.97 }}
+                      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                      className="group relative inline-flex h-10 max-w-[150px] shrink-0 items-center gap-1.5 rounded-lg border-0 bg-transparent px-2 text-black shadow-none outline-none transition-colors hover:bg-zinc-100/70 dark:bg-transparent dark:text-white dark:hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50 sm:max-w-[190px] sm:px-2.5"
+                    >
+                      <span className="max-w-[112px] truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:max-w-[150px] sm:text-sm">
+                        {activeModelName}
+                      </span>
+                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
+                    </motion.button>
+
+                    <AnimatePresence>
+                      {modelPickerOpen && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: 8, scale: 0.97 }}
+                          transition={{ duration: 0.16, ease: 'easeOut' }}
+                          role="listbox"
+                          aria-label="Select AI model"
+                          className="fixed bottom-[calc(88px+env(safe-area-inset-bottom,0px))] right-2 z-[99999] w-[min(360px,calc(100vw-16px))] max-w-[calc(100vw-16px)] max-h-[min(360px,calc(100dvh-180px))] overflow-y-auto overflow-x-hidden rounded-xl border border-zinc-200/90 bg-white/95 p-1.5 shadow-2xl shadow-zinc-900/20 backdrop-blur-2xl dark:border-zinc-700/90 dark:bg-zinc-900/95 dark:shadow-black/50 sm:absolute sm:bottom-[calc(100%+8px)] sm:right-0 sm:w-[360px] sm:max-w-[calc(100vw-24px)] sm:max-h-[420px] sm:overflow-hidden sm:rounded-2xl sm:p-2"
+                        >
+                          <div className="px-2 pb-2 pt-1">
+                            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400 dark:text-zinc-500">
+                              Select AI model
+                            </p>
+                          </div>
+
+                          <div className="space-y-1">
+                            {MODEL_OPTIONS.map(option => {
+                              const Icon = option.icon;
+                              const selected = option.id === selectedModel;
+
+                              return (
+                                <motion.button
+                                  key={option.id}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={selected}
+                                  onClick={() => chooseModel(option.id)}
+                                  whileHover={{ x: 2 }}
+                                  whileTap={{ scale: 0.985 }}
+                                  transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+                                  className={`flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-all ${
+                                    selected
+                                      ? 'border-zinc-500 bg-zinc-100 shadow-sm dark:border-zinc-500 dark:bg-zinc-950/40'
+                                      : 'border-transparent hover:border-zinc-200 hover:bg-zinc-50 dark:hover:border-zinc-700 dark:hover:bg-zinc-800/80'
+                                  }`}
+                                >
+                                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
+                                    selected
+                                      ? 'bg-black text-white shadow-md'
+                                      : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'
+                                  }`}>
+                                    <Icon className="h-4 w-4" />
+                                  </span>
+
+                                  <span className="min-w-0 flex-1">
+                                    <span className="flex items-center gap-2">
+                                      <span className="truncate text-xs font-medium text-zinc-800 dark:text-zinc-100">
+                                        {option.name}
+                                      </span>
+                                    </span>
+                                    <span className="mt-0.5 block truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
+                                      {option.description}{option.vision ? ' · Vision' : ''}
+                                    </span>
+                                  </span>
+
+                                  {selected && (
+                                    <Check className="h-4 w-4 shrink-0 text-zinc-600 dark:text-zinc-300" />
+                                  )}
+                                </motion.button>
+                              );
+                            })}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
+                  {/* Microphone / voice-input button */}
+                  {!voiceInputActive ? (
+                    <motion.button
+                      type="button"
+                      onClick={startVoiceInput}
+                      disabled={isTyping || isProcessingFiles}
+                      aria-label="Voice input"
+                      title="Voice input"
+                      whileHover={{ scale: 1.06 }}
+                      whileTap={{ scale: 0.9 }}
+                      className="order-3 flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 md:order-4"
+                    >
+                      <Mic className="h-[20px] w-[20px]" strokeWidth={2} />
                     </motion.button>
                   ) : (
                     <motion.button
-                      key="send"
                       type="button"
-                      onClick={isTyping ? handleStopResponse : () => handleSendMessage()}
-                      disabled={!input.trim() && (!Array.isArray(filePreviews) || filePreviews.length === 0) && !isTyping}
-                      aria-label={isTyping ? 'Stop response' : 'Send message'}
-                      title={isTyping ? 'Stop response' : 'Send message'}
-                      initial={{ opacity: 0, scale: 0.88, y: 2 }}
-                      animate={{ opacity: 1, scale: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.88, y: 2 }}
-                      whileHover={{ scale: isTyping || input.trim() || filePreviews.length ? 1.06 : 1, y: -1 }}
-                      whileTap={{ scale: 0.92 }}
-                      transition={{ type: 'spring', stiffness: 450, damping: 25 }}
-                      className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isTyping ? 'border-[#ec6aa8] bg-[#ec6aa8] text-white shadow-[#ec6aa8]/20' : 'border-zinc-300 bg-white hover:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-800 dark:hover:border-zinc-500'}`}
+                      onClick={cancelVoiceInput}
+                      aria-label="Discard voice input"
+                      title="Discard voice input"
+                      whileHover={{ scale: 1.06 }}
+                      whileTap={{ scale: 0.9 }}
+                      className="order-3 flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-zinc-800 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 md:order-4"
                     >
-                      {isTyping ? (
-                        <span className="relative flex h-full w-full items-center justify-center">
-                          <span className="h-3.5 w-3.5 rounded-[3px] bg-white shadow-sm" />
-                        </span>
-                      ) : (
-                        <ArrowUp className="h-4 w-4" />
-                      )}
+                      <X className="h-5 w-5" strokeWidth={2.1} />
                     </motion.button>
                   )}
-                </AnimatePresence>
+
+                  {/* Send / Live Talk — one persistent action slot.
+                      The button itself never unmounts, so switching from
+                      Live Talk to Send happens immediately as input changes. */}
+                  {voiceInputActive ? (
+                    <motion.button
+                      type="button"
+                      onClick={commitVoiceInput}
+                      aria-label="Use voice input"
+                      title="Use voice input"
+                      whileHover={{ scale: 1.06, y: -1 }}
+                      whileTap={{ scale: 0.92 }}
+                      className="order-4 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 md:order-5"
+                    >
+                      <Check className="h-5 w-5" strokeWidth={2.1} />
+                    </motion.button>
+                  ) : (() => {
+                    const showLiveTalk = !isTyping && !input.trim() && filePreviews.length === 0;
+
+                    return (
+                      <motion.button
+                        type="button"
+                        onClick={showLiveTalk ? () => setLiveTalkOpen(true) : isTyping ? handleStopResponse : () => handleSendMessage()}
+                        disabled={!showLiveTalk && !isTyping && !input.trim() && filePreviews.length === 0}
+                        aria-label={isTyping ? 'Stop response' : showLiveTalk ? 'Open Live Talk' : 'Send message'}
+                        title={isTyping ? 'Stop response' : showLiveTalk ? 'Live Talk' : 'Send message'}
+                        whileHover={{ scale: 1.06, y: -1 }}
+                        whileTap={{ scale: 0.92 }}
+                        className={`order-4 relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full shadow-sm md:order-5 ${
+                          isTyping || showLiveTalk
+                            ? 'bg-[#ec6aa8] text-white shadow-[0_8px_20px_rgba(236,106,168,.22)]'
+                            : 'border border-zinc-300 bg-white text-zinc-900 hover:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:border-zinc-500'
+                        }`}
+                      >
+                        {isTyping ? (
+                          <span className="flex h-full w-full items-center justify-center">
+                            <span className="h-3.5 w-3.5 rounded-[3px] bg-white shadow-sm" />
+                          </span>
+                        ) : showLiveTalk ? (
+                          <motion.span
+                            key="live-talk"
+                            initial={{ opacity: 0, scale: 0.82 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ duration: 0.06, ease: 'linear' }}
+                            className="flex items-center justify-center"
+                          >
+                            <AudioLines className="h-[19px] w-[19px]" strokeWidth={2.1} />
+                          </motion.span>
+                        ) : (
+                          <motion.span
+                            key="send"
+                            initial={{ opacity: 0, scale: 0.82 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ duration: 0.06, ease: 'linear' }}
+                            className="flex items-center justify-center"
+                          >
+                            <ArrowUp className="h-4 w-4" />
+                          </motion.span>
+                        )}
+                      </motion.button>
+                    );
+                  })()}
+                </div>
               </div>
 
             </div>
