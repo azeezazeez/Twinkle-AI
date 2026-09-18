@@ -15,12 +15,13 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Base64;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+
 
 @Controller
 @RequestMapping("/api/auth/oauth")
@@ -30,30 +31,50 @@ public class OAuthController {
 
     private final OAuthService oauthService;
 
+
+    /*
+     * ============================================================
+     * CONFIGURATION
+     * ============================================================
+     */
+
     @Value("${oauth.state-secret}")
     private String stateSecret;
 
-    @Value("${frontend-url:https://twinkleai.vercel.app}")
+
+    @Value("${frontend.url:https://twinkleai.vercel.app}")
     private String frontendUrl;
 
 
-    // ============================================================
-    // GOOGLE LOGIN
-    // ============================================================
+    /*
+     * ============================================================
+     * GOOGLE LOGIN
+     * ============================================================
+     */
 
     @GetMapping("/google")
     public String google() {
 
         try {
 
-            String state = createState("GOOGLE");
+            String state =
+                    createState("GOOGLE");
+
 
             String authorizationUrl =
-                    oauthService.googleAuthorizationUrl(state);
+                    oauthService.googleAuthorizationUrl(
+                            state
+                    );
 
-            log.info("Starting Google OAuth flow");
 
-            return "redirect:" + authorizationUrl;
+            log.info(
+                    "Starting Google OAuth flow"
+            );
+
+
+            return "redirect:" +
+                    authorizationUrl;
+
 
         } catch (Exception e) {
 
@@ -62,6 +83,7 @@ public class OAuthController {
                     e
             );
 
+
             return redirect(
                     "/login?oauthError=Google+OAuth+configuration+error"
             );
@@ -69,47 +91,80 @@ public class OAuthController {
     }
 
 
-    // ============================================================
-    // GOOGLE CALLBACK
-    // ============================================================
+    /*
+     * ============================================================
+     * GOOGLE CALLBACK
+     * ============================================================
+     */
 
     @GetMapping("/google/callback")
     public String googleCallback(
-            @RequestParam(required = false) String code,
-            @RequestParam(required = false) String state,
-            @RequestParam(required = false) String error,
+
+            @RequestParam(
+                    required = false
+            )
+            String code,
+
+            @RequestParam(
+                    required = false
+            )
+            String state,
+
+            @RequestParam(
+                    required = false
+            )
+            String error,
+
             HttpServletRequest request
+
     ) {
 
-        // --------------------------------------------------------
-        // GOOGLE RETURNED AN ERROR
-        // --------------------------------------------------------
+        log.info(
+                "Google OAuth callback received"
+        );
 
-        if (error != null && !error.isBlank()) {
+
+        /*
+         * --------------------------------------------------------
+         * GOOGLE ERROR
+         * --------------------------------------------------------
+         */
+
+        if (
+                error != null &&
+                !error.isBlank()
+        ) {
 
             log.warn(
                     "Google OAuth returned error: {}",
                     error
             );
 
+
             return redirect(
-                    "/login?oauthError=" + url(error)
+                    "/login?oauthError=" +
+                            url(error)
             );
         }
 
 
-        // --------------------------------------------------------
-        // VALIDATE GOOGLE RESPONSE
-        // --------------------------------------------------------
+        /*
+         * --------------------------------------------------------
+         * VALIDATE CODE + STATE
+         * --------------------------------------------------------
+         */
 
-        if (code == null ||
+        if (
+                code == null ||
                 code.isBlank() ||
                 state == null ||
-                state.isBlank()) {
+                state.isBlank()
+        ) {
 
             log.warn(
                     "Google OAuth callback missing code or state"
             );
+
 
             return redirect(
                     "/login?oauthError=Invalid+Google+response"
@@ -117,15 +172,23 @@ public class OAuthController {
         }
 
 
-        // --------------------------------------------------------
-        // VALIDATE STATE
-        // --------------------------------------------------------
+        /*
+         * --------------------------------------------------------
+         * VALIDATE STATE
+         * --------------------------------------------------------
+         */
 
-        if (!verifyState(state, "GOOGLE")) {
+        if (
+                !verifyState(
+                        state,
+                        "GOOGLE"
+                )
+        ) {
 
             log.warn(
                     "Google OAuth state validation failed"
             );
+
 
             return redirect(
                     "/login?oauthError=Invalid+OAuth+state"
@@ -135,12 +198,16 @@ public class OAuthController {
 
         try {
 
-            // ----------------------------------------------------
-            // EXCHANGE CODE + LOAD GOOGLE USER
-            // ----------------------------------------------------
+            /*
+             * ----------------------------------------------------
+             * LOAD GOOGLE USER
+             * ----------------------------------------------------
+             */
 
             User user =
-                    oauthService.googleUser(code);
+                    oauthService.googleUser(
+                            code
+                    );
 
 
             if (user == null) {
@@ -151,27 +218,83 @@ public class OAuthController {
             }
 
 
-            // ----------------------------------------------------
-            // CREATE AUTHENTICATED SESSION
-            // ----------------------------------------------------
+            if (
+                    user.getId() == null
+            ) {
 
-            createLoginSession(
-                    request,
-                    user
-            );
+                throw new IllegalStateException(
+                        "Google user ID is missing"
+                );
+            }
 
+
+            if (
+                    user.getEmail() == null ||
+                    user.getEmail().isBlank()
+            ) {
+
+                throw new IllegalStateException(
+                        "Google user email is missing"
+                );
+            }
+
+
+            /*
+             * ----------------------------------------------------
+             * CREATE / UPDATE SESSION
+             * ----------------------------------------------------
+             */
+
+            HttpSession session =
+                    createLoginSession(
+                            request,
+                            user
+                    );
+
+
+            /*
+             * ----------------------------------------------------
+             * IMPORTANT DIAGNOSTIC LOGGING
+             * ----------------------------------------------------
+             */
 
             log.info(
-                    "Google OAuth login successful for {}",
+                    "Google OAuth authentication successful"
+            );
+
+            log.info(
+                    "Google user email: {}",
                     user.getEmail()
             );
 
+            log.info(
+                    "Google session created: {}",
+                    session.getId()
+            );
 
-            // ----------------------------------------------------
-            // REDIRECT TO FRONTEND CHAT
-            // ----------------------------------------------------
+            log.info(
+                    "Google session userId: {}",
+                    session.getAttribute(
+                            "userId"
+                    )
+            );
+
+            log.info(
+                    "Google session user exists: {}",
+                    session.getAttribute(
+                            "user"
+                    ) != null
+            );
+
+
+            /*
+             * ----------------------------------------------------
+             * REDIRECT TO FRONTEND
+             * ----------------------------------------------------
+             */
 
             return redirect("/");
+
 
         } catch (Exception e) {
 
@@ -179,6 +302,7 @@ public class OAuthController {
                     "Google OAuth callback failed",
                     e
             );
+
 
             return redirect(
                     "/login?oauthError=" +
@@ -193,33 +317,35 @@ public class OAuthController {
     }
 
 
-    // ============================================================
-    // CREATE LOGIN SESSION
-    // ============================================================
+    /*
+     * ============================================================
+     * CREATE LOGIN SESSION
+     * ============================================================
+     */
 
-    private void createLoginSession(
+    private HttpSession createLoginSession(
+
             HttpServletRequest request,
+
             User user
+
     ) {
 
         /*
-         * IMPORTANT:
+         * Get the existing session if the browser already has one.
          *
-         * We deliberately create/use the HTTP session here.
-         *
-         * The frontend subsequently calls:
-         *
-         * GET /api/auth/status
-         *
-         * with credentials included.
-         *
-         * Spring Session + Redis keeps this session available
-         * between the OAuth callback and frontend API requests.
+         * Otherwise create a new Redis-backed session.
          */
 
         HttpSession session =
                 request.getSession(true);
 
+
+        /*
+         * Store the complete user object.
+         *
+         * AuthController /status reads this attribute.
+         */
 
         session.setAttribute(
                 "user",
@@ -227,30 +353,56 @@ public class OAuthController {
         );
 
 
+        /*
+         * Store user ID separately because other
+         * controllers/services may use it.
+         */
+
         session.setAttribute(
                 "userId",
                 user.getId()
         );
 
 
-        log.info(
-                "Authenticated session created. sessionId={}, userId={}",
-                session.getId(),
-                user.getId()
+        /*
+         * Make sure the session remains active.
+         */
+
+        session.setMaxInactiveInterval(
+                24 * 60 * 60
         );
+
+
+        /*
+         * Force the session to be touched/updated.
+         *
+         * Spring Session will persist this session into Redis
+         * when the request completes.
+         */
+
+        session.setAttribute(
+                "authentication_method",
+                "GOOGLE"
+        );
+
+
+        return session;
     }
 
 
-    // ============================================================
-    // OAUTH STATE
-    // ============================================================
+    /*
+     * ============================================================
+     * CREATE OAUTH STATE
+     * ============================================================
+     */
 
     private String createState(
             String provider
     ) {
 
         long timestamp =
-                Instant.now().getEpochSecond();
+                Instant.now()
+                        .getEpochSecond();
 
 
         String payload =
@@ -279,25 +431,41 @@ public class OAuthController {
     }
 
 
+    /*
+     * ============================================================
+     * VERIFY OAUTH STATE
+     * ============================================================
+     */
+
     private boolean verifyState(
+
             String state,
+
             String expectedProvider
+
     ) {
 
         try {
 
-            if (state == null ||
-                    state.isBlank()) {
+            if (
+                    state == null ||
+                    state.isBlank()
+            ) {
 
                 return false;
             }
 
 
             String[] parts =
-                    state.split("\\.", 2);
+                    state.split(
+                            "\\.",
+                            2
+                    );
 
 
-            if (parts.length != 2) {
+            if (
+                    parts.length != 2
+            ) {
 
                 return false;
             }
@@ -305,6 +473,7 @@ public class OAuthController {
 
             String encodedPayload =
                     parts[0];
+
 
             String providedSignature =
                     parts[1];
@@ -325,10 +494,15 @@ public class OAuthController {
 
 
             String[] payloadParts =
-                    payload.split(":", 2);
+                    payload.split(
+                            ":",
+                            2
+                    );
 
 
-            if (payloadParts.length != 2) {
+            if (
+                    payloadParts.length != 2
+            ) {
 
                 return false;
             }
@@ -337,32 +511,52 @@ public class OAuthController {
             String provider =
                     payloadParts[0];
 
+
             long timestamp =
                     Long.parseLong(
                             payloadParts[1]
                     );
 
 
-            // Provider must match.
-            if (!expectedProvider.equals(provider)) {
+            /*
+             * Provider check
+             */
+
+            if (
+                    !expectedProvider.equals(
+                            provider
+                    )
+            ) {
 
                 return false;
             }
 
 
-            // State is valid for 10 minutes.
+            /*
+             * State expires after 10 minutes.
+             */
+
             long now =
-                    Instant.now().getEpochSecond();
+                    Instant.now()
+                            .getEpochSecond();
+
 
             long age =
                     now - timestamp;
 
 
-            if (age < 0 || age > 600) {
+            if (
+                    age < 0 ||
+                    age > 600
+            ) {
 
                 return false;
             }
 
+
+            /*
+             * Recalculate signature.
+             */
 
             String expectedSignature =
                     hmac(payload);
@@ -373,6 +567,7 @@ public class OAuthController {
                     providedSignature
             );
 
+
         } catch (Exception e) {
 
             log.warn(
@@ -380,14 +575,17 @@ public class OAuthController {
                     e.getMessage()
             );
 
+
             return false;
         }
     }
 
 
-    // ============================================================
-    // HMAC
-    // ============================================================
+    /*
+     * ============================================================
+     * HMAC
+     * ============================================================
+     */
 
     private String hmac(
             String value
@@ -396,14 +594,18 @@ public class OAuthController {
         try {
 
             Mac mac =
-                    Mac.getInstance("HmacSHA256");
+                    Mac.getInstance(
+                            "HmacSHA256"
+                    );
 
 
             SecretKeySpec key =
                     new SecretKeySpec(
+
                             stateSecret.getBytes(
                                     StandardCharsets.UTF_8
                             ),
+
                             "HmacSHA256"
                     );
 
@@ -421,7 +623,10 @@ public class OAuthController {
 
             return Base64.getUrlEncoder()
                     .withoutPadding()
-                    .encodeToString(digest);
+                    .encodeToString(
+                            digest
+                    );
+
 
         } catch (Exception e) {
 
@@ -433,19 +638,34 @@ public class OAuthController {
     }
 
 
-    // ============================================================
-    // CONSTANT-TIME COMPARISON
-    // ============================================================
+    /*
+     * ============================================================
+     * CONSTANT-TIME COMPARISON
+     * ============================================================
+     */
 
     private boolean constantTimeEquals(
+
             String first,
+
             String second
+
     ) {
+
+        if (
+                first == null ||
+                second == null
+        ) {
+
+            return false;
+        }
+
 
         byte[] firstBytes =
                 first.getBytes(
                         StandardCharsets.UTF_8
                 );
+
 
         byte[] secondBytes =
                 second.getBytes(
@@ -461,9 +681,11 @@ public class OAuthController {
     }
 
 
-    // ============================================================
-    // FRONTEND REDIRECT
-    // ============================================================
+    /*
+     * ============================================================
+     * FRONTEND REDIRECT
+     * ============================================================
+     */
 
     private String redirect(
             String path
@@ -473,15 +695,16 @@ public class OAuthController {
                 frontendUrl;
 
 
-        if (base == null ||
-                base.isBlank()) {
+        if (
+                base == null ||
+                base.isBlank()
+        ) {
 
             base =
                     "https://twinkleai.vercel.app";
         }
 
 
-        // Remove trailing slash.
         base =
                 base.replaceAll(
                         "/+$",
@@ -489,14 +712,19 @@ public class OAuthController {
                 );
 
 
-        if (path == null ||
-                path.isBlank()) {
+        if (
+                path == null ||
+                path.isBlank()
+        ) {
 
-            return "redirect:" + base;
+            return "redirect:" +
+                    base;
         }
 
 
-        if (!path.startsWith("/")) {
+        if (
+                !path.startsWith("/")
+        ) {
 
             path =
                     "/" + path;
@@ -509,9 +737,11 @@ public class OAuthController {
     }
 
 
-    // ============================================================
-    // URL ENCODING
-    // ============================================================
+    /*
+     * ============================================================
+     * URL ENCODING
+     * ============================================================
+     */
 
     private String url(
             String value
@@ -532,21 +762,28 @@ public class OAuthController {
     }
 
 
-    // ============================================================
-    // SAFE ERROR MESSAGE
-    // ============================================================
+    /*
+     * ============================================================
+     * SAFE ERROR
+     * ============================================================
+     */
 
     private String safeMessage(
+
             Exception e,
+
             String fallback
+
     ) {
 
         String message =
                 e.getMessage();
 
 
-        if (message == null ||
-                message.isBlank()) {
+        if (
+                message == null ||
+                message.isBlank()
+        ) {
 
             return fallback;
         }
