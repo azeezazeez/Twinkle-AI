@@ -653,13 +653,24 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     // Persist the final partial turn, if any. If the last completed turn was
     // already saved, reuse the existing session ID instead of creating or
     // saving anything again.
-    const savePromise = hasFinalTurn
+    // Always wait for both the final turn and any already-running save.
+    // A completed turn may have cleared the refs while its network request is
+    // still in flight. If we only inspect hasFinalTurn here, Chat.tsx can be
+    // opened before that database write finishes.
+    const finalTurnPromise = hasFinalTurn
       ? persistCompletedTurn()
       : Promise.resolve(existingSessionId);
+    const pendingSave = liveSavePromiseRef.current ?? Promise.resolve();
+    const pendingSession = liveSessionPromiseRef.current ?? Promise.resolve(existingSessionId);
 
-    // Close the Live Talk UI immediately. The parent callback is deliberately
-    // fired only after the final save finishes, so Chat.tsx can safely load
-    // the complete database transcript.
+    const savePromise = Promise.all([finalTurnPromise, pendingSave, pendingSession])
+      .then(results => {
+        const ids = results.map(Number).filter(Number.isFinite);
+        return ids.length > 0 ? ids[ids.length - 1] : liveSessionIdRef.current;
+      });
+
+    // Close the Live Talk UI immediately. The parent callback is fired only
+    // after all persistence promises have settled.
     cleanup();
     onClose();
 
