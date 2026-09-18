@@ -805,10 +805,24 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           cancelVoiceInput();
         }
       } else if (error === 'network') {
-        // Do not destroy the user's draft or show a blocking alert. Keep the
-        // composer in the voice state so the user can retry or reject it.
-        voiceListeningRef.current = false;
+        // Chromium's Web Speech service can report a transient network error.
+        // Retry the same recognition session once without logging the error or
+        // clearing the user's draft. This keeps the microphone usable without
+        // changing any other chat behavior.
+        voiceRecognitionErrorRef.current = null;
+        voiceListeningRef.current = true;
         setVoiceInputActive(true);
+        window.setTimeout(() => {
+          if (attempt !== voiceStartRef.current) return;
+          try {
+            recognition.lang = 'en-US';
+            recognition.start();
+          } catch {
+            // If the browser still cannot start its speech service, leave the
+            // voice composer active so the user can retry or reject it.
+            voiceListeningRef.current = false;
+          }
+        }, 250);
       }
     };
 
@@ -2518,18 +2532,63 @@ const cleanMessageContent = (content: unknown): string => {
                 {/* Main prompt area — always above the action row */}
                 {voiceInputActive ? (
                   <div
-                    className="relative flex min-h-[58px] w-full min-w-0 items-center gap-2 px-4 pt-3 pb-1 sm:min-h-[64px] sm:px-4 sm:pt-3"
+                    className="relative flex min-h-[58px] w-full min-w-0 items-center gap-3 px-4 pt-3 pb-1 sm:min-h-[64px] sm:px-4 sm:pt-3"
                     aria-live="polite"
-                    aria-label="Voice input preview"
+                    aria-label="Listening for voice input"
                   >
-                    <textarea
-                      ref={inputRef}
-                      value={voiceDraftRef.current ? `${voiceBaseInputRef.current ? `${voiceBaseInputRef.current} ` : ''}${voiceDraftRef.current}` : voiceBaseInputRef.current}
-                      readOnly
-                      rows={1}
-                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent p-0 text-[17px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:text-[18px] sm:min-h-[46px]"
-                      placeholder="Listening..."
-                    />
+                    <span className="sr-only">Listening...</span>
+                    <div className="flex min-w-0 flex-1 items-center gap-[3px] overflow-hidden" aria-hidden="true">
+                      {Array.from({ length: 44 }, (_, index) => (
+                        <span
+                          key={index}
+                          className="h-1 w-1 shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600"
+                        />
+                      ))}
+                      <div className="ml-1 flex h-10 min-w-0 flex-1 items-center justify-center gap-[3px] overflow-hidden">
+                        {Array.from({ length: 30 }, (_, index) => {
+                          const heights = [10, 16, 25, 14, 34, 20, 40, 27, 48, 32, 56, 38, 50, 30, 44, 58, 36, 52, 28, 46, 34, 54, 24, 42, 30, 50, 22, 38, 18, 12];
+                          return (
+                            <motion.span
+                              key={index}
+                              className="w-[3px] shrink-0 rounded-full bg-zinc-500 dark:bg-zinc-400"
+                              animate={{ height: [Math.max(6, heights[index] * 0.55), heights[index], Math.max(6, heights[index] * 0.7)] }}
+                              transition={{ duration: 0.8 + (index % 5) * 0.08, repeat: Infinity, repeatType: 'mirror', ease: 'easeInOut', delay: index * 0.025 }}
+                            />
+                          );
+                        })}
+                      </div>
+                      {Array.from({ length: 6 }, (_, index) => (
+                        <span
+                          key={`tail-${index}`}
+                          className="h-1 w-1 shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600"
+                        />
+                      ))}
+                    </div>
+
+                    <div className="ml-auto flex shrink-0 items-center gap-1">
+                      <motion.button
+                        type="button"
+                        onClick={cancelVoiceInput}
+                        aria-label="Reject voice text"
+                        title="Reject"
+                        whileHover={{ scale: 1.06 }}
+                        whileTap={{ scale: 0.9 }}
+                        className="flex h-10 w-10 items-center justify-center rounded-full text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white sm:h-11 sm:w-11"
+                      >
+                        <X className="h-[20px] w-[20px]" strokeWidth={2.1} />
+                      </motion.button>
+                      <motion.button
+                        type="button"
+                        onClick={commitVoiceInput}
+                        aria-label="Accept voice text"
+                        title="Accept"
+                        whileHover={{ scale: 1.06 }}
+                        whileTap={{ scale: 0.9 }}
+                        className="flex h-10 w-10 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-11"
+                      >
+                        <Check className="h-[21px] w-[21px]" strokeWidth={2.2} />
+                      </motion.button>
+                    </div>
                   </div>
                 ) : (
                   <div className="relative w-full min-w-0 px-4 pt-3 pb-1 sm:px-4 sm:pt-3">
@@ -2649,35 +2708,7 @@ const cleanMessageContent = (content: unknown): string => {
                     </AnimatePresence>
                   </div>
 
-                  {voiceInputActive ? (
-                    <div className="ml-auto flex shrink-0 items-center gap-1">
-                      {/* Reject voice text */}
-                      <motion.button
-                        type="button"
-                        onClick={cancelVoiceInput}
-                        aria-label="Reject voice text"
-                        title="Reject"
-                        whileHover={{ scale: 1.06 }}
-                        whileTap={{ scale: 0.9 }}
-                        className="flex h-10 w-10 items-center justify-center rounded-full text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white sm:h-11 sm:w-11"
-                      >
-                        <X className="h-[20px] w-[20px]" strokeWidth={2.1} />
-                      </motion.button>
-
-                      {/* Accept voice text */}
-                      <motion.button
-                        type="button"
-                        onClick={commitVoiceInput}
-                        aria-label="Accept voice text"
-                        title="Accept"
-                        whileHover={{ scale: 1.06 }}
-                        whileTap={{ scale: 0.9 }}
-                        className="flex h-10 w-10 items-center justify-center rounded-full bg-[#ec6aa8] text-white shadow-[0_8px_20px_rgba(236,106,168,.22)] transition hover:bg-[#e85f9f] sm:h-11 sm:w-11"
-                      >
-                        <Check className="h-[20px] w-[20px]" strokeWidth={2.2} />
-                      </motion.button>
-                    </div>
-                  ) : (
+                  {!voiceInputActive && (
                     <motion.button
                       type="button"
                       onClick={startVoiceInput}
