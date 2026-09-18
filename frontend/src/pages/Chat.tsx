@@ -1911,13 +1911,20 @@ const cleanMessageContent = (content: unknown): string => {
    * Make that saved Live Talk session the active chat immediately so the
    * normal chat area displays the complete transcript without a refresh.
    */
-  const handleLiveSessionComplete = useCallback((sessionId: number) => {
+  const handleLiveSessionComplete = useCallback(async (rawSessionId: number) => {
+    const sessionId = Number(rawSessionId);
     if (!Number.isFinite(sessionId)) return;
 
+    // Put the Live Talk session into the parent's source of truth before
+    // selecting it. This keeps the session-validation effect from clearing
+    // currentSessionId because it has not seen the new session yet.
     setSessions(prev => {
-      const existing = prev.find(session => session.id === sessionId);
+      const existing = prev.find(session => Number(session.id) === sessionId);
       if (existing) {
-        return [existing, ...prev.filter(session => session.id !== sessionId)];
+        return [
+          { ...existing, id: sessionId, updatedAt: new Date().toISOString() },
+          ...prev.filter(session => Number(session.id) !== sessionId),
+        ];
       }
 
       const now = new Date().toISOString();
@@ -1933,11 +1940,17 @@ const cleanMessageContent = (content: unknown): string => {
       ];
     });
 
+    // Make Live Talk the active conversation and immediately fetch the
+    // persisted transcript. Do NOT leave messages empty and wait for another
+    // click/refresh; the history endpoint is the source of truth.
     setCurrentSessionId(sessionId);
     persistSessionId(sessionId);
     setMessages([]);
+    setMessageAttachments({});
     setEditingMessage(null);
-  }, [user.id]);
+
+    await loadMessages(sessionId);
+  }, [user.id, loadMessages]);
 
   if (loading) {
     return (
