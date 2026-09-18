@@ -5,7 +5,7 @@ import {
   LogOut, Trash2, X, Search, SquarePen,
   MoreHorizontal, Pin, PinOff, Edit3,
   MessageCircle, Sun, Moon, Sparkles, Mic,
-  Settings2, UserCircle2, ChevronRight, PanelLeftClose,
+  Settings2, UserCircle2, ChevronRight, PanelLeft,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import UserAvatar from './UserAvatar'; 
@@ -950,14 +950,23 @@ export default function Sidebar({
           }`}
           onClick={e => e.stopPropagation()}
         >
-          <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
+          <div className="relative flex items-center px-5 pt-5 pb-3 shrink-0">
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="w-8 h-8 bg-transparent rounded-xl flex items-center justify-center p-1.5 shrink-0">
                 <StormLogo className="w-full h-full text-zinc-900 dark:text-white" />
               </div>
               <h2 className="text-lg font-medium tracking-tight text-zinc-900/90 dark:text-white/90">Twinkle</h2>
             </div>
-            <ThemeToggleButton />
+            <IconTooltip label="Close sidebar">
+              <button
+                onClick={onMobileClose}
+                aria-label="Close sidebar"
+                title="Close sidebar"
+                className="absolute right-3 top-4 flex h-10 w-10 items-center justify-center rounded-2xl text-zinc-600 transition-all hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white"
+              >
+                <PanelLeft className="h-5 w-5" strokeWidth={1.8} />
+              </button>
+            </IconTooltip>
           </div>
 
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
@@ -1048,16 +1057,16 @@ export default function Sidebar({
               className="twinkle-sidebar hidden lg:flex fixed inset-y-0 left-0 z-[2147483647] w-[360px] bg-white dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 flex-col h-full shadow-2xl"
               onClick={e => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between px-5 pt-5 pb-2 shrink-0">
+              <div className="relative flex items-center px-5 pt-5 pb-2 shrink-0">
                 <h2 className="text-xl font-medium tracking-tight text-zinc-900/90 dark:text-white/90">Twinkle</h2>
                 <IconTooltip label="Close sidebar">
                   <button
                     onClick={collapseDesktop}
                     aria-label="Close sidebar"
                     title="Close sidebar"
-                    className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white"
+                    className="absolute right-3 top-4 flex h-10 w-10 items-center justify-center rounded-2xl text-zinc-600 transition-all hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white"
                   >
-                    <PanelLeftClose className="h-5 w-5" strokeWidth={1.7} />
+                    <PanelLeft className="h-5 w-5" strokeWidth={1.8} />
                   </button>
                 </IconTooltip>
               </div>
