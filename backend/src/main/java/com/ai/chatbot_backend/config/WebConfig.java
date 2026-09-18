@@ -19,16 +19,14 @@ public class WebConfig {
 
         CorsConfiguration configuration = new CorsConfiguration();
 
-        // Frontend origins
         configuration.setAllowedOrigins(Arrays.asList(
-                "https://nexus-smart-ai.vercel.app",
                 "https://twinkleai.vercel.app",
+                "https://nexus-smart-ai.vercel.app",
                 "http://localhost:5173",
                 "http://localhost:3000",
                 "http://127.0.0.1:5173"
         ));
 
-        // HTTP methods
         configuration.setAllowedMethods(Arrays.asList(
                 "GET",
                 "POST",
@@ -39,7 +37,6 @@ public class WebConfig {
                 "HEAD"
         ));
 
-        // Request headers
         configuration.setAllowedHeaders(Arrays.asList(
                 "Origin",
                 "Accept",
@@ -50,23 +47,17 @@ public class WebConfig {
                 "Pragma"
         ));
 
-        // Response headers exposed to browser
-        configuration.setExposedHeaders(Arrays.asList(
-                "Authorization",
-                "Content-Type",
-                "Set-Cookie"
-        ));
-
-        // Required for HttpSession cookies
         configuration.setAllowCredentials(true);
 
-        // Cache preflight response
         configuration.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source =
                 new UrlBasedCorsConfigurationSource();
 
-        source.registerCorsConfiguration("/**", configuration);
+        source.registerCorsConfiguration(
+                "/**",
+                configuration
+        );
 
         return new CorsFilter(source);
     }
