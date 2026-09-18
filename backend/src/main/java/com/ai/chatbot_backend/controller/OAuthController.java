@@ -33,7 +33,7 @@ public class OAuthController {
     @Value("${oauth.state-secret}")
     private String stateSecret;
 
-    @Value("${app.frontend-url:http://localhost:5173}")
+    @Value("${app.frontend-url:https://twinkleai.vercel.app}")
     private String frontendUrl;
 
 
@@ -477,7 +477,7 @@ public class OAuthController {
                 base.isBlank()) {
 
             base =
-                    "http://localhost:5173";
+                    "https://twinkleai.vercel.app";
         }
 
 
