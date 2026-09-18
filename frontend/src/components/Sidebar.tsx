@@ -960,7 +960,7 @@ export default function Sidebar({
           onClick={e => e.stopPropagation()}
         >
           {/* Mobile header: same right-edge control alignment as desktop */}
-          <div className="flex w-full items-center pl-5 pr-0 pt-5 pb-3 shrink-0">
+          <div className="relative flex w-full items-center pl-5 pt-5 pb-3 pr-0 shrink-0">
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="w-8 h-8 bg-transparent rounded-xl flex items-center justify-center p-1.5 shrink-0">
                 <StormLogo className="w-full h-full text-zinc-900 dark:text-white" />
@@ -970,15 +970,15 @@ export default function Sidebar({
               </h2>
             </div>
 
-            <div className="relative group/tip ml-auto mr-5 flex items-center justify-center shrink-0">
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center justify-center shrink-0">
               <button
                 type="button"
                 onClick={onMobileClose}
                 aria-label="Close sidebar"
                 title="Close sidebar"
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-zinc-600 transition-all duration-200 hover:bg-zinc-100 hover:text-zinc-950 active:scale-95 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-zinc-600 transition-all duration-200 hover:bg-zinc-100 hover:text-zinc-950 active:scale-95 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white"
               >
-                <SidebarControlIcon className="h-9 w-9" />
+                <SidebarControlIcon className="h-6 w-6" />
               </button>
 
               <div className="absolute left-full top-1/2 ml-3 -translate-y-1/2 rounded-lg bg-zinc-900 px-2.5 py-1.5 text-xs font-semibold text-white whitespace-nowrap pointer-events-none z-[300] shadow-lg opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150">
@@ -1076,7 +1076,7 @@ export default function Sidebar({
               onClick={e => e.stopPropagation()}
             >
               {/* Expanded sidebar header: logo/text on the left, close control flush to the right edge */}
-              <div className="flex w-full items-center pl-5 pr-0 pt-5 pb-3 shrink-0">
+              <div className="relative flex w-full items-center pl-5 pt-5 pb-3 pr-0 shrink-0">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-8 h-8 bg-transparent rounded-xl flex items-center justify-center p-1.5 shrink-0">
                     <StormLogo className="w-full h-full text-zinc-900 dark:text-white" />
@@ -1086,17 +1086,17 @@ export default function Sidebar({
                   </h2>
                 </div>
 
-                {/* ml-auto pushes the control to the absolute right side of the header.
-                    pr-0 keeps the button from being pulled inward by right padding. */}
-                <div className="relative group/tip ml-auto mr-0 flex items-center justify-center shrink-0">
+                {/* Explicit right anchoring: the control is positioned from the sidebar's right edge.
+                    mr-2 moves it 8px left; adjust to mr-1/mr-3/mr-4 if desired. */}
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center justify-center shrink-0">
                   <button
                     type="button"
                     onClick={collapseDesktop}
                     aria-label="Close sidebar"
                     title="Close sidebar"
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-zinc-600 transition-all duration-200 hover:bg-zinc-100 hover:text-zinc-950 active:scale-95 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-zinc-600 transition-all duration-200 hover:bg-zinc-100 hover:text-zinc-950 active:scale-95 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white"
                   >
-                    <SidebarControlIcon className="h-5 w-5" />
+                    <SidebarControlIcon className="h-6 w-6" />
                   </button>
 
                   <div className="absolute left-full top-1/2 ml-3 -translate-y-1/2 rounded-lg bg-zinc-900 px-2.5 py-1.5 text-xs font-semibold text-white whitespace-nowrap pointer-events-none z-[300] shadow-lg opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150">
