@@ -6,23 +6,24 @@ export default function SocialAuthButtons() {
   const [loading, setLoading] = useState(false);
 
   const handleGoogleLogin = () => {
-    if (loading) return;
+    if (loading) {
+      return;
+    }
 
     setLoading(true);
 
     /*
-     * IMPORTANT:
-     * Do not use authApi here.
-     * OAuth is a browser navigation, not an API fetch.
+     * Google OAuth is a browser navigation.
      *
-     * Browser:
-     *   /api/auth/oauth/google
+     * Do NOT use fetch().
+     * Do NOT submit the email form.
+     * Do NOT navigate to /login.
      *
      * Vercel:
-     *   ↓ rewrite
+     * /api/auth/oauth/google
      *
-     * Render:
-     *   /api/auth/oauth/google
+     * rewrites to:
+     * https://twinkle-ai-ype3.onrender.com/api/auth/oauth/google
      */
     window.location.assign(GOOGLE_OAUTH_URL);
   };
@@ -66,6 +67,7 @@ export default function SocialAuthButtons() {
             text-lg
             font-bold
           "
+          aria-hidden="true"
         >
           G
         </span>
