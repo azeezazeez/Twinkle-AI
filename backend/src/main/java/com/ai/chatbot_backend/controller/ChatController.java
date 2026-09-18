@@ -184,7 +184,6 @@ public class ChatController {
                 request.getSessionId(),
                 request.getModel(),
                 request.getLanguage(),
-                List.of(),
                 session
         );
     }
@@ -207,12 +206,8 @@ public class ChatController {
         try {
 
             /*
-             * IMPORTANT:
-             *
              * Read multipart text fields directly from the servlet request.
-             *
-             * This prevents Spring from trying to convert a multipart part
-             * with Content-Type application/octet-stream into String/Long.
+             * This avoids String/Long conversion problems with multipart parts.
              */
             String message = request.getParameter("message");
             String model = request.getParameter("model");
@@ -221,45 +216,34 @@ public class ChatController {
 
             Long sessionId = null;
 
-            if (sessionIdText != null
-                    && !sessionIdText.isBlank()) {
-
+            if (sessionIdText != null && !sessionIdText.isBlank()) {
                 try {
-
-                    sessionId = Long.parseLong(
-                            sessionIdText.trim()
-                    );
-
+                    sessionId = Long.parseLong(sessionIdText.trim());
                 } catch (NumberFormatException e) {
-
                     throw new IllegalArgumentException(
                             "Invalid sessionId: " + sessionIdText
                     );
                 }
             }
 
+            /*
+             * Every uploaded file is persisted for chat-history rendering.
+             */
+            List<String> attachmentUrls = new ArrayList<>();
 
-            List<String> imageBase64 =
-                    new ArrayList<>();
+            /*
+             * ONLY native media is sent to Gemini:
+             * image/*, audio/* and video/*.
+             */
+            List<String> geminiMediaUrls = new ArrayList<>();
 
-            List<String> imageMimeTypes =
-                    new ArrayList<>();
-
-            // Every uploaded file is persisted as a data URL so the
-            // frontend can show the attachment after sending and refresh.
-            List<String> attachmentUrls =
-                    new ArrayList<>();
+            /*
+             * Documents are extracted locally with Apache Tika and become
+             * ordinary text input to the selected text model (normally Groq).
+             */
+            StringBuilder extractedText = new StringBuilder();
 
             long totalAttachmentBytes = 0L;
-
-            StringBuilder extractedText =
-                    new StringBuilder();
-
-
-            // =====================================================
-            // PROCESS FILES
-            // =====================================================
-
             long totalImageBytes = 0L;
             int imageCount = 0;
 
@@ -271,30 +255,15 @@ public class ChatController {
                         continue;
                     }
 
-                    String filename =
-                            safeFilename(
-                                    file.getOriginalFilename()
-                            );
-
-                    /*
-                     * Resolve MIME type using:
-                     *
-                     * 1. Apache Tika
-                     * 2. filename extension
-                     * 3. browser MIME as final fallback
-                     *
-                     * application/octet-stream is rejected.
-                     */
-                    String mime =
-                            resolveMimeType(file);
-
-                    log.info(
-                            "Received file: name={}, browserMime={}, resolvedMime={}, size={}",
-                            filename,
-                            file.getContentType(),
-                            mime,
-                            file.getSize()
+                    String filename = safeFilename(
+                            file.getOriginalFilename()
                     );
+
+                    if (file.getSize() > MAX_TOTAL_ATTACHMENT_BYTES) {
+                        throw new IllegalArgumentException(
+                                "File is too large: " + filename
+                        );
+                    }
 
                     totalAttachmentBytes += file.getSize();
 
@@ -304,78 +273,71 @@ public class ChatController {
                         );
                     }
 
+                    String mime = resolveMimeType(file);
                     byte[] fileBytes = file.getBytes();
 
-                    String encodedFilename =
-                            URLEncoder.encode(
-                                    filename,
-                                    StandardCharsets.UTF_8
-                            ).replace("+", "%20");
+                    log.info(
+                            "Received upload: name={}, browserMime={}, resolvedMime={}, size={}",
+                            filename,
+                            file.getContentType(),
+                            mime,
+                            file.getSize()
+                    );
 
-                    attachmentUrls.add(
+                    /*
+                     * Persist the original file as a data URL so the frontend
+                     * can render it after sending and after history reload.
+                     */
+                    String encodedFilename = URLEncoder
+                            .encode(filename, StandardCharsets.UTF_8)
+                            .replace("+", "%20");
+
+                    String dataUrl =
                             "data:"
                                     + mime
                                     + ";name="
                                     + encodedFilename
                                     + ";base64,"
-                                    + Base64.getEncoder().encodeToString(fileBytes)
-                    );
+                                    + Base64.getEncoder()
+                                    .encodeToString(fileBytes);
 
+                    attachmentUrls.add(dataUrl);
 
-                    // =================================================
-                    // IMAGE
-                    // =================================================
+                    /* =====================================================
+                       IMAGE / AUDIO / VIDEO -> GEMINI
+                       ===================================================== */
+                    if (isNativeMediaMimeType(mime)) {
 
-                    if (mime.startsWith("image/")) {
+                        if (mime.startsWith("image/")) {
+                            imageCount++;
 
-                        imageCount++;
-                        if (imageCount > MAX_IMAGES_PER_MESSAGE) {
-                            throw new IllegalArgumentException(
-                                    "You can attach a maximum of "
-                                            + MAX_IMAGES_PER_MESSAGE
-                                            + " images per message."
-                            );
+                            if (imageCount > MAX_IMAGES_PER_MESSAGE) {
+                                throw new IllegalArgumentException(
+                                        "You can attach a maximum of "
+                                                + MAX_IMAGES_PER_MESSAGE
+                                                + " images per message."
+                                );
+                            }
+
+                            totalImageBytes += file.getSize();
+
+                            if (totalImageBytes > MAX_TOTAL_IMAGE_BYTES) {
+                                throw new IllegalArgumentException(
+                                        "Images are too large. Keep the total image size under 15MB per message."
+                                );
+                            }
                         }
 
-                        totalImageBytes += file.getSize();
-                        if (totalImageBytes > MAX_TOTAL_IMAGE_BYTES) {
-                            throw new IllegalArgumentException(
-                                    "Images are too large. Keep the total image size under 15MB per message."
-                            );
-                        }
-
-                        imageBase64.add(
-                                Base64.getEncoder()
-                                        .encodeToString(
-                                                fileBytes
-                                        )
-                        );
-
-                        imageMimeTypes.add(mime);
-
+                        geminiMediaUrls.add(dataUrl);
                         continue;
                     }
 
+                    /* =====================================================
+                       DOCUMENT -> TIKA -> TEXT MODEL
+                       ===================================================== */
+                    String text = extractText(file, mime);
 
-                    // =================================================
-                    // DOCUMENT FALLBACK
-                    // =================================================
-                    // Gemini natively understands PDF, images, audio, video,
-                    // and supported text formats. Office/OpenDocument formats
-                    // are extracted with Tika and sent to Gemini as text.
-                    if (isGeminiNativeMimeType(mime)) {
-                        continue;
-                    }
-
-                    String text =
-                            extractText(
-                                    file,
-                                    mime
-                            );
-
-                    if (text != null
-                            && !text.isBlank()) {
-
+                    if (text != null && !text.isBlank()) {
                         if (extractedText.length() > 0) {
                             extractedText.append("\n\n");
                         }
@@ -389,42 +351,20 @@ public class ChatController {
                 }
             }
 
-
-            // =====================================================
-            // BUILD USER MESSAGE
-            // =====================================================
-
             String userMessage =
-                    message == null
-                            ? ""
-                            : message.trim();
-
+                    message == null ? "" : message.trim();
 
             if (extractedText.length() > 0) {
 
                 if (userMessage.isBlank()) {
-
                     userMessage =
-                            "The user uploaded document(s) but did not provide a question or instruction. "
-                            + "Format the uploaded document cleanly for display while preserving its actual content. "
-                            + "Do NOT summarize, analyze, review, rewrite, or add new information. "
-                            + "Preserve the document's wording, section order, headings, bullets, numbering, dates, "
-                            + "names, technologies, project details, and other factual content. "
-                            + "Create a clean Markdown layout. Put a horizontal line (---) between every major section. "
-                            + "Create one clearly labeled 'Links & Contact' section near the top or bottom and collect ALL "
-                            + "unique URLs, email addresses, phone links, and other clickable links from the document there. "
-                            + "Do not scatter links throughout the document unless a link is necessary to understand a specific item. "
-                            + "Render every collected link as a clickable Markdown link, for example "
-                            + "[GitHub](https://github.com/example), [Email](mailto:name@example.com), "
-                            + "or [Phone](tel:+123456789). "
-                            + "If the extracted PDF text contains a duplicated block of URLs at the end, do not repeat that "
-                            + "duplicate block; use those links only in the single 'Links & Contact' section. "
-                            + "Do not include an introduction, conclusion, analysis, summary, or commentary. "
-                            + "Output only the cleanly formatted document content.\n\n"
-                            + extractedText;
-
+                            "The user uploaded one or more documents. "
+                                    + "Use the actual document content below to answer the user's request. "
+                                    + "If no specific request was provided, present the document content in clean, readable Markdown. "
+                                    + "Do not invent information or add unsupported claims.\n\n"
+                                    + "Uploaded document content:\n"
+                                    + extractedText;
                 } else {
-
                     userMessage =
                             userMessage
                                     + "\n\nAttached document content:\n"
@@ -432,63 +372,45 @@ public class ChatController {
                 }
             }
 
-
-            // =====================================================
-            // VALIDATION
-            // =====================================================
-
-            if (userMessage.isBlank()
-                    && attachmentUrls.isEmpty()) {
-
+            if (userMessage.isBlank() && attachmentUrls.isEmpty()) {
                 throw new IllegalArgumentException(
                         "Message or at least one supported file is required"
                 );
             }
 
-
-            if (userMessage.isBlank() && !attachmentUrls.isEmpty()) {
-
+            if (userMessage.isBlank() && !geminiMediaUrls.isEmpty()) {
                 userMessage =
-                        "The user uploaded file(s) but did not provide a question or instruction. "
-                        + "Analyze the uploaded file(s) carefully. For documents, return the complete actual source content "
-                        + "in clean, readable Markdown without summarizing, shortening, or inventing information. "
-                        + "For images, audio, or video, describe and extract the relevant information actually present in the media. "
-                        + "Do not add unnecessary introduction or conclusion.";
+                        "Analyze the uploaded media carefully. "
+                                + "Describe or extract only information that is actually present. "
+                                + "Do not invent information or unsupported claims.";
             }
-
-
-            // =====================================================
-            // PROCESS
-            // =====================================================
 
             return processMessageWithFiles(
                     userMessage,
                     sessionId,
                     model,
                     language,
-                    imageBase64,
-                    imageMimeTypes,
+                    geminiMediaUrls,
                     attachmentUrls,
                     session
-            );        } catch (AIServiceException e) {
+            );
+
+        } catch (AIServiceException e) {
             throw e;
+
         } catch (IllegalArgumentException e) {
-log.warn(
+
+            log.warn(
                     "Invalid file upload: {}",
                     e.getMessage()
             );
 
-            ChatResponse errorResponse =
-                    new ChatResponse();
-
-            errorResponse.setError(
-                    e.getMessage()
-            );
+            ChatResponse errorResponse = new ChatResponse();
+            errorResponse.setError(e.getMessage());
 
             return ResponseEntity
                     .status(HttpStatus.BAD_REQUEST)
                     .body(errorResponse);
-
 
         } catch (Exception e) {
 
@@ -498,13 +420,11 @@ log.warn(
                     e
             );
 
-            ChatResponse errorResponse =
-                    new ChatResponse();
-
+            ChatResponse errorResponse = new ChatResponse();
             errorResponse.setError(
                     e.getMessage() != null
                             ? e.getMessage()
-                            : "Failed to process file"
+                            : "Failed to process uploaded file"
             );
 
             return ResponseEntity
@@ -512,7 +432,6 @@ log.warn(
                     .body(errorResponse);
         }
     }
-
 
     // =========================================================
     // FILE HELPERS
@@ -799,25 +718,20 @@ log.warn(
     }
 
 
-    private boolean isGeminiNativeMimeType(String mime) {
+    private boolean isNativeMediaMimeType(String mime) {
+
         if (mime == null || mime.isBlank()) {
             return false;
         }
 
-        String normalized = mime.toLowerCase(Locale.ROOT);
+        String normalized = mime
+                .trim()
+                .toLowerCase(Locale.ROOT);
 
-        if (normalized.startsWith("image/")
+        return normalized.startsWith("image/")
                 || normalized.startsWith("audio/")
-                || normalized.startsWith("video/")) {
-            return true;
-        }
-
-        return "application/pdf".equals(normalized)
-                || normalized.startsWith("text/")
-                || "application/json".equals(normalized)
-                || "application/xml".equals(normalized);
+                || normalized.startsWith("video/");
     }
-
 
     private String normalizeMimeType(
             String mime
@@ -947,7 +861,6 @@ log.warn(
             Long sessionId,
             String model,
             String language,
-            List<String> imageBase64,
             HttpSession session
     ) {
 
@@ -956,7 +869,6 @@ log.warn(
                 sessionId,
                 model,
                 language,
-                imageBase64,
                 List.of(),
                 List.of(),
                 session
@@ -969,8 +881,7 @@ log.warn(
             Long sessionId,
             String model,
             String language,
-            List<String> imageBase64,
-            List<String> imageMimeTypes,
+            List<String> geminiMediaUrls,
             List<String> attachmentUrls,
             HttpSession session
     ) {
@@ -1181,17 +1092,23 @@ log.warn(
 
         String aiResponse;
 
-        // Any attachment is routed to Gemini 3.8 Flash. This keeps Groq
-        // exclusively responsible for normal text chat.
-        if (attachmentUrls != null && !attachmentUrls.isEmpty()) {
+        /*
+         * ONLY native media is sent to Gemini.
+         *
+         * Documents were extracted with Apache Tika above, so they use the
+         * selected text model instead of consuming Gemini multimodal quota.
+         */
+        if (geminiMediaUrls != null && !geminiMediaUrls.isEmpty()) {
+
             aiResponse = geminiService.generateResponse(
                     message,
                     conversationHistory,
-                    attachmentUrls,
+                    geminiMediaUrls,
                     language
             );
 
         } else if (geminiRequested) {
+
             aiResponse = geminiService.generateResponse(
                     message,
                     conversationHistory,
@@ -1200,6 +1117,7 @@ log.warn(
             );
 
         } else {
+
             aiResponse = groqService.generateResponse(
                     message,
                     conversationHistory,
