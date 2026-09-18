@@ -1,10 +1,3 @@
-/**
- * Twinkle AI — Unified Email Authentication
- *
- * Flow:
- * Email → Continue → OTP → Chat
- */
-
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
