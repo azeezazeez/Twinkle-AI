@@ -862,11 +862,36 @@ export default function Sidebar({
   // immediately. The user can expand it with the sidebar icon.
   const [desktopCollapsed, setDesktopCollapsed] = useState(true);
   const [focusSearch, setFocusSearch] = useState(false);
+  const [chatCount, setChatCount] = useState(() => sessions.length);
+  const chatCountRequestRef = useRef(0);
 
-  // The parent Chat component is the source of truth for the visible chat list.
-  // Keep the collapsed tooltip derived from that same list so a delayed/stale
-  // backend response can never overwrite a correct count with 0.
-  const chatCount = sessions.length;
+  // Chat.tsx is the primary source of truth. Keep the badge synchronized with
+  // it immediately whenever the session list changes.
+  useEffect(() => {
+    setChatCount(sessions.length);
+  }, [sessions]);
+
+  // When the user hovers the collapsed Chats icon, verify the count directly
+  // against the backend. This is intentionally limited to the Chats control
+  // and never runs from a generic sidebar hover.
+  const refreshChatCount = useCallback(async () => {
+    const requestId = ++chatCountRequestRef.current;
+
+    try {
+      const response = await chatApi.getSessions() as any;
+      if (requestId !== chatCountRequestRef.current) return;
+
+      const remoteSessions = Array.isArray(response?.sessions)
+        ? response.sessions
+        : [];
+
+      setChatCount(remoteSessions.length);
+    } catch (error) {
+      if (requestId !== chatCountRequestRef.current) return;
+      console.error('Failed to refresh chat count:', error);
+      // Preserve the already-known count if the verification request fails.
+    }
+  }, []);
 
   useEffect(() => { onDesktopStateChange?.(false); }, [onDesktopStateChange]);
 
@@ -1015,8 +1040,8 @@ export default function Sidebar({
             <IconTooltip label={`Chats (${chatCount})`}>
               <button
                 onClick={expandDesktop}
-                onPointerEnter={() => {}}
-                onFocus={() => {}}
+                onPointerEnter={() => { void refreshChatCount(); }}
+                onFocus={() => { void refreshChatCount(); }}
                 aria-label="Chats"
                 className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-all"
               >
