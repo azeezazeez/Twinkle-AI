@@ -273,19 +273,6 @@ function SessionList({
     return () => window.clearTimeout(timer);
   }, [searchQuery, runSearch]);
 
-  // Parent session state is authoritative. Keep an active search result set
-  // synchronized when a chat is deleted/renamed from another UI action.
-  useEffect(() => {
-    setSearchResults(prev => {
-      if (!prev) return prev;
-
-      const sessionById = new Map(sessions.map(session => [session.id, session]));
-      return prev
-        .map(result => sessionById.get(result.id))
-        .filter((result): result is Session => Boolean(result));
-    });
-  }, [sessions]);
-
   useEffect(() => {
     if (menuOpenId === null) return;
     const handler = (e: MouseEvent) => {
