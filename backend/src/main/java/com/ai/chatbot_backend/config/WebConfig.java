@@ -23,7 +23,6 @@ public class WebConfig {
         configuration.setAllowedOrigins(Arrays.asList(
                 "https://nexus-smart-ai.vercel.app",
                 "https://twinkleai.vercel.app",
-                "https://Twinkle-smart-ai.vercel.app",
                 "http://localhost:5173",
                 "http://localhost:3000",
                 "http://127.0.0.1:5173"
