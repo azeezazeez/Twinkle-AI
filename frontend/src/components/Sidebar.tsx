@@ -863,20 +863,15 @@ export default function Sidebar({
   const [desktopCollapsed, setDesktopCollapsed] = useState(true);
   const [focusSearch, setFocusSearch] = useState(false);
 
-  // Local tooltip count. It is refreshed from the backend when the user
-  // enters the collapsed Chats icon, instead of waiting for Chat.tsx to
-  // rerender its sessions prop.
+  // Keep the collapsed Chats badge/count synchronized with the same sessions
+  // source used by the expanded sidebar, while also allowing an explicit
+  // backend refresh when the user enters the Chats icon.
   const [chatCount, setChatCount] = useState(() => sessions.length);
   const chatCountRequestRef = useRef(0);
 
-  // Stay synchronized with immediate parent-side session changes.
-  useEffect(() => {
-    setChatCount(sessions.length);
-  }, [sessions.length]);
-
-  // Force a fresh backend count on every hover/focus entry.
   const refreshChatCount = useCallback(async () => {
     const requestId = ++chatCountRequestRef.current;
+
     try {
       const response = await chatApi.getSessions() as any;
       if (requestId !== chatCountRequestRef.current) return;
@@ -884,11 +879,38 @@ export default function Sidebar({
       const remoteSessions = Array.isArray(response?.sessions)
         ? response.sessions
         : [];
+
       setChatCount(remoteSessions.length);
     } catch (error) {
       console.error('Failed to refresh chat count:', error);
     }
   }, []);
+
+  // Parent state is the immediate source of truth. This updates the badge
+  // instantly when Chat.tsx creates/deletes a session.
+  useEffect(() => {
+    setChatCount(sessions.length);
+  }, [sessions.length]);
+
+  // Chat.tsx announces confirmed session mutations. Refresh the backend count
+  // so the collapsed badge also reflects changes made outside this component.
+  useEffect(() => {
+    const handleSessionsChanged = () => {
+      void refreshChatCount();
+    };
+
+    window.addEventListener('twinkle-sessions-changed', handleSessionsChanged);
+    return () => {
+      window.removeEventListener('twinkle-sessions-changed', handleSessionsChanged);
+    };
+  }, [refreshChatCount]);
+
+  // PointerEnter reliably handles mouse/trackpad pointer entry. Focus keeps
+  // keyboard navigation working without requiring a mouse event.
+  const handleChatsPointerEnter = useCallback(() => {
+    void refreshChatCount();
+  }, [refreshChatCount]);
+
   useEffect(() => { onDesktopStateChange?.(false); }, [onDesktopStateChange]);
 
   const expandDesktop = useCallback(() => {
@@ -1036,8 +1058,8 @@ export default function Sidebar({
             <IconTooltip label={`Chats (${chatCount})`}>
               <button
                 onClick={expandDesktop}
-                onMouseEnter={() => { void refreshChatCount(); }}
-                onFocus={() => { void refreshChatCount(); }}
+                onPointerEnter={handleChatsPointerEnter}
+                onFocus={handleChatsPointerEnter}
                 aria-label="Chats"
                 className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-all"
               >
