@@ -651,17 +651,23 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
       Boolean(userTurnRef.current.trim()) ||
       Boolean(assistantTurnRef.current.trim());
 
+    // Always wait for the complete serialized save queue. If a previous
+    // Live Talk turn is still being persisted, ending the modal must not
+    // notify Chat.tsx before that database write has finished.
     const savePromise = hasFinalTurn
       ? persistCompletedTurn()
-      : Promise.resolve(liveSessionIdRef.current);
+      : (liveSavePromiseRef.current ?? Promise.resolve());
 
     cleanup();
     onClose();
 
-    void savePromise.then(sessionId => {
+    void savePromise.then(() => {
+      const sessionId = liveSessionIdRef.current;
       if (sessionId != null) {
         onSessionComplete?.(sessionId);
       }
+    }).catch(error => {
+      console.error('Live Talk final persistence failed:', error);
     });
   };
 
