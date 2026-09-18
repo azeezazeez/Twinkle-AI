@@ -56,7 +56,7 @@ public class OAuthService {
     @Value("${oauth.google.client-secret:}")
     private String googleClientSecret;
 
-    @Value("${oauth.google.redirect-uri:https://twinkle-ai-ype3.onrender.com/api/auth/oauth/google/callback}")
+    @Value("${oauth.google.redirect-uri:https://twinkleai.vercel.app/api/auth/oauth/google/callback}")
     private String googleRedirectUri;
 
     // ========================================================================
