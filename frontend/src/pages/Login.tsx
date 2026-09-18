@@ -1,3 +1,13 @@
+/**
+ * Twinkle AI — Unified Email Authentication
+ *
+ * Flow:
+ * Email → Continue → OTP → Chat
+ *
+ * Google:
+ * Continue with Google → Google OAuth → Chat
+ */
+
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
@@ -8,8 +18,16 @@ interface Props {
   onLogin: (user: any) => void;
 }
 
-const getErrorMessage = (error: unknown): string => {
-  if (error instanceof Error && error.message) {
+const GOOGLE_OAUTH_URL =
+  '/api/auth/oauth/google';
+
+const getErrorMessage = (
+  error: unknown
+): string => {
+  if (
+    error instanceof Error &&
+    error.message
+  ) {
     return error.message;
   }
 
@@ -17,9 +35,17 @@ const getErrorMessage = (error: unknown): string => {
     typeof error === 'object' &&
     error !== null &&
     'message' in error &&
-    typeof (error as { message?: unknown }).message === 'string'
+    typeof (
+      error as {
+        message?: unknown;
+      }
+    ).message === 'string'
   ) {
-    return (error as { message: string }).message;
+    return (
+      error as {
+        message: string;
+      }
+    ).message;
   }
 
   return 'Unable to continue. Please try again.';
@@ -56,13 +82,28 @@ function GoogleIcon() {
   );
 }
 
-export default function Login({ onLogin: _onLogin }: Props) {
+export default function Login({
+  onLogin: _onLogin,
+}: Props) {
   const navigate = useNavigate();
 
-  const [email, setEmail] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
+  const [email, setEmail] =
+    useState('');
+
+  const [error, setError] =
+    useState('');
+
+  const [loading, setLoading] =
+    useState(false);
+
+  const [googleLoading, setGoogleLoading] =
+    useState(false);
+
+  /*
+   * ==========================================================
+   * EMAIL → OTP
+   * ==========================================================
+   */
 
   const handleContinue = async (
     event: React.FormEvent<HTMLFormElement>
@@ -71,16 +112,13 @@ export default function Login({ onLogin: _onLogin }: Props) {
 
     setError('');
 
-    const normalizedEmail = email.trim().toLowerCase();
-
-    /*
-     * ----------------------------------------------------------
-     * EMAIL VALIDATION
-     * ----------------------------------------------------------
-     */
+    const normalizedEmail =
+      email.trim().toLowerCase();
 
     if (!normalizedEmail) {
-      setError('Enter your email address.');
+      setError(
+        'Enter your email address.'
+      );
       return;
     }
 
@@ -89,36 +127,19 @@ export default function Login({ onLogin: _onLogin }: Props) {
         normalizedEmail
       )
     ) {
-      setError('Enter a valid email address.');
+      setError(
+        'Enter a valid email address.'
+      );
       return;
     }
 
     setLoading(true);
 
     try {
-      /*
-       * --------------------------------------------------------
-       * REQUEST OTP
-       *
-       * Backend:
-       * POST /api/auth/request-otp
-       *
-       * Body:
-       * {
-       *   "email": "user@example.com"
-       * }
-       * --------------------------------------------------------
-       */
-
-      const response = await authApi.requestOtp(
-        normalizedEmail
-      );
-
-      /*
-       * --------------------------------------------------------
-       * OTP PAGE
-       * --------------------------------------------------------
-       */
+      const response =
+        await authApi.requestOtp(
+          normalizedEmail
+        );
 
       navigate('/verify-otp', {
         state: {
@@ -126,10 +147,6 @@ export default function Login({ onLogin: _onLogin }: Props) {
         },
       });
 
-      /*
-       * Keep response referenced so TypeScript/API changes
-       * do not create unused-response confusion.
-       */
       void response;
     } catch (err: unknown) {
       console.error(
@@ -146,9 +163,19 @@ export default function Login({ onLogin: _onLogin }: Props) {
   };
 
   /*
-   * ------------------------------------------------------------
-   * GOOGLE AUTHENTICATION
-   * ------------------------------------------------------------
+   * ==========================================================
+   * GOOGLE OAUTH
+   * ==========================================================
+   *
+   * IMPORTANT:
+   *
+   * This is deliberately NOT:
+   *
+   *   authApi.startGoogleOAuth()
+   *
+   * We use direct browser navigation so there is absolutely
+   * no possibility of this action being treated as part of
+   * the email/OTP flow.
    */
 
   const handleGoogle = () => {
@@ -159,21 +186,24 @@ export default function Login({ onLogin: _onLogin }: Props) {
     setGoogleLoading(true);
     setError('');
 
-    try {
-      authApi.startGoogleOAuth();
-    } catch (err) {
-      console.error(
-        '[Twinkle Auth] Google OAuth failed:',
-        err
-      );
+    console.log(
+      '[Twinkle Auth] Starting Google OAuth:',
+      GOOGLE_OAUTH_URL
+    );
 
-      setGoogleLoading(false);
-
-      setError(
-        'Unable to open Google sign-in. Please try again.'
-      );
-    }
+    /*
+     * Full browser navigation.
+     */
+    window.location.assign(
+      GOOGLE_OAUTH_URL
+    );
   };
+
+  /*
+   * ==========================================================
+   * UI
+   * ==========================================================
+   */
 
   return (
     <div
@@ -224,7 +254,9 @@ export default function Login({ onLogin: _onLogin }: Props) {
 
         <button
           type="button"
-          onClick={() => navigate('/')}
+          onClick={() =>
+            navigate('/')
+          }
           aria-label="Close"
           className="
             absolute
@@ -279,7 +311,8 @@ export default function Login({ onLogin: _onLogin }: Props) {
               dark:text-zinc-300
             "
           >
-            You'll get smarter responses and can
+            You'll get smarter responses
+            and can
             <br className="hidden sm:block" />
             upload files, images, and more.
           </p>
@@ -290,6 +323,7 @@ export default function Login({ onLogin: _onLogin }: Props) {
             type="button"
             onClick={handleGoogle}
             disabled={googleLoading}
+            aria-label="Continue with Google"
             className="
               mt-7
               w-full
@@ -313,6 +347,7 @@ export default function Login({ onLogin: _onLogin }: Props) {
               dark:hover:bg-zinc-900
               transition-colors
               disabled:opacity-60
+              disabled:cursor-not-allowed
             "
           >
             <GoogleIcon />
@@ -360,13 +395,17 @@ export default function Login({ onLogin: _onLogin }: Props) {
           {/* EMAIL FORM */}
 
           <form
-            onSubmit={handleContinue}
+            onSubmit={
+              handleContinue
+            }
           >
             <input
               type="email"
               value={email}
               onChange={(event) =>
-                setEmail(event.target.value)
+                setEmail(
+                  event.target.value
+                )
               }
               placeholder="Email address"
               autoComplete="email"
@@ -435,6 +474,7 @@ export default function Login({ onLogin: _onLogin }: Props) {
                 hover:opacity-90
                 transition-opacity
                 disabled:opacity-50
+                disabled:cursor-not-allowed
               "
             >
               {loading
