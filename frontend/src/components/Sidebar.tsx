@@ -4,13 +4,13 @@ import { Session, User } from '../types';
 import {
   LogOut, Trash2, X, Search, SquarePen,
   MoreHorizontal, Pin, PinOff, Edit3,
-  MessageCircle, Sun, Moon, Sparkles,
+  MessageCircle, Sun, Moon, Sparkles, Mic,
   Settings2, UserCircle2, ChevronRight, PanelLeftClose,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import UserAvatar from './UserAvatar'; 
-import StormLogo from './StormLogo';
 import { chatApi } from '../lib/api';
+import StormLogo from './StormLogo';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Props {
@@ -240,8 +240,8 @@ function SessionList({
     return () => document.removeEventListener('keydown', handleKeyboard);
   }, [searchQuery]);
 
-  const runSearch = useCallback(async (rawQuery: string) => {
-    const query = rawQuery.trim().toLowerCase();
+  useEffect(() => {
+    const query = searchQuery.trim();
     const requestId = ++searchRequestRef.current;
 
     if (!query) {
@@ -250,28 +250,48 @@ function SessionList({
       return;
     }
 
-    // Search the already-loaded sidebar sessions locally. The backend search
-    // endpoint previously performed the same session-name filter, so avoiding
-    // a network round trip makes search feel immediate.
-    setIsSearching(false);
-    const results = sessions.filter(session =>
-      String(session.sessionName ?? '').toLowerCase().includes(query)
-    );
-    if (requestId === searchRequestRef.current) {
-      setSearchResults(results);
-    }
-  }, [sessions]);
+    const timer = setTimeout(async () => {
+      setIsSearching(true);
 
-  useEffect(() => {
-    const query = searchQuery.trim();
-    if (!query) {
-      setSearchResults(null);
-      setIsSearching(false);
-      return;
-    }
-    const timer = window.setTimeout(() => { void runSearch(query); }, 80);
-    return () => window.clearTimeout(timer);
-  }, [searchQuery, runSearch]);
+      try {
+        const res = await chatApi.searchSessions(query);
+        if (requestId !== searchRequestRef.current) return;
+
+        const rawResults = Array.isArray((res as any)?.sessions)
+          ? (res as any).sessions
+          : [];
+
+        const normalizedResults = rawResults
+          .map((s: any) => ({
+            ...s,
+            id: Number(s.id ?? s.sessionId ?? s.session_id),
+            sessionName: String(
+              s.sessionName ?? s.name ?? s.title ?? 'New Chat'
+            ),
+          }))
+          .filter((s: any) => Number.isFinite(s.id));
+
+        setSearchResults(normalizedResults);
+      } catch (err) {
+        if (requestId !== searchRequestRef.current) return;
+
+        // The API is unavailable/failed: search the already loaded sessions
+        // instead of leaving the mobile drawer empty.
+        const lowerQuery = query.toLowerCase();
+        setSearchResults(
+          sessions.filter(s =>
+            String(s.sessionName ?? '').toLowerCase().includes(lowerQuery)
+          )
+        );
+      } finally {
+        if (requestId === searchRequestRef.current) {
+          setIsSearching(false);
+        }
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, sessions]);
 
   useEffect(() => {
     if (menuOpenId === null) return;
@@ -313,11 +333,7 @@ function SessionList({
 
   const handleSearchChange = (q: string) => {
     setSearchQuery(q);
-    if (!q.trim()) {
-      ++searchRequestRef.current;
-      setSearchResults(null);
-      setIsSearching(false);
-    }
+    if (!q.trim()) setSearchResults(null);
   };
 
   const togglePin = useCallback((id: number) => {
@@ -349,19 +365,13 @@ function SessionList({
   };
 
   const handleDelete = (id: number) => {
+    // Close the context menu and mobile drawer immediately after Delete is clicked.
+    // The parent callback can then handle the delete confirmation / actual deletion.
     setMenuOpenId(null);
-
-    // Let the parent handle deletion/confirmation BEFORE closing the drawer.
-    // This prevents the SessionList from unmounting before the parent receives
-    // the delete request.
-    onDeleteSession(id);
-
-    // Close only after the delete request has been handed to the parent.
     onClose();
-
-    // Remove the deleted session from the local pinned-session state as well.
+    onDeleteSession(id);
     setPinnedIds(prev => {
-      const next = prev.filter(p => Number(p) !== Number(id));
+      const next = prev.filter(p => p !== id);
       savePinnedIds(next);
       return next;
     });
@@ -390,7 +400,7 @@ function SessionList({
   return (
     <>
       {/* Top controls */}
-      <div className="w-full shrink-0 px-4 pt-3 pb-4">
+      <div className="p-4 shrink-0">
         <button
           type="button"
           onClick={() => { onNewSession(); onClose(); }}
@@ -401,7 +411,7 @@ function SessionList({
           <span className="text-[17px] font-normal tracking-tight">New chat</span>
         </button>
 
-        <div className="relative group mx-auto w-full max-w-[328px] min-w-0 box-border">
+        <div className="relative group mx-auto w-full max-w-[324px]">
           <div className="absolute inset-y-0 left-3.5 flex items-center pointer-events-none text-zinc-400 group-focus-within:text-zinc-500 transition-colors">
             {isSearching
               ? <Sparkles className="w-3.5 h-3.5 animate-pulse" />
@@ -420,14 +430,18 @@ function SessionList({
               }
               if (e.key === 'Enter') {
                 e.preventDefault();
-                void runSearch(searchQuery);
+                const query = searchQuery.trim();
+                if (query) {
+                  ++searchRequestRef.current;
+                  setSearchQuery(query);
+                }
               }
             }}
             placeholder="Search chats..."
             autoComplete="off"
             spellCheck={false}
             aria-label="Search chats"
-            className="block w-full min-w-0 box-border pl-10 pr-9 py-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs font-medium text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-zinc-400 transition-all"
+            className="w-full pl-10 pr-9 py-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs font-medium text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-zinc-400 transition-all"
           />
           {searchQuery ? (
             <button
@@ -437,7 +451,26 @@ function SessionList({
             >
               <X className="w-3.5 h-3.5" />
             </button>
-          ) : null}
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+                if (!SpeechRecognition) return;
+                const recognition = new SpeechRecognition();
+                recognition.lang = 'en-US';
+                recognition.interimResults = false;
+                recognition.maxAlternatives = 1;
+                recognition.onresult = (event: any) => handleSearchChange(event.results?.[0]?.[0]?.transcript || '');
+                recognition.start();
+              }}
+              className="absolute inset-y-0 right-2 flex w-7 items-center justify-center rounded-lg text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+              aria-label="Search by voice"
+              title="Search by voice"
+            >
+              <Mic className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -829,8 +862,33 @@ export default function Sidebar({
   // immediately. The user can expand it with the sidebar icon.
   const [desktopCollapsed, setDesktopCollapsed] = useState(true);
   const [focusSearch, setFocusSearch] = useState(false);
-  const [chatCount, setChatCount] = useState(0);
-  const countSyncInFlightRef = useRef(false);
+
+  // Local tooltip count. It is refreshed from the backend when the user
+  // enters the collapsed Chats icon, instead of waiting for Chat.tsx to
+  // rerender its sessions prop.
+  const [chatCount, setChatCount] = useState(() => sessions.length);
+  const chatCountRequestRef = useRef(0);
+
+  // Stay synchronized with immediate parent-side session changes.
+  useEffect(() => {
+    setChatCount(sessions.length);
+  }, [sessions.length]);
+
+  // Force a fresh backend count on every hover/focus entry.
+  const refreshChatCount = useCallback(async () => {
+    const requestId = ++chatCountRequestRef.current;
+    try {
+      const response = await chatApi.getSessions() as any;
+      if (requestId !== chatCountRequestRef.current) return;
+
+      const remoteSessions = Array.isArray(response?.sessions)
+        ? response.sessions
+        : [];
+      setChatCount(remoteSessions.length);
+    } catch (error) {
+      console.error('Failed to refresh chat count:', error);
+    }
+  }, []);
   useEffect(() => { onDesktopStateChange?.(false); }, [onDesktopStateChange]);
 
   const expandDesktop = useCallback(() => {
@@ -875,19 +933,9 @@ export default function Sidebar({
     window.location.assign('/settings');
   }, [onSettings]);
 
-  // Normalize session IDs once at the Sidebar boundary. The backend may return
-  // IDs as strings while the React callbacks/types use numbers. Keeping one
-  // normalized shape prevents selection, pinning and deletion mismatches.
-  const normalizedSessions: Session[] = sessions
-    .map(session => ({
-      ...session,
-      id: Number(session.id),
-    }))
-    .filter(session => Number.isFinite(session.id));
-
-  const normalizedListProps = {
+  const listProps = {
     user,
-    sessions: normalizedSessions,
+    sessions,
     currentSessionId,
     onSelectSession,
     onNewSession,
@@ -895,75 +943,9 @@ export default function Sidebar({
     onRenameSession,
     onClearAll,
     onLogout,
-    onProfile: handleProfile,
+      onProfile: handleProfile,
     onSettings: handleSettings,
   };
-
-  // The Sidebar receives the session list from Chat.tsx, but the backend can
-  // change before that parent list has re-rendered (for example immediately
-  // after a Live Talk save). Keep a local count as a small, authoritative UI
-  // cache and merge the active session into it so an optimistic session is not
-  // lost from the badge.
-  const activeSessionId = Number(currentSessionId);
-  const localChatCount =
-    normalizedSessions.length +
-    (Number.isFinite(activeSessionId) &&
-    activeSessionId > 0 &&
-    !normalizedSessions.some(session => session.id === activeSessionId)
-      ? 1
-      : 0);
-
-  useEffect(() => {
-    setChatCount(localChatCount);
-  }, [localChatCount]);
-
-  const refreshChatCount = useCallback(async () => {
-    if (countSyncInFlightRef.current) return;
-    countSyncInFlightRef.current = true;
-
-    try {
-      const response = await chatApi.getSessions() as any;
-      const serverSessions = Array.isArray(response?.sessions)
-        ? response.sessions
-        : [];
-
-      const serverIds = new Set<number>();
-      for (const session of serverSessions) {
-        const id = Number(session?.id);
-        if (Number.isFinite(id) && id > 0) serverIds.add(id);
-      }
-
-      if (Number.isFinite(activeSessionId) && activeSessionId > 0) {
-        serverIds.add(activeSessionId);
-      }
-
-      setChatCount(serverIds.size);
-    } catch (error) {
-      // Never make the tooltip disappear because a background count request
-      // failed. The locally synchronized count remains usable.
-      console.debug('Chat count refresh failed:', error);
-      setChatCount(localChatCount);
-    } finally {
-      countSyncInFlightRef.current = false;
-    }
-  }, [activeSessionId, localChatCount]);
-
-  // Sync on mount and whenever another part of the chat UI announces a saved
-  // or deleted session. This avoids requiring the user to open the sidebar.
-  useEffect(() => {
-    void refreshChatCount();
-
-    const handleSessionChange = () => {
-      void refreshChatCount();
-    };
-
-    window.addEventListener('twinkle-chat-updated', handleSessionChange);
-    window.addEventListener('twinkle-live-session-updated', handleSessionChange);
-    return () => {
-      window.removeEventListener('twinkle-chat-updated', handleSessionChange);
-      window.removeEventListener('twinkle-live-session-updated', handleSessionChange);
-    };
-  }, [refreshChatCount]);
 
   return (
     <>
@@ -1003,7 +985,7 @@ export default function Sidebar({
 
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
             <SessionList
-              {...normalizedListProps}
+              {...listProps}
               onClose={onMobileClose}
               focusSearchOnMount={false}
             />
@@ -1053,9 +1035,9 @@ export default function Sidebar({
 
             <IconTooltip label={`Chats (${chatCount})`}>
               <button
-                onMouseEnter={() => void refreshChatCount()}
-                onFocus={() => void refreshChatCount()}
                 onClick={expandDesktop}
+                onMouseEnter={() => { void refreshChatCount(); }}
+                onFocus={() => { void refreshChatCount(); }}
                 aria-label="Chats"
                 className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-all"
               >
@@ -1092,28 +1074,21 @@ export default function Sidebar({
               onClick={e => e.stopPropagation()}
             >
               <div className="flex items-center justify-between px-5 pt-5 pb-2 shrink-0">
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl">
-                    <StormLogo className="h-7 w-7 text-black dark:text-white" />
+                <button
+                  onClick={collapseDesktop}
+                  className="flex items-center gap-2.5 group"
+                  title="Close sidebar"
+                >
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-600 transition group-hover:bg-zinc-100 group-hover:text-zinc-950 dark:text-zinc-300 dark:group-hover:bg-zinc-900 dark:group-hover:text-white">
+                    <PanelLeftClose className="h-5 w-5" strokeWidth={1.7} />
                   </div>
                   <h2 className="text-xl font-medium tracking-tight text-zinc-900/90 dark:text-white/90">Twinkle</h2>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <ThemeToggleButton />
-                  <button
-                    type="button"
-                    onClick={collapseDesktop}
-                    className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-500 shadow-sm transition hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-white"
-                    aria-label="Close sidebar"
-                    title="Close sidebar"
-                  >
-                    <PanelLeftClose className="h-4 w-4" strokeWidth={1.8} />
-                  </button>
-                </div>
+                </button>
+                <ThemeToggleButton />
               </div>
 
               <SessionList
-                {...normalizedListProps}
+                {...listProps}
                 onClose={collapseDesktop}
                 focusSearchOnMount={focusSearch}
               />
