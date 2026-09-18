@@ -11,7 +11,7 @@ import LiveTalkModal from '../components/LiveTalkModal';
 import {
   ArrowDown, ArrowUp,
   Copy, Check, Edit2,
-  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, Mic, AudioLines,
+  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, Mic, AudioLines, ExternalLink,
 } from 'lucide-react';
 
 import ReactMarkdown from 'react-markdown';
@@ -554,7 +554,7 @@ const getSpeechLanguage = (): string => {
 export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [typingSessionTitle, setTypingSessionTitle] = useState<{ id: number; title: string } | null>(null);
-  const [currentSessionId, setCurrentSessionId] = useState<number | null>(() => readPersistedSessionId());
+  const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -925,16 +925,13 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   }, []);
 
   const chooseModel = useCallback((modelId: string) => {
-    const nextModel = MODEL_OPTIONS.find(option => option.id === modelId);
-    if (!nextModel) return;
     if (modelId !== selectedModel) playModelSwitchSound();
-    setSelectedModel(nextModel.id);
+    setSelectedModel(modelId);
     setModelPickerOpen(false);
-    try { localStorage.setItem(MODEL_STORAGE_KEY, nextModel.id); } catch {}
+    try { localStorage.setItem(MODEL_STORAGE_KEY, modelId); } catch {}
   }, [selectedModel]);
 
-  const activeModel = MODEL_OPTIONS.find(m => m.id === selectedModel) ?? MODEL_OPTIONS[0];
-  const activeModelName = activeModel.name || activeModel.id;
+  const activeModel = MODEL_OPTIONS.find(m => m.id === selectedModel) || MODEL_OPTIONS[0];
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -948,20 +945,11 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   // OTHER existing session always loads its messages correctly.
   const skipMessageLoadRef = useRef<number | null>(null);
 
-  // Session synchronization guards. A session mutation can finish while an
-  // older GET /chat/sessions request is still in flight. Never allow that
-  // older response to overwrite the newer local state.
-  const sessionMutationVersionRef = useRef(0);
-  const sessionRequestVersionRef = useRef(0);
-
   // Auto-resize textarea
   useEffect(() => {
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
-      const nextHeight = Math.min(inputRef.current.scrollHeight, 180);
-      inputRef.current.style.height = `${nextHeight}px`;
-      inputRef.current.style.overflowY =
-        inputRef.current.scrollHeight > 180 ? 'auto' : 'hidden';
+      inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 180)}px`;
     }
   }, [input]);
 
@@ -978,42 +966,16 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
   // Load sessions & messages
   const loadSessions = useCallback(async () => {
-    const requestVersion = ++sessionRequestVersionRef.current;
-    const mutationVersionAtStart = sessionMutationVersionRef.current;
-
     try {
       const response = await chatApi.getSessions() as any;
-
-      // An older request must never overwrite state changed by a newer
-      // create/rename/delete/clear/live mutation.
-      if (requestVersion !== sessionRequestVersionRef.current) return;
-      if (mutationVersionAtStart !== sessionMutationVersionRef.current) return;
-
-      const remoteSessions = Array.isArray(response?.sessions)
-        ? response.sessions
-        : [];
-
-      setSessions(remoteSessions);
+      setSessions(response.sessions || []);
     } catch (err: any) {
-      if (requestVersion !== sessionRequestVersionRef.current) return;
       console.error('Failed to load sessions:', err);
       if (err.status === 401) onLogout();
     } finally {
-      if (requestVersion === sessionRequestVersionRef.current) {
-        setLoading(false);
-      }
+      setLoading(false);
     }
   }, [onLogout]);
-
-  // Reconcile the sidebar/session list after a successful server mutation.
-  // The mutation version makes this safe even when requests overlap.
-  const markSessionMutation = useCallback(() => {
-    sessionMutationVersionRef.current += 1;
-  }, []);
-
-  const notifySessionsChanged = useCallback(() => {
-    window.dispatchEvent(new CustomEvent('twinkle-sessions-changed'));
-  }, []);
 
   // Live Talk persists turns in the background. Update the same sidebar state
   // immediately instead of forcing another GET /chat/sessions request.
@@ -1022,7 +984,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       const detail = (event as CustomEvent<{ id: number; sessionName?: string }>).detail;
       if (!detail?.id) return;
 
-      markSessionMutation();
       const now = new Date().toISOString();
       setSessions(prev => {
         const existing = prev.find(session => session.id === detail.id);
@@ -1046,14 +1007,11 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           ...prev,
         ];
       });
-
-      // Live Talk can create a session outside the normal send flow.
-      notifySessionsChanged();
     };
 
     window.addEventListener('twinkle-live-session-updated', handleLiveSessionUpdate);
     return () => window.removeEventListener('twinkle-live-session-updated', handleLiveSessionUpdate);
-  }, [user.id, markSessionMutation, notifySessionsChanged]);
+  }, [user.id]);
 
   const loadMessages = useCallback(async (sid: number) => {
     try {
@@ -1089,34 +1047,17 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
   useEffect(() => { loadSessions(); }, [loadSessions]);
 
-  // Restore the exact conversation that was open before a browser refresh.
-  // Do not create a new session here: the persisted ID is the source of truth
-  // for which existing conversation should be reopened.
   useEffect(() => {
     if (loading) return;
-
-    const persistedId = readPersistedSessionId();
-    if (persistedId === null) return;
-
-    const restoredSession = sessions.find(
-      session => Number(session.id) === persistedId
-    );
-
-    if (restoredSession) {
-      if (currentSessionId !== persistedId) {
-        setCurrentSessionId(persistedId);
+    if (currentSessionId !== null) {
+      const stillExists = sessions.some(s => s.id === currentSessionId);
+      if (!stillExists) {
+        setCurrentSessionId(null);
+        persistSessionId(null);
+        setMessages([]);
       }
-      return;
     }
-
-    // The saved conversation no longer exists on the server. Only in this
-    // case should we clear the saved session and return to the empty chat.
-    if (currentSessionId === persistedId) {
-      setCurrentSessionId(null);
-      persistSessionId(null);
-      setMessages([]);
-    }
-  }, [sessions, loading, currentSessionId]);
+  }, [sessions, loading]);
 
   // Only skip loading messages if the currentSessionId exactly matches the
   // ID we marked to skip (the newly created session). Any other session --
@@ -1451,7 +1392,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     try {
       let response: any;
       const hasFiles = filesToSend && filesToSend.length > 0;
-      const finalMessage = messageText.trim() || (hasFiles && filesToSend.some(f => f.type.startsWith('image/')) ? 'Image uploaded' : '');
+      const finalMessage = messageText.trim();
 
       if (hasFiles) {
         response = await chatApi.sendMessageWithFiles(
@@ -1476,8 +1417,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       const activeSessionId = response.sessionId || currentSessionId;
 
       if (isNewSession && activeSessionId) {
-        markSessionMutation();
-
         // Store the new session's ID (not just `true`) so the
         // message-load effect skips ONLY this specific session's fetch.
         // Switching to any other session will still trigger a full load.
@@ -1487,41 +1426,16 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
         const now = new Date().toISOString();
         setSessions(prev => {
-          const existing = prev.find(session => Number(session.id) === Number(activeSessionId));
-          if (existing) {
-            return [
-              { ...existing, id: Number(activeSessionId), updatedAt: now },
-              ...prev.filter(session => Number(session.id) !== Number(activeSessionId)),
-            ];
-          }
-
+          if (prev.some(session => session.id === activeSessionId)) return prev;
           return [
             {
-              id: Number(activeSessionId),
+              id: activeSessionId,
               userId: user.id,
               sessionName: 'New Chat',
               createdAt: now,
               updatedAt: now,
             },
             ...prev,
-          ];
-        });
-
-        // The backend has confirmed creation. Keep the UI synchronized now;
-        // do not wait for a browser refresh.
-        notifySessionsChanged();
-      } else if (activeSessionId) {
-        // Existing chats are also changed by every successful message because
-        // the backend updates ChatSession.updatedAt. Keep that chat at the top
-        // of the same session list immediately.
-        markSessionMutation();
-        const now = new Date().toISOString();
-        setSessions(prev => {
-          const existing = prev.find(session => Number(session.id) === Number(activeSessionId));
-          if (!existing) return prev;
-          return [
-            { ...existing, updatedAt: now },
-            ...prev.filter(session => Number(session.id) !== Number(activeSessionId)),
           ];
         });
       }
@@ -1563,7 +1477,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
               : 'New Chat';
 
           await chatApi.renameSession(activeSessionId, newTitle);
-          markSessionMutation();
           setTypingSessionTitle({ id: activeSessionId, title: newTitle });
 
           // Keep the Sidebar's sessions prop synchronized immediately.
@@ -1801,12 +1714,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
     try {
       await chatApi.deleteSession(deletedSessionId);
-      markSessionMutation();
 
       // Update React state immediately after the server confirms deletion.
       // This keeps the sidebar in sync without requiring a browser refresh.
       setSessions(prev => prev.filter(session => session.id !== deletedSessionId));
-      notifySessionsChanged();
 
       if (currentSessionId === deletedSessionId) {
         setCurrentSessionId(null);
@@ -1831,7 +1742,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
     try {
       await chatApi.renameSession(sid, trimmedName);
-      markSessionMutation();
 
       // Update the parent source of truth immediately. Both desktop and
       // mobile SessionList instances receive this same sessions array.
@@ -1851,12 +1761,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const confirmClearAll = async () => {
     try {
       await chatApi.clearSessions();
-      markSessionMutation();
 
       // Clear the local session collection as soon as the backend confirms
       // the operation so the sidebar updates immediately.
       setSessions([]);
-      notifySessionsChanged();
       setTypingSessionTitle(null);
       setSessionIdToDelete(null);
       setCurrentSessionId(null);
@@ -2003,22 +1911,13 @@ const cleanMessageContent = (content: unknown): string => {
    * Make that saved Live Talk session the active chat immediately so the
    * normal chat area displays the complete transcript without a refresh.
    */
-  const handleLiveSessionComplete = useCallback(async (rawSessionId: number) => {
-    const sessionId = Number(rawSessionId);
+  const handleLiveSessionComplete = useCallback((sessionId: number) => {
     if (!Number.isFinite(sessionId)) return;
 
-    markSessionMutation();
-
-    // Put the Live Talk session into the parent's source of truth before
-    // selecting it. This keeps the session-validation effect from clearing
-    // currentSessionId because it has not seen the new session yet.
     setSessions(prev => {
-      const existing = prev.find(session => Number(session.id) === sessionId);
+      const existing = prev.find(session => session.id === sessionId);
       if (existing) {
-        return [
-          { ...existing, id: sessionId, updatedAt: new Date().toISOString() },
-          ...prev.filter(session => Number(session.id) !== sessionId),
-        ];
+        return [existing, ...prev.filter(session => session.id !== sessionId)];
       }
 
       const now = new Date().toISOString();
@@ -2034,19 +1933,11 @@ const cleanMessageContent = (content: unknown): string => {
       ];
     });
 
-    // Make Live Talk the active conversation and immediately fetch the
-    // persisted transcript. Do NOT leave messages empty and wait for another
-    // click/refresh; the history endpoint is the source of truth.
     setCurrentSessionId(sessionId);
     persistSessionId(sessionId);
     setMessages([]);
-    setMessageAttachments({});
     setEditingMessage(null);
-
-    await loadMessages(sessionId);
-  }, [user.id, loadMessages, markSessionMutation]);
-
-  if (loading) {
+  }, [user.id]);
     return (
       <div className="flex items-center justify-center h-screen font-sans text-zinc-400 bg-white dark:bg-zinc-950 transition-colors duration-300">
         <motion.div
@@ -2598,48 +2489,81 @@ const cleanMessageContent = (content: unknown): string => {
             </AnimatePresence>
 
             <div className={`relative z-[60] flex w-full min-w-0 flex-col overflow-visible rounded-[24px] border border-zinc-200/90 bg-white shadow-[0_2px_18px_rgba(0,0,0,0.08)] transition-all dark:border-zinc-700/90 dark:bg-zinc-900 dark:shadow-black/20 ${justFinished ? 'animate-blink' : ''}`}>
-              {/* File preview strip (kept for consistency but never shown without UI trigger) */}
+              {/* Selected-file preview strip.
+                  Use a horizontal scroller on small screens so attachments
+                  never get pushed below/clipped by the mobile composer. */}
               <AnimatePresence>
                 {filePreviews.length > 0 && (
-                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="flex flex-wrap gap-3 px-3 pt-3 pb-2.5 border-b border-zinc-100 dark:border-zinc-800/70">
-                    {filePreviews.map(fp => (
-                      <div key={fp.id} className="relative flex flex-col items-center gap-1 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => void openFilePreview(fp.file, fp.preview)}
-                          className="group/preview relative block w-20 text-left"
-                          title={`Preview ${fp.file.name}`}
-                        >
-                          {fp.file.type.startsWith('image/') && fp.preview ? (
-                            <div className="w-20 h-16 rounded-xl overflow-hidden bg-zinc-200 dark:bg-zinc-700 shadow-sm border border-zinc-200/60 cursor-pointer">
-                              <img src={fp.preview} alt={fp.file.name} className="w-full h-full object-cover transition-transform group-hover/preview:scale-105" />
-                            </div>
-                          ) : fp.file.type === 'application/pdf' && fp.preview ? (
-                            <div className="relative w-20 h-16 rounded-xl overflow-hidden bg-white dark:bg-zinc-800 shadow-sm border border-zinc-200 dark:border-zinc-700 cursor-pointer">
-                              <iframe src={`${fp.preview}#page=1&view=FitH`} title={`Preview ${fp.file.name}`} className="pointer-events-none absolute inset-0 h-[288px] w-[360px] origin-top-left scale-[0.222] bg-white" />
-                              <div className="absolute inset-0 bg-transparent group-hover/preview:bg-zinc-1000/5 transition-colors" />
-                            </div>
-                          ) : (
-                            <div className="w-20 h-16 rounded-xl flex flex-col items-center justify-center gap-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 cursor-pointer hover:border-zinc-500 dark:hover:border-zinc-500/50 transition-colors">
-                              <FileText className="w-6 h-6 text-zinc-900 dark:text-zinc-100" />
-                              <span className="text-[8px] font-black uppercase text-zinc-500 dark:text-zinc-400">{fp.file.name.split('.').pop()?.toUpperCase() || 'FILE'}</span>
-                            </div>
-                          )}
-                          <span className="mt-1 block text-[9px] font-medium text-zinc-500 dark:text-zinc-400 truncate max-w-[80px]" title={fp.file.name}>{fp.file.name}</span>
-                          <span className="block text-[8px] text-zinc-400">{formatFileSize(fp.file.size)}</span>
-                        </button>
-                        <button onClick={() => removeFile(fp.id)} className="absolute -top-1.5 -right-1.5 w-[18px] h-[18px] rounded-full flex items-center justify-center bg-zinc-600 dark:bg-zinc-500 text-white shadow-md hover:bg-zinc-500">
-                          <X className="w-2.5 h-2.5" />
-                        </button>
-                      </div>
-                    ))}
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="w-full min-w-0 border-b border-zinc-100 dark:border-zinc-800/70"
+                  >
+                    <div
+                      className="flex w-full min-w-0 gap-2 overflow-x-auto overflow-y-hidden px-2.5 pt-2.5 pb-2.5 sm:flex-wrap sm:overflow-x-visible sm:px-3 sm:pt-3 sm:pb-2.5"
+                      style={{ WebkitOverflowScrolling: 'touch' }}
+                    >
+                      {filePreviews.map(fp => {
+                        const extension = fp.file.name.split('.').pop()?.toUpperCase() || 'FILE';
+                        const isImage = fp.file.type.startsWith('image/') && Boolean(fp.preview);
+                        const isPdf = fp.file.type === 'application/pdf' || /\.pdf$/i.test(fp.file.name);
+
+                        return (
+                          <div key={fp.id} className="relative flex w-[76px] shrink-0 flex-col items-center gap-1 sm:w-20">
+                            <button
+                              type="button"
+                              onClick={() => void openFilePreview(fp.file, fp.preview)}
+                              className="group/preview relative block w-full min-w-0 text-left touch-manipulation"
+                              title={`Preview ${fp.file.name}`}
+                            >
+                              {isImage ? (
+                                <div className="h-[60px] w-[76px] overflow-hidden rounded-xl bg-zinc-200 shadow-sm ring-1 ring-inset ring-zinc-200/70 dark:bg-zinc-700 dark:ring-zinc-700 sm:h-16 sm:w-20">
+                                  <img
+                                    src={fp.preview}
+                                    alt={fp.file.name}
+                                    className="h-full w-full object-cover transition-transform group-hover/preview:scale-105"
+                                  />
+                                </div>
+                              ) : isPdf ? (
+                                /* Do not use an iframe for the tiny PDF thumbnail.
+                                   Android/iOS browsers can leave nested PDF viewers
+                                   blank at this size. The full preview still opens
+                                   from the card. */
+                                <div className="flex h-[60px] w-[76px] flex-col items-center justify-center gap-0.5 rounded-xl border border-zinc-200 bg-white shadow-sm transition-colors group-hover/preview:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:group-hover/preview:border-zinc-500 sm:h-16 sm:w-20">
+                                  <FileText className="h-6 w-6 text-zinc-800 dark:text-zinc-100" />
+                                  <span className="text-[8px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400">PDF</span>
+                                </div>
+                              ) : (
+                                <div className="flex h-[60px] w-[76px] flex-col items-center justify-center gap-0.5 rounded-xl border border-zinc-200 bg-zinc-100 shadow-sm transition-colors hover:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:hover:border-zinc-500 sm:h-16 sm:w-20">
+                                  <FileText className="h-6 w-6 text-zinc-800 dark:text-zinc-100" />
+                                  <span className="max-w-[62px] truncate text-[8px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400">{extension}</span>
+                                </div>
+                              )}
+                              <span className="mt-1 block max-w-full truncate text-[9px] font-medium text-zinc-500 dark:text-zinc-400" title={fp.file.name}>
+                                {fp.file.name}
+                              </span>
+                              <span className="block text-[8px] text-zinc-400">{formatFileSize(fp.file.size)}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeFile(fp.id)}
+                              aria-label={`Remove ${fp.file.name}`}
+                              className="absolute -right-1 -top-1 flex h-[19px] w-[19px] items-center justify-center rounded-full bg-zinc-700 text-white shadow-md transition-transform hover:scale-105 hover:bg-zinc-600 dark:bg-zinc-500 dark:hover:bg-zinc-400"
+                            >
+                              <X className="h-2.5 w-2.5" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
 
               <div
                 ref={modelPickerRef}
-                className="twinkle-composer-row relative z-[200] flex min-w-0 flex-col gap-1 px-2.5 py-2 sm:gap-2 sm:px-3 sm:py-2.5 md:flex-row md:items-center md:gap-2 md:px-4"
+                className="twinkle-composer-row relative z-[200] flex min-w-0 items-center gap-1.5 px-2.5 py-2 sm:gap-2 sm:px-3 sm:py-2.5 md:px-4"
               >
                 {/* Hidden file input */}
                 <input
@@ -2654,12 +2578,52 @@ const cleanMessageContent = (content: unknown): string => {
                   }}
                 />
 
-                {/* Composer text / speech-to-text area.
-                    Mobile: full width on the first row.
-                    Desktop: stays in the main horizontal composer row. */}
+                {/* + attachment button */}
+                <motion.button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isTyping || isProcessingFiles}
+                  aria-label="Attach files"
+                  title="Attach files"
+                  whileHover={{ scale: 1.04, y: -1 }}
+                  whileTap={{ scale: 0.94, y: 0 }}
+                  transition={{
+                    type: 'spring',
+                    stiffness: 420,
+                    damping: 24,
+                    mass: 0.6,
+                  }}
+                  className="group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                >
+                  <motion.span
+                    className="pointer-events-none absolute inset-0 rounded-2xl bg-zinc-1000/0 blur-md"
+                    whileHover={{ scale: 1.15, opacity: 0.18 }}
+                    transition={{ duration: 0.25, ease: 'easeOut' }}
+                  />
+
+                  <motion.span
+                    className="relative z-10 flex items-center justify-center"
+                    animate={isProcessingFiles ? { rotate: 90 } : { rotate: 0 }}
+                    whileHover={{ scale: 1.12, rotate: 180 }}
+                    whileTap={{ scale: 0.9, rotate: 180 }}
+                    transition={{
+                      type: 'spring',
+                      stiffness: 500,
+                      damping: 22,
+                    }}
+                  >
+                    {isProcessingFiles ? (
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
+                    ) : (
+                      <Plus className="h-[22px] w-[22px] stroke-[2.25]" />
+                    )}
+                  </motion.span>
+                </motion.button>
+
+                {/* Composer text / speech-to-text mode */}
                 {voiceInputActive ? (
                   <div
-                    className="relative order-1 flex min-h-[42px] w-full min-w-0 items-center gap-2 px-1 sm:min-h-[46px] sm:gap-3 md:order-2 md:flex-1"
+                    className="relative flex min-w-0 flex-1 items-center gap-2 px-1 sm:gap-3"
                     aria-live="polite"
                     aria-label="Listening for speech"
                   >
@@ -2674,7 +2638,6 @@ const cleanMessageContent = (content: unknown): string => {
                           const height = hasSpeech
                             ? 5 + ((index * 17) % 18)
                             : 3 + ((index * 7) % 5);
-
                           return (
                             <motion.span
                               key={index}
@@ -2694,9 +2657,29 @@ const cleanMessageContent = (content: unknown): string => {
                         })}
                       </div>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={cancelVoiceInput}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-800 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                      aria-label="Discard voice input"
+                      title="Discard"
+                    >
+                      <X className="h-5 w-5" strokeWidth={2.1} />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={commitVoiceInput}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                      aria-label="Use voice input"
+                      title="Use voice input"
+                    >
+                      <Check className="h-5 w-5" strokeWidth={2.1} />
+                    </button>
                   </div>
                 ) : (
-                  <div className="relative order-1 flex min-h-[42px] w-full min-w-0 items-center md:order-2 md:min-h-[46px] md:flex-1">
+                  <div className="relative min-w-0 flex-1 flex items-center">
                     <textarea
                       ref={inputRef}
                       value={input}
@@ -2709,242 +2692,148 @@ const cleanMessageContent = (content: unknown): string => {
                       }}
                       placeholder="Ask Anything"
                       rows={1}
-                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-hidden bg-transparent px-1 py-1.5 text-[15px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:py-2.5"
+                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent px-1 py-2 text-[15px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:min-h-[46px] sm:py-2.5"
                       onInput={(e) => {
                         const t = e.target as HTMLTextAreaElement;
                         t.style.height = 'auto';
-                        const nextHeight = Math.min(t.scrollHeight, 180);
-                        t.style.height = `${nextHeight}px`;
-                        t.style.overflowY = t.scrollHeight > 180 ? 'auto' : 'hidden';
+                        t.style.height = `${Math.min(t.scrollHeight, 180)}px`;
                       }}
                     />
                   </div>
                 )}
 
-                {/* Toolbar.
-                    Mobile: + on the left, model/mic/action on the right.
-                    Desktop: children become direct flex items so the original
-                    + -> input -> model -> mic -> action order is preserved. */}
-                <div className="order-2 flex w-full min-w-0 items-center justify-between gap-1 md:contents">
-                  {/* + attachment button */}
+                {/* Think / model selector */}
+                <div className="relative shrink-0">
                   <motion.button
                     type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isTyping || isProcessingFiles}
-                    aria-label="Attach files"
-                    title="Attach files"
-                    whileHover={{ scale: 1.04, y: -1 }}
-                    whileTap={{ scale: 0.94, y: 0 }}
-                    transition={{
-                      type: 'spring',
-                      stiffness: 420,
-                      damping: 24,
-                      mass: 0.6,
-                    }}
-                    className="order-1 group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 md:order-1"
+                    onClick={() => setModelPickerOpen(prev => !prev)}
+                    disabled={isTyping}
+                    aria-haspopup="listbox"
+                    aria-expanded={modelPickerOpen}
+                    whileHover={{ y: -1 }}
+                    whileTap={{ scale: 0.97 }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                    className="group relative inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border-0 bg-transparent px-2 text-black shadow-none outline-none transition-colors hover:bg-zinc-100/70 dark:bg-transparent dark:text-white dark:hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50 sm:px-2.5"
                   >
-                    <motion.span
-                      className="pointer-events-none absolute inset-0 rounded-2xl bg-zinc-1000/0 blur-md"
-                      whileHover={{ scale: 1.15, opacity: 0.18 }}
-                      transition={{ duration: 0.25, ease: 'easeOut' }}
-                    />
-
-                    <motion.span
-                      className="relative z-10 flex items-center justify-center"
-                      whileHover={{ scale: 1.12 }}
-                      whileTap={{ scale: 0.9 }}
-                      transition={{
-                        type: 'spring',
-                        stiffness: 500,
-                        damping: 22,
-                      }}
-                    >
-                      {isProcessingFiles ? (
-                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
-                      ) : (
-                        <Plus className="h-[22px] w-[22px] stroke-[2.25]" />
-                      )}
-                    </motion.span>
+                    <span className="max-w-[190px] truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:text-sm">
+                      {activeModel.name}
+                    </span>
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
+                  
                   </motion.button>
 
-                  {/* Model selector */}
-                  <div className="order-2 relative ml-auto shrink-0 md:order-3 md:ml-0">
-                    <motion.button
-                      type="button"
-                      onClick={() => setModelPickerOpen(prev => !prev)}
-                      disabled={isTyping}
-                      aria-haspopup="listbox"
-                      aria-expanded={modelPickerOpen}
-                      whileHover={{ y: -1 }}
-                      whileTap={{ scale: 0.97 }}
-                      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                      className="group relative inline-flex h-10 max-w-[150px] shrink-0 items-center gap-1.5 rounded-lg border-0 bg-transparent px-2 text-black shadow-none outline-none transition-colors hover:bg-zinc-100/70 dark:bg-transparent dark:text-white dark:hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50 sm:max-w-[190px] sm:px-2.5"
-                    >
-                      <span className="max-w-[112px] truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:max-w-[150px] sm:text-sm">
-                        {activeModelName}
-                      </span>
-                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
-                    </motion.button>
-
-                    <AnimatePresence>
-                      {modelPickerOpen && (
-                        <motion.div
-                          initial={{ opacity: 0, y: 8, scale: 0.97 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, y: 8, scale: 0.97 }}
-                          transition={{ duration: 0.16, ease: 'easeOut' }}
-                          role="listbox"
-                          aria-label="Select AI model"
-                          className="fixed bottom-[calc(88px+env(safe-area-inset-bottom,0px))] right-2 z-[99999] w-[min(360px,calc(100vw-16px))] max-w-[calc(100vw-16px)] max-h-[min(360px,calc(100dvh-180px))] overflow-y-auto overflow-x-hidden rounded-xl border border-zinc-200/90 bg-white/95 p-1.5 shadow-2xl shadow-zinc-900/20 backdrop-blur-2xl dark:border-zinc-700/90 dark:bg-zinc-900/95 dark:shadow-black/50 sm:absolute sm:bottom-[calc(100%+8px)] sm:right-0 sm:w-[360px] sm:max-w-[calc(100vw-24px)] sm:max-h-[420px] sm:overflow-hidden sm:rounded-2xl sm:p-2"
-                        >
-                          <div className="px-2 pb-2 pt-1">
-                            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400 dark:text-zinc-500">
-                              Select AI model
-                            </p>
-                          </div>
-
-                          <div className="space-y-1">
-                            {MODEL_OPTIONS.map(option => {
-                              const Icon = option.icon;
-                              const selected = option.id === selectedModel;
-
-                              return (
-                                <motion.button
-                                  key={option.id}
-                                  type="button"
-                                  role="option"
-                                  aria-selected={selected}
-                                  onClick={() => chooseModel(option.id)}
-                                  whileHover={{ x: 2 }}
-                                  whileTap={{ scale: 0.985 }}
-                                  transition={{ type: 'spring', stiffness: 450, damping: 28 }}
-                                  className={`flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-all ${
-                                    selected
-                                      ? 'border-zinc-500 bg-zinc-100 shadow-sm dark:border-zinc-500 dark:bg-zinc-950/40'
-                                      : 'border-transparent hover:border-zinc-200 hover:bg-zinc-50 dark:hover:border-zinc-700 dark:hover:bg-zinc-800/80'
-                                  }`}
-                                >
-                                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
-                                    selected
-                                      ? 'bg-black text-white shadow-md'
-                                      : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'
-                                  }`}>
-                                    <Icon className="h-4 w-4" />
+                  <AnimatePresence>
+                    {modelPickerOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 8, scale: 0.97 }}
+                        transition={{ duration: 0.16, ease: 'easeOut' }}
+                        role="listbox"
+                        aria-label="Select AI model"
+                        className="fixed bottom-[calc(88px+env(safe-area-inset-bottom,0px))] right-2 z-[99999] w-[min(360px,calc(100vw-16px))] max-w-[calc(100vw-16px)] max-h-[min(360px,calc(100dvh-180px))] overflow-y-auto overflow-x-hidden rounded-xl border border-zinc-200/90 bg-white/95 p-1.5 shadow-2xl shadow-zinc-900/20 backdrop-blur-2xl dark:border-zinc-700/90 dark:bg-zinc-900/95 dark:shadow-black/50 sm:absolute sm:bottom-[calc(100%+8px)] sm:right-0 sm:w-[360px] sm:max-w-[calc(100vw-24px)] sm:max-h-[420px] sm:overflow-hidden sm:rounded-2xl sm:p-2"
+                      >
+                        <div className="px-2 pb-2 pt-1">
+                          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400 dark:text-zinc-500">
+                            Select AI model
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          {MODEL_OPTIONS.map(option => {
+                            const Icon = option.icon;
+                            const selected = option.id === selectedModel;
+                            return (
+                              <motion.button
+                                key={option.id}
+                                type="button"
+                                role="option"
+                                aria-selected={selected}
+                                onClick={() => chooseModel(option.id)}
+                                whileHover={{ x: 2 }}
+                                whileTap={{ scale: 0.985 }}
+                                transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+                                className={`flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-all ${selected ? 'border-zinc-500 bg-zinc-100 shadow-sm dark:border-zinc-500 dark:bg-zinc-950/40' : 'border-transparent hover:border-zinc-200 hover:bg-zinc-50 dark:hover:border-zinc-700 dark:hover:bg-zinc-800/80'}`}
+                              >
+                                <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${selected ? 'bg-black text-white shadow-md' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'}`}>
+                                  <Icon className="h-4 w-4" />
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="flex items-center gap-2">
+                                    <span className="truncate text-xs font-medium text-zinc-800 dark:text-zinc-100">{option.name}</span>
                                   </span>
-
-                                  <span className="min-w-0 flex-1">
-                                    <span className="flex items-center gap-2">
-                                      <span className="truncate text-xs font-medium text-zinc-800 dark:text-zinc-100">
-                                        {option.name}
-                                      </span>
-                                    </span>
-                                    <span className="mt-0.5 block truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
-                                      {option.description}{option.vision ? ' · Vision' : ''}
-                                    </span>
+                                  <span className="mt-0.5 block truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
+                                    {option.description}{option.vision ? ' · Vision' : ''}
                                   </span>
+                                </span>
+                                {selected && <Check className="h-4 w-4 shrink-0 text-zinc-600 dark:text-zinc-600 dark:text-zinc-300" />}
+                              </motion.button>
+                            );
+                          })}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
 
-                                  {selected && (
-                                    <Check className="h-4 w-4 shrink-0 text-zinc-600 dark:text-zinc-300" />
-                                  )}
-                                </motion.button>
-                              );
-                            })}
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
+                {!voiceInputActive && (
+                  <motion.button
+                    type="button"
+                    onClick={startVoiceInput}
+                    disabled={isTyping || isProcessingFiles}
+                    aria-label="Voice input"
+                    title="Voice input"
+                    whileHover={{ scale: 1.06 }}
+                    whileTap={{ scale: 0.9 }}
+                    className="flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-9"
+                  >
+                    <Mic className="h-[20px] w-[20px]" strokeWidth={2} />
+                  </motion.button>
+                )}
 
-                  {/* Microphone / voice-input button */}
-                  {!voiceInputActive ? (
+                {/* Live Talk / Send occupy the same action slot, like ChatGPT. */}
+                <AnimatePresence mode="wait" initial={false}>
+                  {!isTyping && !input.trim() && filePreviews.length === 0 ? (
                     <motion.button
+                      key="live-talk"
                       type="button"
-                      onClick={startVoiceInput}
-                      disabled={isTyping || isProcessingFiles}
-                      aria-label="Voice input"
-                      title="Voice input"
+                      onClick={() => setLiveTalkOpen(true)}
+                      aria-label="Open Live Talk"
+                      title="Live Talk"
+                      initial={{ opacity: 0, scale: 0.88, y: 2 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.88, y: 2 }}
                       whileHover={{ scale: 1.06 }}
-                      whileTap={{ scale: 0.9 }}
-                      className="order-3 flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 md:order-4"
+                      whileTap={{ scale: 0.92 }}
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#ec6aa8] text-white shadow-[0_8px_20px_rgba(236,106,168,.22)] transition hover:bg-[#e85f9f] sm:h-11 sm:w-11"
                     >
-                      <Mic className="h-[20px] w-[20px]" strokeWidth={2} />
+                      <AudioLines className="h-[19px] w-[19px]" strokeWidth={2.1} />
                     </motion.button>
                   ) : (
                     <motion.button
+                      key="send"
                       type="button"
-                      onClick={cancelVoiceInput}
-                      aria-label="Discard voice input"
-                      title="Discard voice input"
-                      whileHover={{ scale: 1.06 }}
-                      whileTap={{ scale: 0.9 }}
-                      className="order-3 flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-zinc-800 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 md:order-4"
+                      onClick={isTyping ? handleStopResponse : () => handleSendMessage()}
+                      disabled={!input.trim() && (!Array.isArray(filePreviews) || filePreviews.length === 0) && !isTyping}
+                      aria-label={isTyping ? 'Stop response' : 'Send message'}
+                      title={isTyping ? 'Stop response' : 'Send message'}
+                      initial={{ opacity: 0, scale: 0.88, y: 2 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.88, y: 2 }}
+                      whileHover={{ scale: isTyping || input.trim() || filePreviews.length ? 1.06 : 1, y: -1 }}
+                      whileTap={{ scale: 0.92 }}
+                      transition={{ type: 'spring', stiffness: 450, damping: 25 }}
+                      className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isTyping ? 'border-[#ec6aa8] bg-[#ec6aa8] text-white shadow-[#ec6aa8]/20' : 'border-zinc-300 bg-white hover:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-800 dark:hover:border-zinc-500'}`}
                     >
-                      <X className="h-5 w-5" strokeWidth={2.1} />
+                      {isTyping ? (
+                        <span className="relative flex h-full w-full items-center justify-center">
+                          <span className="h-3.5 w-3.5 rounded-[3px] bg-white shadow-sm" />
+                        </span>
+                      ) : (
+                        <ArrowUp className="h-4 w-4" />
+                      )}
                     </motion.button>
                   )}
-
-                  {/* Send / Live Talk — one persistent action slot.
-                      The button itself never unmounts, so switching from
-                      Live Talk to Send happens immediately as input changes. */}
-                  {voiceInputActive ? (
-                    <motion.button
-                      type="button"
-                      onClick={commitVoiceInput}
-                      aria-label="Use voice input"
-                      title="Use voice input"
-                      whileHover={{ scale: 1.06, y: -1 }}
-                      whileTap={{ scale: 0.92 }}
-                      className="order-4 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 md:order-5"
-                    >
-                      <Check className="h-5 w-5" strokeWidth={2.1} />
-                    </motion.button>
-                  ) : (() => {
-                    const showLiveTalk = !isTyping && !input.trim() && filePreviews.length === 0;
-
-                    return (
-                      <motion.button
-                        type="button"
-                        onClick={showLiveTalk ? () => setLiveTalkOpen(true) : isTyping ? handleStopResponse : () => handleSendMessage()}
-                        disabled={!showLiveTalk && !isTyping && !input.trim() && filePreviews.length === 0}
-                        aria-label={isTyping ? 'Stop response' : showLiveTalk ? 'Open Live Talk' : 'Send message'}
-                        title={isTyping ? 'Stop response' : showLiveTalk ? 'Live Talk' : 'Send message'}
-                        whileHover={{ scale: 1.06, y: -1 }}
-                        whileTap={{ scale: 0.92 }}
-                        className={`order-4 relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full shadow-sm md:order-5 ${
-                          isTyping || showLiveTalk
-                            ? 'bg-[#ec6aa8] text-white shadow-[0_8px_20px_rgba(236,106,168,.22)]'
-                            : 'border border-zinc-300 bg-white text-zinc-900 hover:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:border-zinc-500'
-                        }`}
-                      >
-                        {isTyping ? (
-                          <span className="flex h-full w-full items-center justify-center">
-                            <span className="h-3.5 w-3.5 rounded-[3px] bg-white shadow-sm" />
-                          </span>
-                        ) : showLiveTalk ? (
-                          <motion.span
-                            key="live-talk"
-                            initial={{ opacity: 0, scale: 0.82 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            transition={{ duration: 0.06, ease: 'linear' }}
-                            className="flex items-center justify-center"
-                          >
-                            <AudioLines className="h-[19px] w-[19px]" strokeWidth={2.1} />
-                          </motion.span>
-                        ) : (
-                          <motion.span
-                            key="send"
-                            initial={{ opacity: 0, scale: 0.82 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            transition={{ duration: 0.06, ease: 'linear' }}
-                            className="flex items-center justify-center"
-                          >
-                            <ArrowUp className="h-4 w-4" />
-                          </motion.span>
-                        )}
-                      </motion.button>
-                    );
-                  })()}
-                </div>
+                </AnimatePresence>
               </div>
 
             </div>
@@ -2993,7 +2882,24 @@ const cleanMessageContent = (content: unknown): string => {
                 {previewFile.type.startsWith('image/') ? (
                   <div className="flex min-h-full items-center justify-center"><img src={previewUrl} alt={previewFile.name} className="max-h-full max-w-full rounded-xl object-contain shadow-lg" /></div>
                 ) : previewFile.type === 'application/pdf' ? (
-                  <iframe src={`${previewUrl}#toolbar=1&navpanes=0&view=FitH`} title={`PDF preview: ${previewFile.name}`} className="h-full min-h-[70vh] w-full rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800" />
+                  <div className="flex min-h-full w-full flex-col gap-3">
+                    <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800">
+                      <iframe
+                        src={`${previewUrl}#toolbar=1&navpanes=0&view=FitH`}
+                        title={`PDF preview: ${previewFile.name}`}
+                        className="h-full min-h-[62vh] w-full bg-white sm:min-h-[70vh]"
+                      />
+                    </div>
+                    <a
+                      href={previewUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mx-auto inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-transform active:scale-[0.98] sm:hidden dark:bg-white dark:text-zinc-900"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      Open PDF in browser
+                    </a>
+                  </div>
                 ) : previewText !== null ? (
                   <pre className="mx-auto min-h-full max-w-4xl whitespace-pre-wrap break-words rounded-xl bg-white p-5 font-mono text-xs leading-relaxed text-zinc-800 shadow-sm dark:bg-zinc-900 dark:text-zinc-200">{previewText}</pre>
                 ) : (
