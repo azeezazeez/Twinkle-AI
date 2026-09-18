@@ -1,10 +1,10 @@
 const handleDelete = (id: number) => {
   setMenuOpenId(null);
 
-
+  // Parent owns the actual deletion + confirmation modal.
   onDeleteSession(id);
 
-
+  // Close only after the delete request has been handed to the parent.
   onClose();
 
   setPinnedIds(prev => {
@@ -13,7 +13,6 @@ const handleDelete = (id: number) => {
     return next;
   });
 };
-
 
 
 const normalizedSessions = sessions
@@ -25,7 +24,7 @@ const normalizedListProps = {
   sessions: normalizedSessions,
 };
 
-
+// Collapsed rail: replace sessions.length with normalizedSessions.length.
 <IconTooltip label={`Chats (${normalizedSessions.length})`}>
   <button
     onClick={expandDesktop}
@@ -36,14 +35,14 @@ const normalizedListProps = {
   </button>
 </IconTooltip>
 
-
+// Mobile SessionList:
 <SessionList
   {...normalizedListProps}
   onClose={onMobileClose}
   focusSearchOnMount={false}
 />
 
-
+// Desktop SessionList:
 <SessionList
   {...normalizedListProps}
   onClose={collapseDesktop}
