@@ -554,7 +554,7 @@ const getSpeechLanguage = (): string => {
 export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [typingSessionTitle, setTypingSessionTitle] = useState<{ id: number; title: string } | null>(null);
-  const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
+  const [currentSessionId, setCurrentSessionId] = useState<number | null>(() => readPersistedSessionId());
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -1047,17 +1047,34 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
   useEffect(() => { loadSessions(); }, [loadSessions]);
 
+  // Restore the exact conversation that was open before a browser refresh.
+  // Do not create a new session here: the persisted ID is the source of truth
+  // for which existing conversation should be reopened.
   useEffect(() => {
     if (loading) return;
-    if (currentSessionId !== null) {
-      const stillExists = sessions.some(s => s.id === currentSessionId);
-      if (!stillExists) {
-        setCurrentSessionId(null);
-        persistSessionId(null);
-        setMessages([]);
+
+    const persistedId = readPersistedSessionId();
+    if (persistedId === null) return;
+
+    const restoredSession = sessions.find(
+      session => Number(session.id) === persistedId
+    );
+
+    if (restoredSession) {
+      if (currentSessionId !== persistedId) {
+        setCurrentSessionId(persistedId);
       }
+      return;
     }
-  }, [sessions, loading]);
+
+    // The saved conversation no longer exists on the server. Only in this
+    // case should we clear the saved session and return to the empty chat.
+    if (currentSessionId === persistedId) {
+      setCurrentSessionId(null);
+      persistSessionId(null);
+      setMessages([]);
+    }
+  }, [sessions, loading, currentSessionId]);
 
   // Only skip loading messages if the currentSessionId exactly matches the
   // ID we marked to skip (the newly created session). Any other session --
