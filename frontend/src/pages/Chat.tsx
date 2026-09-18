@@ -1789,10 +1789,33 @@ You can ask me questions, give me a file or image to analyze, ask for help with 
   return content;
 };
 
+const stripHtmlTagsOutsideCode = (value: string): string => {
+  // AI responses can occasionally contain literal HTML such as <br>, <p>,
+  // or <div>. Convert those tags to plain text/line breaks before Markdown
+  // rendering, while leaving fenced code blocks completely untouched.
+  const parts = value.split(/(```[\s\S]*?```)/g);
+  return parts
+    .map((part, index) => {
+      if (index % 2 === 1) return part;
+
+      return part
+        .replace(/&lt;br\s*\/?&gt;/gi, '\n')
+        .replace(/<br\s*\/?>(?=\s*)/gi, '\n')
+        .replace(/&lt;\/?(?:p|div|section|article|ul|ol|li|h[1-6]|strong|em|b|i|span)[^&]*?&gt;/gi, '\n')
+        .replace(/<\/?(?:p|div|section|article|ul|ol|li|h[1-6]|strong|em|b|i|span)[^>]*>/gi, '\n')
+        .replace(/<\/?[a-z][^>]*>/gi, '')
+        .replace(/&lt;\/?[a-z][^&]*?&gt;/gi, '');
+    })
+    .join('')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+};
+
 const cleanMessageContent = (content: unknown): string => {
     if (typeof content !== 'string') return '';
 
-    let cleaned = normalizeTwinkleIdentity(content)
+    let cleaned = stripHtmlTagsOutsideCode(normalizeTwinkleIdentity(content));
+    cleaned = cleaned
       // NEVER strip Markdown links here. Keeping the original [label](url)
       // structure lets ReactMarkdown preserve clickability while the
       // renderer below displays the complete URL as the visible text.
@@ -2133,7 +2156,7 @@ const cleanMessageContent = (content: unknown): string => {
                                 : 'w-full rounded-2xl border border-zinc-200/80 dark:border-zinc-700/80 bg-white/70 dark:bg-zinc-900/40 px-4 py-3.5 md:px-5 md:py-4 shadow-sm text-zinc-900 dark:text-zinc-100'
                             }`}
                           >
-                            <div className="text-sm md:text-base leading-relaxed markdown-body max-w-none min-w-0 w-full break-words [overflow-wrap:anywhere]">
+                            <div className="text-sm md:text-base leading-relaxed markdown-body max-w-none min-w-0 w-full break-words [overflow-wrap:anywhere] [&_*]:max-w-full [&_img]:h-auto [&_img]:max-w-full [&_table]:block [&_table]:w-full [&_table]:max-w-full [&_table]:overflow-x-auto [&_td]:break-words [&_th]:break-words">
                               {isEditing ? (
                                 <div className="flex flex-col gap-3 w-full min-w-0 p-1">
                                   <textarea
