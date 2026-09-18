@@ -970,7 +970,7 @@ export default function Sidebar({
               </h2>
             </div>
 
-            <div className="relative group/tip ml-auto mr-2 flex items-center justify-center shrink-0">
+            <div className="relative group/tip ml-auto mr-5 flex items-center justify-center shrink-0">
               <button
                 type="button"
                 onClick={onMobileClose}
@@ -978,7 +978,7 @@ export default function Sidebar({
                 title="Close sidebar"
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-zinc-600 transition-all duration-200 hover:bg-zinc-100 hover:text-zinc-950 active:scale-95 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white"
               >
-                <SidebarControlIcon className="h-7 w-7" />
+                <SidebarControlIcon className="h-9 w-9" />
               </button>
 
               <div className="absolute left-full top-1/2 ml-3 -translate-y-1/2 rounded-lg bg-zinc-900 px-2.5 py-1.5 text-xs font-semibold text-white whitespace-nowrap pointer-events-none z-[300] shadow-lg opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150">
