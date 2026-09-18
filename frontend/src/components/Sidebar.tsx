@@ -476,7 +476,7 @@ function SessionList({
 
       {/* Session list */}
       <div className="px-4 pb-2 shrink-0">
-        <div className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Chats</div>
+        <div className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Recents</div>
       </div>
       <div
         className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 pb-4"
@@ -865,7 +865,6 @@ export default function Sidebar({
   // Chat.tsx owns the authoritative session collection. Derive the count
   // directly from the prop so it can never become stale or be overwritten by
   // an older backend request.
-  const chatCount = sessions.length;
 
   useEffect(() => { onDesktopStateChange?.(false); }, [onDesktopStateChange]);
 
@@ -1011,10 +1010,10 @@ export default function Sidebar({
               </button>
             </IconTooltip>
 
-            <IconTooltip label={`Chats (${chatCount})`}>
+            <IconTooltip label={"Recents"}>
               <button
                 onClick={expandDesktop}
-                aria-label="Chats"
+                aria-label="Recents"
                 className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-all"
               >
                 <MessageCircle className="w-[19px] h-[19px]" strokeWidth={1.7} />
@@ -1050,17 +1049,17 @@ export default function Sidebar({
               onClick={e => e.stopPropagation()}
             >
               <div className="flex items-center justify-between px-5 pt-5 pb-2 shrink-0">
-                <button
-                  onClick={collapseDesktop}
-                  className="flex items-center gap-2.5 group"
-                  title="Close sidebar"
-                >
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-600 transition group-hover:bg-zinc-100 group-hover:text-zinc-950 dark:text-zinc-300 dark:group-hover:bg-zinc-900 dark:group-hover:text-white">
+                <h2 className="text-xl font-medium tracking-tight text-zinc-900/90 dark:text-white/90">Twinkle</h2>
+                <IconTooltip label="Close sidebar">
+                  <button
+                    onClick={collapseDesktop}
+                    aria-label="Close sidebar"
+                    title="Close sidebar"
+                    className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white"
+                  >
                     <PanelLeftClose className="h-5 w-5" strokeWidth={1.7} />
-                  </div>
-                  <h2 className="text-xl font-medium tracking-tight text-zinc-900/90 dark:text-white/90">Twinkle</h2>
-                </button>
-                <ThemeToggleButton />
+                  </button>
+                </IconTooltip>
               </div>
 
               <SessionList
