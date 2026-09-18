@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import React from 'react';
 import { User, Session, Message } from '../types';
 import Sidebar from '../components/Sidebar';
-import { chatApi, authApi, createLiveToken } from '../lib/api';
+import { chatApi, authApi } from '../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
 import StormLogo from '../components/StormLogo';
 import ConfirmationModal from '../components/ConfirmationModal';
@@ -617,260 +617,210 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const sessionToDelete = sessions.find(session => session.id === sessionIdToDelete);
   // Keep the chat interface clean on login; the sidebar opens only when requested.
 
+  // Browser-native speech recognition is used for composer dictation. It is
+  // considerably more reliable for short dictation on mobile/desktop browsers
+  // than keeping a second Gemini Live WebSocket open just for transcription.
+  type SpeechRecognitionResultEventLike = {
+    resultIndex: number;
+    results: {
+      length: number;
+      [index: number]: {
+        isFinal: boolean;
+        length: number;
+        [index: number]: { transcript: string };
+      };
+    };
+  };
+
+  type SpeechRecognitionInstance = {
+    continuous: boolean;
+    interimResults: boolean;
+    lang: string;
+    maxAlternatives: number;
+    onstart: (() => void) | null;
+    onresult: ((event: SpeechRecognitionResultEventLike) => void) | null;
+    onerror: ((event: { error?: string }) => void) | null;
+    onend: (() => void) | null;
+    start: () => void;
+    stop: () => void;
+    abort: () => void;
+  };
+
+  type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance;
+
   const voiceBaseInputRef = useRef('');
   const voiceDraftRef = useRef('');
-  const voiceSocketRef = useRef<WebSocket | null>(null);
-  const voiceStreamRef = useRef<MediaStream | null>(null);
-  const voiceAudioContextRef = useRef<AudioContext | null>(null);
-  const voiceSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const voiceProcessorRef = useRef<ScriptProcessorNode | null>(null);
-  const voiceSilentGainRef = useRef<GainNode | null>(null);
+  const voiceRecognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const voiceStartRef = useRef(0);
-  const voiceTurnCompleteResolverRef = useRef<(() => void) | null>(null);
+  const voiceRecognitionErrorRef = useRef<string | null>(null);
+  const voiceListeningRef = useRef(false);
   const [voiceDraftVersion, setVoiceDraftVersion] = useState(0);
 
-  const cleanupVoiceAudio = useCallback(() => {
-    try { voiceProcessorRef.current?.disconnect(); } catch {}
-    try { voiceSourceRef.current?.disconnect(); } catch {}
-    try { voiceSilentGainRef.current?.disconnect(); } catch {}
-    voiceProcessorRef.current = null;
-    voiceSourceRef.current = null;
-    voiceSilentGainRef.current = null;
+  const getRecognitionLanguage = useCallback(() => {
+    try {
+      const code = localStorage.getItem('twinkle_app_language') || 'auto';
+      const map: Record<string, string> = {
+        en: 'en-IN', hi: 'hi-IN', te: 'te-IN', ta: 'ta-IN', kn: 'kn-IN',
+        ml: 'ml-IN', bn: 'bn-IN', mr: 'mr-IN', gu: 'gu-IN', pa: 'pa-IN',
+        ur: 'ur-PK', ar: 'ar-SA', es: 'es-ES', fr: 'fr-FR', de: 'de-DE',
+        it: 'it-IT', pt: 'pt-PT', ru: 'ru-RU', ja: 'ja-JP', ko: 'ko-KR',
+        zh: 'zh-CN', tr: 'tr-TR', vi: 'vi-VN', id: 'id-ID', th: 'th-TH',
+        fil: 'fil-PH',
+      };
+      return map[code] || 'en-IN';
+    } catch {
+      return 'en-IN';
+    }
+  }, []);
 
-    voiceStreamRef.current?.getTracks().forEach(track => track.stop());
-    voiceStreamRef.current = null;
-
-    const context = voiceAudioContextRef.current;
-    voiceAudioContextRef.current = null;
-    if (context) void context.close().catch(() => undefined);
+  const cleanupVoiceRecognition = useCallback(() => {
+    const recognition = voiceRecognitionRef.current;
+    voiceRecognitionRef.current = null;
+    if (!recognition) return;
+    recognition.onstart = null;
+    recognition.onresult = null;
+    recognition.onerror = null;
+    recognition.onend = null;
+    try { recognition.abort(); } catch {}
   }, []);
 
   const cancelVoiceInput = useCallback(() => {
     voiceStartRef.current += 1;
-    try {
-      const socket = voiceSocketRef.current;
-      if (socket?.readyState === WebSocket.OPEN) socket.close(1000, 'cancelled');
-      else socket?.close();
-    } catch {}
-    voiceSocketRef.current = null;
-    voiceTurnCompleteResolverRef.current?.();
-    voiceTurnCompleteResolverRef.current = null;
-    cleanupVoiceAudio();
+    cleanupVoiceRecognition();
     voiceDraftRef.current = '';
     voiceBaseInputRef.current = '';
+    voiceRecognitionErrorRef.current = null;
+    voiceListeningRef.current = false;
     setVoiceDraftVersion(version => version + 1);
     setVoiceInputActive(false);
     window.setTimeout(() => inputRef.current?.focus(), 0);
-  }, [cleanupVoiceAudio]);
+  }, [cleanupVoiceRecognition]);
 
-  const commitVoiceInput = useCallback(async () => {
+  const commitVoiceInput = useCallback(() => {
     if (!voiceInputActive) return;
-
-    // Stop capturing immediately, but give Gemini a short window to deliver
-    // the final input-transcription chunk before we commit it to the composer.
-    try {
-      const socket = voiceSocketRef.current;
-      if (socket?.readyState === WebSocket.OPEN) {
-        try {
-          socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
-        } catch {}
-
-        await new Promise<void>(resolve => {
-          let settled = false;
-          const finish = () => {
-            if (settled) return;
-            settled = true;
-            window.clearTimeout(timer);
-            if (voiceTurnCompleteResolverRef.current === finish) {
-              voiceTurnCompleteResolverRef.current = null;
-            }
-            resolve();
-          };
-          const timer = window.setTimeout(finish, 550);
-          voiceTurnCompleteResolverRef.current = finish;
-        });
-      }
-    } catch {}
 
     const base = voiceBaseInputRef.current.trim();
     const spoken = voiceDraftRef.current.trim();
     const combined = `${base}${base && spoken ? ' ' : ''}${spoken}`.trim();
 
     voiceStartRef.current += 1;
-    try { voiceSocketRef.current?.close(1000, 'committed'); } catch {}
-    voiceSocketRef.current = null;
-    voiceTurnCompleteResolverRef.current?.();
-    voiceTurnCompleteResolverRef.current = null;
-    cleanupVoiceAudio();
-
-    setInput(combined);
+    cleanupVoiceRecognition();
     voiceDraftRef.current = '';
     voiceBaseInputRef.current = '';
+    voiceRecognitionErrorRef.current = null;
+    voiceListeningRef.current = false;
+    setInput(combined);
     setVoiceDraftVersion(version => version + 1);
     setVoiceInputActive(false);
     window.setTimeout(() => inputRef.current?.focus(), 0);
-  }, [cleanupVoiceAudio, voiceInputActive]);
+  }, [cleanupVoiceRecognition, voiceInputActive]);
 
-  const startVoiceInput = useCallback(async () => {
+  const startVoiceInput = useCallback(() => {
     if (voiceInputActive || isTyping || isProcessingFiles) return;
 
-    if (!navigator.mediaDevices?.getUserMedia) {
-      window.alert('Microphone access is not supported in this browser. Please use a current Chrome, Edge, or Safari browser.');
+    const SpeechRecognitionCtor = (
+      window as Window & {
+        SpeechRecognition?: SpeechRecognitionConstructor;
+        webkitSpeechRecognition?: SpeechRecognitionConstructor;
+      }
+    ).SpeechRecognition || (
+      window as Window & {
+        SpeechRecognition?: SpeechRecognitionConstructor;
+        webkitSpeechRecognition?: SpeechRecognitionConstructor;
+      }
+    ).webkitSpeechRecognition;
+
+    if (!SpeechRecognitionCtor) {
+      window.alert(
+        'Speech-to-text is not supported by this browser. Please use the latest Chrome or Edge and allow microphone access.'
+      );
       return;
     }
+
+    // Stop a stale recognition instance before starting a new one.
+    cleanupVoiceRecognition();
 
     const attempt = ++voiceStartRef.current;
     voiceBaseInputRef.current = input.trim();
     voiceDraftRef.current = '';
+    voiceRecognitionErrorRef.current = null;
+    voiceListeningRef.current = true;
     setVoiceDraftVersion(version => version + 1);
     setVoiceInputActive(true);
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+    const recognition = new SpeechRecognitionCtor();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = getRecognitionLanguage();
+    recognition.maxAlternatives = 1;
+    voiceRecognitionRef.current = recognition;
 
-      if (attempt !== voiceStartRef.current) {
-        stream.getTracks().forEach(track => track.stop());
-        return;
+    recognition.onstart = () => {
+      if (attempt !== voiceStartRef.current) return;
+      voiceListeningRef.current = true;
+      setVoiceInputActive(true);
+    };
+
+    recognition.onresult = event => {
+      if (attempt !== voiceStartRef.current) return;
+
+      // Rebuild the complete transcript from the recognition result set.
+      // This avoids duplicated/interleaved text when Chrome emits interim
+      // results followed by their final versions.
+      let transcript = '';
+      for (let i = 0; i < event.results.length; i += 1) {
+        transcript += event.results[i][0]?.transcript || '';
       }
-      voiceStreamRef.current = stream;
 
-      const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContextCtor) throw new Error('Web Audio is not supported in this browser.');
-      const context = new AudioContextCtor();
-      voiceAudioContextRef.current = context;
-      if (context.state === 'suspended') await context.resume();
+      voiceDraftRef.current = transcript.replace(/\s+/g, ' ').trim();
+      setVoiceDraftVersion(version => version + 1);
+    };
 
-      const { token, model } = await createLiveToken('Charon', 'auto', true);
+    recognition.onerror = event => {
+      if (attempt !== voiceStartRef.current) return;
+      const error = String(event?.error || 'unknown');
+      voiceRecognitionErrorRef.current = error;
+      console.error('Twinkle speech-to-text error:', error);
+
+      if (error === 'not-allowed' || error === 'service-not-allowed') {
+        cancelVoiceInput();
+        window.alert('Microphone permission was denied. Allow microphone access for Twinkle and try again.');
+      } else if (error === 'audio-capture') {
+        cancelVoiceInput();
+        window.alert('No microphone was detected. Connect a microphone and try again.');
+      } else if (error === 'network') {
+        cancelVoiceInput();
+        window.alert('Speech-to-text needs a network connection. Check your connection and try again.');
+      }
+    };
+
+    recognition.onend = () => {
       if (attempt !== voiceStartRef.current) return;
 
-      const socket = new WebSocket(
-        `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}`
-      );
-      voiceSocketRef.current = socket;
-
-      socket.onopen = () => {
-        if (attempt !== voiceStartRef.current) return;
-        socket.send(JSON.stringify({
-          setup: {
-            model: `models/${model}`,
-            generationConfig: { responseModalities: ['AUDIO'] },
-            systemInstruction: {
-              parts: [{
-                text: `Twinkle AI speech-to-text mode. Transcribe the user's speech accurately. Preserve the user's wording and language. The selected language is ${getSpeechLanguage()}. Do not translate the user's speech. Do not answer the user.`,
-              }],
-            },
-            inputAudioTranscription: {},
-            realtimeInputConfig: {
-              automaticActivityDetection: {
-                disabled: false,
-                prefixPaddingMs: 250,
-                silenceDurationMs: 900,
-              },
-            },
-          },
-        }));
-      };
-
-      socket.onmessage = async event => {
-        if (attempt !== voiceStartRef.current) return;
-        try {
-          let message: any;
-          if (typeof event.data === 'string') message = JSON.parse(event.data);
-          else if (event.data instanceof Blob) message = JSON.parse(await event.data.text());
-          else if (event.data instanceof ArrayBuffer) message = JSON.parse(new TextDecoder().decode(new Uint8Array(event.data)));
-          else return;
-
-          if (message?.error) throw new Error(message.error.message || 'Speech transcription service returned an error.');
-
-          const text = String(message?.serverContent?.inputTranscription?.text || '');
-          if (text) {
-            voiceDraftRef.current += text;
-            setVoiceDraftVersion(version => version + 1);
-          }
-
-          if (message?.serverContent?.turnComplete) {
-            voiceTurnCompleteResolverRef.current?.();
-          }
-        } catch (error) {
-          console.error('Twinkle speech transcription error:', error);
-        }
-      };
-
-      socket.onerror = () => {
-        if (attempt !== voiceStartRef.current) return;
-        console.error('Twinkle speech transcription WebSocket error.');
+      // Chrome can end recognition after a pause even when continuous=true.
+      // Automatically restart while the user remains in listening mode.
+      if (!voiceRecognitionErrorRef.current && voiceListeningRef.current) {
         window.setTimeout(() => {
-          if (attempt === voiceStartRef.current && !voiceDraftRef.current.trim()) {
-            cancelVoiceInput();
-            window.alert('Speech-to-text could not connect. Please check your internet connection and allow microphone access for localhost.');
-          }
-        }, 0);
-      };
+          if (attempt !== voiceStartRef.current) return;
+          try { recognition.start(); } catch {}
+        }, 80);
+      }
+    };
 
-      socket.onclose = event => {
-        if (attempt !== voiceStartRef.current) return;
-        voiceSocketRef.current = null;
-        if (event.code !== 1000 && !voiceDraftRef.current.trim()) {
-          cancelVoiceInput();
-        }
-      };
-
-      const source = context.createMediaStreamSource(stream);
-      const processor = context.createScriptProcessor(2048, 1, 1);
-      const silentGain = context.createGain();
-      silentGain.gain.value = 0;
-
-      processor.onaudioprocess = audioEvent => {
-        if (attempt !== voiceStartRef.current) return;
-        const activeSocket = voiceSocketRef.current;
-        if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) return;
-        const pcm = downsamplePcm16k(audioEvent.inputBuffer.getChannelData(0), context.sampleRate);
-        try {
-          activeSocket.send(JSON.stringify({
-            realtimeInput: {
-              audio: {
-                data: int16ToBase64(pcm),
-                mimeType: 'audio/pcm;rate=16000',
-              },
-            },
-          }));
-        } catch {}
-      };
-
-      source.connect(processor);
-      processor.connect(silentGain);
-      silentGain.connect(context.destination);
-      voiceSourceRef.current = source;
-      voiceProcessorRef.current = processor;
-      voiceSilentGainRef.current = silentGain;
-    } catch (error: any) {
-      if (attempt !== voiceStartRef.current) return;
+    try {
+      recognition.start();
+    } catch (error) {
       console.error('Speech-to-text start failed:', error);
       cancelVoiceInput();
-      const message = String(error?.message || 'Unable to start speech-to-text.');
-      if (/permission|denied|notallowed/i.test(message)) {
-        window.alert('Microphone permission was denied. Allow microphone access for localhost and try again.');
-      } else {
-        window.alert(`Speech-to-text could not start. ${message}`);
-      }
+      window.alert('Speech-to-text could not start. Please allow microphone access and try again.');
     }
-  }, [cancelVoiceInput, input, isProcessingFiles, isTyping, voiceInputActive]);
+  }, [cancelVoiceInput, cleanupVoiceRecognition, getRecognitionLanguage, input, isProcessingFiles, isTyping, voiceInputActive]);
 
   useEffect(() => () => {
     voiceStartRef.current += 1;
-    try { voiceSocketRef.current?.close(); } catch {}
-    voiceSocketRef.current = null;
-    cleanupVoiceAudio();
-  }, [cleanupVoiceAudio]);
-
-  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    voiceListeningRef.current = false;
+    cleanupVoiceRecognition();
+  }, [cleanupVoiceRecognition]);  const [selectedModel, setSelectedModel] = useState<string>(() => {
     try {
       const stored = localStorage.getItem(MODEL_STORAGE_KEY);
       return stored && MODEL_OPTIONS.some(option => option.id === stored)
@@ -2532,7 +2482,7 @@ const cleanMessageContent = (content: unknown): string => {
 
               <div
                 ref={modelPickerRef}
-                className="twinkle-composer-row relative z-[200] flex min-w-0 flex-col px-3 pt-3 pb-2.5 sm:px-4 sm:pt-3.5 sm:pb-3"
+                className="twinkle-composer-row relative z-[200] flex min-w-0 flex-col"
               >
                 {/* Hidden file input */}
                 <input
@@ -2547,10 +2497,10 @@ const cleanMessageContent = (content: unknown): string => {
                   }}
                 />
 
-                {/* Main prompt area */}
+                {/* Main prompt area — always above the action row */}
                 {voiceInputActive ? (
                   <div
-                    className="relative flex min-h-[42px] min-w-0 w-full items-center gap-2"
+                    className="relative flex min-h-[58px] w-full min-w-0 items-center gap-2 px-4 pt-3 pb-1 sm:min-h-[64px] sm:px-4 sm:pt-3"
                     aria-live="polite"
                     aria-label="Listening for speech"
                   >
@@ -2586,31 +2536,32 @@ const cleanMessageContent = (content: unknown): string => {
                     </div>
                   </div>
                 ) : (
-                  <textarea
-                    ref={inputRef}
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey && !isTyping) {
-                        e.preventDefault();
-                        handleSendMessage();
-                      }
-                    }}
-                    placeholder="Ask Anything"
-                    rows={1}
-                    className="twinkle-composer-textarea block min-h-[46px] max-h-[180px] w-full min-w-0 resize-none overflow-y-auto bg-transparent px-0 py-2 text-[17px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 sm:text-[18px]"
-                    onInput={(e) => {
-                      const t = e.target as HTMLTextAreaElement;
-                      t.style.height = 'auto';
-                      t.style.height = `${Math.min(t.scrollHeight, 180)}px`;
-                    }}
-                  />
+                  <div className="relative w-full min-w-0 px-4 pt-3 pb-1 sm:px-4 sm:pt-3">
+                    <textarea
+                      ref={inputRef}
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey && !isTyping) {
+                          e.preventDefault();
+                          handleSendMessage();
+                        }
+                      }}
+                      placeholder="Ask Anything"
+                      rows={1}
+                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent p-0 text-[17px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:text-[18px] sm:min-h-[46px]"
+                      onInput={(e) => {
+                        const t = e.target as HTMLTextAreaElement;
+                        t.style.height = 'auto';
+                        t.style.height = `${Math.min(t.scrollHeight, 180)}px`;
+                      }}
+                    />
+                  </div>
                 )}
 
-                {/* Bottom action row:
-                    + | model selector | mic | send/live talk */}
-                <div className="mt-1 flex min-w-0 w-full items-center gap-1 sm:gap-2">
-                  {/* + attachment button — intentionally no rotation animation */}
+                {/* Bottom action row: plus → model → mic → send/live talk */}
+                <div className="flex w-full min-w-0 items-center gap-1 px-2.5 pb-2.5 pt-1.5 sm:gap-2 sm:px-3 sm:pb-3 sm:pt-1.5 md:px-4">
+                  {/* + attachment button */}
                   <motion.button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -2619,13 +2570,12 @@ const cleanMessageContent = (content: unknown): string => {
                     title="Attach files"
                     whileHover={{ scale: 1.04 }}
                     whileTap={{ scale: 0.94 }}
-                    transition={{ type: 'spring', stiffness: 420, damping: 24 }}
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 sm:h-11 sm:w-11"
+                    className="group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
                   >
                     {isProcessingFiles ? (
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
                     ) : (
-                      <Plus className="h-[23px] w-[23px] stroke-[2]" />
+                      <Plus className="h-[22px] w-[22px] stroke-[2.25]" />
                     )}
                   </motion.button>
 
@@ -2639,11 +2589,12 @@ const cleanMessageContent = (content: unknown): string => {
                       disabled={isTyping}
                       aria-haspopup="listbox"
                       aria-expanded={modelPickerOpen}
+                      whileHover={{ y: -1 }}
                       whileTap={{ scale: 0.97 }}
                       transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                      className="group inline-flex h-10 max-w-[145px] shrink-0 items-center gap-1 rounded-lg border-0 bg-transparent px-1.5 text-black shadow-none outline-none transition-colors hover:bg-zinc-100/70 dark:bg-transparent dark:text-white dark:hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50 sm:h-11 sm:max-w-[190px] sm:px-2.5"
+                      className="group relative inline-flex h-10 shrink-0 items-center gap-1 rounded-lg border-0 bg-transparent px-1.5 text-black shadow-none outline-none transition-colors hover:bg-zinc-100/70 dark:bg-transparent dark:text-white dark:hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50 sm:gap-1.5 sm:px-2"
                     >
-                      <span className="truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:text-sm">
+                      <span className="max-w-[135px] truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:max-w-[190px] sm:text-sm">
                         {activeModel.name}
                       </span>
                       <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
@@ -2658,7 +2609,7 @@ const cleanMessageContent = (content: unknown): string => {
                           transition={{ duration: 0.16, ease: 'easeOut' }}
                           role="listbox"
                           aria-label="Select AI model"
-                          className="fixed bottom-[calc(92px+env(safe-area-inset-bottom,0px))] left-2 right-2 z-[99999] max-h-[min(400px,calc(100dvh-140px))] overflow-y-auto overflow-x-hidden rounded-2xl border border-zinc-200/90 bg-white/95 p-1.5 shadow-2xl shadow-zinc-900/20 backdrop-blur-2xl dark:border-zinc-700/90 dark:bg-zinc-900/95 dark:shadow-black/50 sm:absolute sm:bottom-[calc(100%+8px)] sm:left-auto sm:right-0 sm:w-[360px] sm:max-h-[420px] sm:overflow-hidden sm:rounded-2xl sm:p-2"
+                          className="fixed bottom-[calc(104px+env(safe-area-inset-bottom,0px))] left-2 z-[99999] w-[min(360px,calc(100vw-16px))] max-w-[calc(100vw-16px)] max-h-[min(360px,calc(100dvh-150px))] overflow-y-auto overflow-x-hidden rounded-xl border border-zinc-200/90 bg-white/95 p-1.5 shadow-2xl shadow-zinc-900/20 backdrop-blur-2xl dark:border-zinc-700/90 dark:bg-zinc-900/95 dark:shadow-black/50 sm:absolute sm:bottom-[calc(100%+8px)] sm:left-auto sm:right-0 sm:w-[360px] sm:max-w-[calc(100vw-24px)] sm:max-h-[420px] sm:overflow-hidden sm:rounded-2xl sm:p-2"
                         >
                           <div className="px-2 pb-2 pt-1">
                             <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400 dark:text-zinc-500">
@@ -2702,7 +2653,6 @@ const cleanMessageContent = (content: unknown): string => {
                     </AnimatePresence>
                   </div>
 
-                  {/* Microphone */}
                   {!voiceInputActive && (
                     <motion.button
                       type="button"
@@ -2710,36 +2660,12 @@ const cleanMessageContent = (content: unknown): string => {
                       disabled={isTyping || isProcessingFiles}
                       aria-label="Voice input"
                       title="Voice input"
-                      whileHover={{ scale: 1.04 }}
-                      whileTap={{ scale: 0.92 }}
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-11"
+                      whileHover={{ scale: 1.06 }}
+                      whileTap={{ scale: 0.9 }}
+                      className="flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-9"
                     >
                       <Mic className="h-[20px] w-[20px]" strokeWidth={2} />
                     </motion.button>
-                  )}
-
-                  {/* Voice cancel / commit */}
-                  {voiceInputActive && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={cancelVoiceInput}
-                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-800 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-11"
-                        aria-label="Discard voice input"
-                        title="Discard"
-                      >
-                        <X className="h-5 w-5" strokeWidth={2.1} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={commitVoiceInput}
-                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-11"
-                        aria-label="Use voice input"
-                        title="Use voice input"
-                      >
-                        <Check className="h-5 w-5" strokeWidth={2.1} />
-                      </button>
-                    </>
                   )}
 
                   {/* Live Talk / Send */}
