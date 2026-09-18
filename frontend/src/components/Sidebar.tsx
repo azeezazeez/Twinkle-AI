@@ -4,41 +4,13 @@ import { Session, User } from '../types';
 import {
   LogOut, Trash2, X, Search, SquarePen,
   MoreHorizontal, Pin, PinOff, Edit3,
-  MessageCircle, Sun, Moon, Sparkles,
-  Settings2, UserCircle2, ChevronRight,
+  MessageCircle, Sun, Moon, Sparkles, Mic,
+  Settings2, UserCircle2, ChevronRight, PanelLeftClose,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import UserAvatar from './UserAvatar'; 
 import { chatApi } from '../lib/api';
 import StormLogo from './StormLogo';
-
-function SidebarControlIcon({ className = "h-5 w-5" }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-      aria-hidden="true"
-    >
-      <rect
-        x="3"
-        y="4"
-        width="18"
-        height="16"
-        rx="4"
-        stroke="currentColor"
-        strokeWidth="1.7"
-      />
-      <path
-        d="M9 4.8V19.2"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Props {
@@ -471,7 +443,7 @@ function SessionList({
             aria-label="Search chats"
             className="w-full pl-10 pr-9 py-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs font-medium text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-zinc-400 transition-all"
           />
-          {searchQuery && (
+          {searchQuery ? (
             <button
               onClick={() => handleSearchChange('')}
               className="absolute inset-y-0 right-3 flex items-center text-zinc-400 hover:text-zinc-600"
@@ -479,13 +451,32 @@ function SessionList({
             >
               <X className="w-3.5 h-3.5" />
             </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+                if (!SpeechRecognition) return;
+                const recognition = new SpeechRecognition();
+                recognition.lang = 'en-US';
+                recognition.interimResults = false;
+                recognition.maxAlternatives = 1;
+                recognition.onresult = (event: any) => handleSearchChange(event.results?.[0]?.[0]?.transcript || '');
+                recognition.start();
+              }}
+              className="absolute inset-y-0 right-2 flex w-7 items-center justify-center rounded-lg text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+              aria-label="Search by voice"
+              title="Search by voice"
+            >
+              <Mic className="w-3.5 h-3.5" />
+            </button>
           )}
         </div>
       </div>
 
       {/* Session list */}
       <div className="px-4 pb-2 shrink-0">
-        <div className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Recents</div>
+        <div className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Chats</div>
       </div>
       <div
         className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 pb-4"
@@ -784,17 +775,17 @@ function AccountMenu({
             role="menu"
             className={
               compact
-                ? "absolute bottom-0 left-full z-[10000] ml-3 w-[310px] origin-bottom-left overflow-hidden rounded-2xl border border-zinc-200 bg-white p-2 shadow-[0_18px_55px_rgba(0,0,0,.16)] dark:border-zinc-800 dark:bg-zinc-950"
-                : "absolute bottom-[calc(100%+10px)] left-1/2 z-[10000] w-[calc(100vw-32px)] max-w-[310px] -translate-x-1/2 origin-bottom overflow-hidden rounded-2xl border border-zinc-200 bg-white p-2 shadow-[0_18px_55px_rgba(0,0,0,.16)] dark:border-zinc-800 dark:bg-zinc-950 sm:left-0 sm:w-[310px] sm:max-w-none sm:translate-x-0 sm:origin-bottom-left"
+                ? "absolute bottom-0 left-1/2 z-[10000] ml-0 w-[290px] max-w-[calc(100vw-24px)] -translate-x-1/2 origin-bottom-left overflow-hidden rounded-2xl border border-zinc-200 bg-white p-1.5 shadow-[0_18px_55px_rgba(0,0,0,.16)] dark:border-zinc-800 dark:bg-zinc-950 sm:left-full sm:ml-3 sm:translate-x-0"
+                : "absolute bottom-[calc(100%+10px)] left-1/2 z-[10000] w-[290px] max-w-[calc(100vw-24px)] -translate-x-1/2 origin-bottom-left overflow-hidden rounded-2xl border border-zinc-200 bg-white p-1.5 shadow-[0_18px_55px_rgba(0,0,0,.16)] dark:border-zinc-800 dark:bg-zinc-950 sm:left-0 sm:translate-x-0"
             }
           >
             {/* Account header */}
-            <div className="rounded-xl px-3 py-3">
+            <div className="rounded-xl px-2.5 py-2.5">
               <div className="flex items-center gap-3">
                 <UserAvatar
                   name={user.username}
                   avatarUrl={user.avatarUrl}
-                  className="h-10 w-10 shrink-0 text-xs shadow-sm"
+                  className="h-9 w-9 shrink-0 text-xs shadow-sm"
                 />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">
@@ -813,7 +804,7 @@ function AccountMenu({
               type="button"
               role="menuitem"
               onClick={goProfile}
-              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
             >
               <UserCircle2 className="h-[18px] w-[18px] text-zinc-500" />
               <span className="flex-1">Profile</span>
@@ -824,7 +815,7 @@ function AccountMenu({
               type="button"
               role="menuitem"
               onClick={goSettings}
-              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
             >
               <Settings2 className="h-[18px] w-[18px] text-zinc-500" />
               <span className="flex-1">Settings</span>
@@ -837,7 +828,7 @@ function AccountMenu({
               type="button"
               role="menuitem"
               onClick={logout}
-              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
             >
               <LogOut className="h-[18px] w-[18px] text-zinc-500" />
               <span className="flex-1">Log out</span>
@@ -871,10 +862,6 @@ export default function Sidebar({
   // immediately. The user can expand it with the sidebar icon.
   const [desktopCollapsed, setDesktopCollapsed] = useState(true);
   const [focusSearch, setFocusSearch] = useState(false);
-  // Chat.tsx owns the authoritative session collection. Derive the count
-  // directly from the prop so it can never become stale or be overwritten by
-  // an older backend request.
-
   useEffect(() => { onDesktopStateChange?.(false); }, [onDesktopStateChange]);
 
   const expandDesktop = useCallback(() => {
@@ -959,32 +946,14 @@ export default function Sidebar({
           }`}
           onClick={e => e.stopPropagation()}
         >
-          {/* Mobile header: same right-edge control alignment as desktop */}
-          <div className="relative flex w-full items-center pl-5 pt-5 pb-3 pr-0 shrink-0">
+          <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="w-8 h-8 bg-transparent rounded-xl flex items-center justify-center p-1.5 shrink-0">
                 <StormLogo className="w-full h-full text-zinc-900 dark:text-white" />
               </div>
-              <h2 className="text-lg font-medium tracking-tight text-zinc-900/90 dark:text-white/90">
-                Twinkle
-              </h2>
+              <h2 className="text-lg font-medium tracking-tight text-zinc-900/90 dark:text-white/90">Twinkle</h2>
             </div>
-
-            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center justify-center shrink-0">
-              <button
-                type="button"
-                onClick={onMobileClose}
-                aria-label="Close sidebar"
-                title="Close sidebar"
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-zinc-600 transition-all duration-200 hover:bg-zinc-100 hover:text-zinc-950 active:scale-95 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white"
-              >
-                <SidebarControlIcon className="h-6 w-6" />
-              </button>
-
-              <div className="absolute left-full top-1/2 ml-3 -translate-y-1/2 rounded-lg bg-zinc-900 px-2.5 py-1.5 text-xs font-semibold text-white whitespace-nowrap pointer-events-none z-[300] shadow-lg opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150">
-                Close sidebar
-              </div>
-            </div>
+            <ThemeToggleButton />
           </div>
 
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
@@ -1037,10 +1006,10 @@ export default function Sidebar({
               </button>
             </IconTooltip>
 
-            <IconTooltip label={"Recents"}>
+            <IconTooltip label={`Chats (${sessions.length})`}>
               <button
                 onClick={expandDesktop}
-                aria-label="Recents"
+                aria-label="Chats"
                 className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-all"
               >
                 <MessageCircle className="w-[19px] h-[19px]" strokeWidth={1.7} />
@@ -1075,34 +1044,18 @@ export default function Sidebar({
               className="twinkle-sidebar hidden lg:flex fixed inset-y-0 left-0 z-[2147483647] w-[360px] bg-white dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 flex-col h-full shadow-2xl"
               onClick={e => e.stopPropagation()}
             >
-              {/* Expanded sidebar header: logo/text on the left, close control flush to the right edge */}
-              <div className="relative flex w-full items-center pl-5 pt-5 pb-3 pr-0 shrink-0">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-8 h-8 bg-transparent rounded-xl flex items-center justify-center p-1.5 shrink-0">
-                    <StormLogo className="w-full h-full text-zinc-900 dark:text-white" />
+              <div className="flex items-center justify-between px-5 pt-5 pb-2 shrink-0">
+                <button
+                  onClick={collapseDesktop}
+                  className="flex items-center gap-2.5 group"
+                  title="Close sidebar"
+                >
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-600 transition group-hover:bg-zinc-100 group-hover:text-zinc-950 dark:text-zinc-300 dark:group-hover:bg-zinc-900 dark:group-hover:text-white">
+                    <PanelLeftClose className="h-5 w-5" strokeWidth={1.7} />
                   </div>
-                  <h2 className="text-xl font-medium tracking-tight text-zinc-900/90 dark:text-white/90">
-                    Twinkle
-                  </h2>
-                </div>
-
-                {/* Explicit right anchoring: the control is positioned from the sidebar's right edge.
-                    mr-2 moves it 8px left; adjust to mr-1/mr-3/mr-4 if desired. */}
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center justify-center shrink-0">
-                  <button
-                    type="button"
-                    onClick={collapseDesktop}
-                    aria-label="Close sidebar"
-                    title="Close sidebar"
-                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-zinc-600 transition-all duration-200 hover:bg-zinc-100 hover:text-zinc-950 active:scale-95 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white"
-                  >
-                    <SidebarControlIcon className="h-6 w-6" />
-                  </button>
-
-                  <div className="absolute left-full top-1/2 ml-3 -translate-y-1/2 rounded-lg bg-zinc-900 px-2.5 py-1.5 text-xs font-semibold text-white whitespace-nowrap pointer-events-none z-[300] shadow-lg opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150">
-                    Close sidebar
-                  </div>
-                </div>
+                  <h2 className="text-xl font-medium tracking-tight text-zinc-900/90 dark:text-white/90">Twinkle</h2>
+                </button>
+                <ThemeToggleButton />
               </div>
 
               <SessionList
