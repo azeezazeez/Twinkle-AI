@@ -757,18 +757,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     recognition.lang = getRecognitionLanguage();
     recognition.maxAlternatives = 1;
 
-    // Prefer browser-local speech processing when the browser exposes it.
-    // This avoids the common Chrome/Brave Web Speech `network` error when a
-    // local speech language pack is available, while preserving the normal
-    // browser fallback when the feature is not supported.
-    try {
-      if ('processLocally' in recognition) {
-        recognition.processLocally = true;
-      }
-    } catch {
-      // Local processing is optional; use the browser's normal speech service.
-    }
-
     voiceRecognitionRef.current = recognition;
 
     recognition.onstart = () => {
@@ -804,6 +792,18 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       } else if (error === 'audio-capture') {
         cancelVoiceInput();
         window.alert('No microphone was detected. Connect a microphone and try again.');
+      } else if (error === 'language-not-supported') {
+        // Some Chromium-based browsers do not support regional language codes
+        // such as en-IN for Web Speech. Retry with the widely supported
+        // English locale instead of leaving the microphone unusable.
+        try {
+          recognition.lang = 'en-US';
+          voiceRecognitionErrorRef.current = null;
+          voiceListeningRef.current = true;
+          setVoiceInputActive(true);
+        } catch {
+          cancelVoiceInput();
+        }
       } else if (error === 'network') {
         // Do not destroy the user's draft or show a blocking alert. Keep the
         // composer in the voice state so the user can retry or reject it.
