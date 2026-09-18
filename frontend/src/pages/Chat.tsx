@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import React from 'react';
 import { User, Session, Message } from '../types';
 import Sidebar from '../components/Sidebar';
-import { chatApi, authApi, createLiveToken } from '../lib/api';
+import { chatApi, authApi } from '../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
 import StormLogo from '../components/StormLogo';
 import ConfirmationModal from '../components/ConfirmationModal';
@@ -617,260 +617,210 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const sessionToDelete = sessions.find(session => session.id === sessionIdToDelete);
   // Keep the chat interface clean on login; the sidebar opens only when requested.
 
+  // Browser-native speech recognition is used for composer dictation. It is
+  // considerably more reliable for short dictation on mobile/desktop browsers
+  // than keeping a second Gemini Live WebSocket open just for transcription.
+  type SpeechRecognitionResultEventLike = {
+    resultIndex: number;
+    results: {
+      length: number;
+      [index: number]: {
+        isFinal: boolean;
+        length: number;
+        [index: number]: { transcript: string };
+      };
+    };
+  };
+
+  type SpeechRecognitionInstance = {
+    continuous: boolean;
+    interimResults: boolean;
+    lang: string;
+    maxAlternatives: number;
+    onstart: (() => void) | null;
+    onresult: ((event: SpeechRecognitionResultEventLike) => void) | null;
+    onerror: ((event: { error?: string }) => void) | null;
+    onend: (() => void) | null;
+    start: () => void;
+    stop: () => void;
+    abort: () => void;
+  };
+
+  type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance;
+
   const voiceBaseInputRef = useRef('');
   const voiceDraftRef = useRef('');
-  const voiceSocketRef = useRef<WebSocket | null>(null);
-  const voiceStreamRef = useRef<MediaStream | null>(null);
-  const voiceAudioContextRef = useRef<AudioContext | null>(null);
-  const voiceSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const voiceProcessorRef = useRef<ScriptProcessorNode | null>(null);
-  const voiceSilentGainRef = useRef<GainNode | null>(null);
+  const voiceRecognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const voiceStartRef = useRef(0);
-  const voiceTurnCompleteResolverRef = useRef<(() => void) | null>(null);
+  const voiceRecognitionErrorRef = useRef<string | null>(null);
+  const voiceListeningRef = useRef(false);
   const [voiceDraftVersion, setVoiceDraftVersion] = useState(0);
 
-  const cleanupVoiceAudio = useCallback(() => {
-    try { voiceProcessorRef.current?.disconnect(); } catch {}
-    try { voiceSourceRef.current?.disconnect(); } catch {}
-    try { voiceSilentGainRef.current?.disconnect(); } catch {}
-    voiceProcessorRef.current = null;
-    voiceSourceRef.current = null;
-    voiceSilentGainRef.current = null;
+  const getRecognitionLanguage = useCallback(() => {
+    try {
+      const code = localStorage.getItem('twinkle_app_language') || 'auto';
+      const map: Record<string, string> = {
+        en: 'en-IN', hi: 'hi-IN', te: 'te-IN', ta: 'ta-IN', kn: 'kn-IN',
+        ml: 'ml-IN', bn: 'bn-IN', mr: 'mr-IN', gu: 'gu-IN', pa: 'pa-IN',
+        ur: 'ur-PK', ar: 'ar-SA', es: 'es-ES', fr: 'fr-FR', de: 'de-DE',
+        it: 'it-IT', pt: 'pt-PT', ru: 'ru-RU', ja: 'ja-JP', ko: 'ko-KR',
+        zh: 'zh-CN', tr: 'tr-TR', vi: 'vi-VN', id: 'id-ID', th: 'th-TH',
+        fil: 'fil-PH',
+      };
+      return map[code] || 'en-IN';
+    } catch {
+      return 'en-IN';
+    }
+  }, []);
 
-    voiceStreamRef.current?.getTracks().forEach(track => track.stop());
-    voiceStreamRef.current = null;
-
-    const context = voiceAudioContextRef.current;
-    voiceAudioContextRef.current = null;
-    if (context) void context.close().catch(() => undefined);
+  const cleanupVoiceRecognition = useCallback(() => {
+    const recognition = voiceRecognitionRef.current;
+    voiceRecognitionRef.current = null;
+    if (!recognition) return;
+    recognition.onstart = null;
+    recognition.onresult = null;
+    recognition.onerror = null;
+    recognition.onend = null;
+    try { recognition.abort(); } catch {}
   }, []);
 
   const cancelVoiceInput = useCallback(() => {
     voiceStartRef.current += 1;
-    try {
-      const socket = voiceSocketRef.current;
-      if (socket?.readyState === WebSocket.OPEN) socket.close(1000, 'cancelled');
-      else socket?.close();
-    } catch {}
-    voiceSocketRef.current = null;
-    voiceTurnCompleteResolverRef.current?.();
-    voiceTurnCompleteResolverRef.current = null;
-    cleanupVoiceAudio();
+    cleanupVoiceRecognition();
     voiceDraftRef.current = '';
     voiceBaseInputRef.current = '';
+    voiceRecognitionErrorRef.current = null;
+    voiceListeningRef.current = false;
     setVoiceDraftVersion(version => version + 1);
     setVoiceInputActive(false);
     window.setTimeout(() => inputRef.current?.focus(), 0);
-  }, [cleanupVoiceAudio]);
+  }, [cleanupVoiceRecognition]);
 
-  const commitVoiceInput = useCallback(async () => {
+  const commitVoiceInput = useCallback(() => {
     if (!voiceInputActive) return;
-
-    // Stop capturing immediately, but give Gemini a short window to deliver
-    // the final input-transcription chunk before we commit it to the composer.
-    try {
-      const socket = voiceSocketRef.current;
-      if (socket?.readyState === WebSocket.OPEN) {
-        try {
-          socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
-        } catch {}
-
-        await new Promise<void>(resolve => {
-          let settled = false;
-          const finish = () => {
-            if (settled) return;
-            settled = true;
-            window.clearTimeout(timer);
-            if (voiceTurnCompleteResolverRef.current === finish) {
-              voiceTurnCompleteResolverRef.current = null;
-            }
-            resolve();
-          };
-          const timer = window.setTimeout(finish, 550);
-          voiceTurnCompleteResolverRef.current = finish;
-        });
-      }
-    } catch {}
 
     const base = voiceBaseInputRef.current.trim();
     const spoken = voiceDraftRef.current.trim();
     const combined = `${base}${base && spoken ? ' ' : ''}${spoken}`.trim();
 
     voiceStartRef.current += 1;
-    try { voiceSocketRef.current?.close(1000, 'committed'); } catch {}
-    voiceSocketRef.current = null;
-    voiceTurnCompleteResolverRef.current?.();
-    voiceTurnCompleteResolverRef.current = null;
-    cleanupVoiceAudio();
-
-    setInput(combined);
+    cleanupVoiceRecognition();
     voiceDraftRef.current = '';
     voiceBaseInputRef.current = '';
+    voiceRecognitionErrorRef.current = null;
+    voiceListeningRef.current = false;
+    setInput(combined);
     setVoiceDraftVersion(version => version + 1);
     setVoiceInputActive(false);
     window.setTimeout(() => inputRef.current?.focus(), 0);
-  }, [cleanupVoiceAudio, voiceInputActive]);
+  }, [cleanupVoiceRecognition, voiceInputActive]);
 
-  const startVoiceInput = useCallback(async () => {
+  const startVoiceInput = useCallback(() => {
     if (voiceInputActive || isTyping || isProcessingFiles) return;
 
-    if (!navigator.mediaDevices?.getUserMedia) {
-      window.alert('Microphone access is not supported in this browser. Please use a current Chrome, Edge, or Safari browser.');
+    const SpeechRecognitionCtor = (
+      window as Window & {
+        SpeechRecognition?: SpeechRecognitionConstructor;
+        webkitSpeechRecognition?: SpeechRecognitionConstructor;
+      }
+    ).SpeechRecognition || (
+      window as Window & {
+        SpeechRecognition?: SpeechRecognitionConstructor;
+        webkitSpeechRecognition?: SpeechRecognitionConstructor;
+      }
+    ).webkitSpeechRecognition;
+
+    if (!SpeechRecognitionCtor) {
+      window.alert(
+        'Speech-to-text is not supported by this browser. Please use the latest Chrome or Edge and allow microphone access.'
+      );
       return;
     }
+
+    // Stop a stale recognition instance before starting a new one.
+    cleanupVoiceRecognition();
 
     const attempt = ++voiceStartRef.current;
     voiceBaseInputRef.current = input.trim();
     voiceDraftRef.current = '';
+    voiceRecognitionErrorRef.current = null;
+    voiceListeningRef.current = true;
     setVoiceDraftVersion(version => version + 1);
     setVoiceInputActive(true);
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+    const recognition = new SpeechRecognitionCtor();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = getRecognitionLanguage();
+    recognition.maxAlternatives = 1;
+    voiceRecognitionRef.current = recognition;
 
-      if (attempt !== voiceStartRef.current) {
-        stream.getTracks().forEach(track => track.stop());
-        return;
+    recognition.onstart = () => {
+      if (attempt !== voiceStartRef.current) return;
+      voiceListeningRef.current = true;
+      setVoiceInputActive(true);
+    };
+
+    recognition.onresult = event => {
+      if (attempt !== voiceStartRef.current) return;
+
+      // Rebuild the complete transcript from the recognition result set.
+      // This avoids duplicated/interleaved text when Chrome emits interim
+      // results followed by their final versions.
+      let transcript = '';
+      for (let i = 0; i < event.results.length; i += 1) {
+        transcript += event.results[i][0]?.transcript || '';
       }
-      voiceStreamRef.current = stream;
 
-      const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContextCtor) throw new Error('Web Audio is not supported in this browser.');
-      const context = new AudioContextCtor();
-      voiceAudioContextRef.current = context;
-      if (context.state === 'suspended') await context.resume();
+      voiceDraftRef.current = transcript.replace(/\s+/g, ' ').trim();
+      setVoiceDraftVersion(version => version + 1);
+    };
 
-      const { token, model } = await createLiveToken('Charon', 'auto', true);
+    recognition.onerror = event => {
+      if (attempt !== voiceStartRef.current) return;
+      const error = String(event?.error || 'unknown');
+      voiceRecognitionErrorRef.current = error;
+      console.error('Twinkle speech-to-text error:', error);
+
+      if (error === 'not-allowed' || error === 'service-not-allowed') {
+        cancelVoiceInput();
+        window.alert('Microphone permission was denied. Allow microphone access for Twinkle and try again.');
+      } else if (error === 'audio-capture') {
+        cancelVoiceInput();
+        window.alert('No microphone was detected. Connect a microphone and try again.');
+      } else if (error === 'network') {
+        cancelVoiceInput();
+        window.alert('Speech-to-text needs a network connection. Check your connection and try again.');
+      }
+    };
+
+    recognition.onend = () => {
       if (attempt !== voiceStartRef.current) return;
 
-      const socket = new WebSocket(
-        `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}`
-      );
-      voiceSocketRef.current = socket;
-
-      socket.onopen = () => {
-        if (attempt !== voiceStartRef.current) return;
-        socket.send(JSON.stringify({
-          setup: {
-            model: `models/${model}`,
-            generationConfig: { responseModalities: ['AUDIO'] },
-            systemInstruction: {
-              parts: [{
-                text: `Twinkle AI speech-to-text mode. Transcribe the user's speech accurately. Preserve the user's wording and language. The selected language is ${getSpeechLanguage()}. Do not translate the user's speech. Do not answer the user.`,
-              }],
-            },
-            inputAudioTranscription: {},
-            realtimeInputConfig: {
-              automaticActivityDetection: {
-                disabled: false,
-                prefixPaddingMs: 250,
-                silenceDurationMs: 900,
-              },
-            },
-          },
-        }));
-      };
-
-      socket.onmessage = async event => {
-        if (attempt !== voiceStartRef.current) return;
-        try {
-          let message: any;
-          if (typeof event.data === 'string') message = JSON.parse(event.data);
-          else if (event.data instanceof Blob) message = JSON.parse(await event.data.text());
-          else if (event.data instanceof ArrayBuffer) message = JSON.parse(new TextDecoder().decode(new Uint8Array(event.data)));
-          else return;
-
-          if (message?.error) throw new Error(message.error.message || 'Speech transcription service returned an error.');
-
-          const text = String(message?.serverContent?.inputTranscription?.text || '');
-          if (text) {
-            voiceDraftRef.current += text;
-            setVoiceDraftVersion(version => version + 1);
-          }
-
-          if (message?.serverContent?.turnComplete) {
-            voiceTurnCompleteResolverRef.current?.();
-          }
-        } catch (error) {
-          console.error('Twinkle speech transcription error:', error);
-        }
-      };
-
-      socket.onerror = () => {
-        if (attempt !== voiceStartRef.current) return;
-        console.error('Twinkle speech transcription WebSocket error.');
+      // Chrome can end recognition after a pause even when continuous=true.
+      // Automatically restart while the user remains in listening mode.
+      if (!voiceRecognitionErrorRef.current && voiceListeningRef.current) {
         window.setTimeout(() => {
-          if (attempt === voiceStartRef.current && !voiceDraftRef.current.trim()) {
-            cancelVoiceInput();
-            window.alert('Speech-to-text could not connect. Please check your internet connection and allow microphone access for localhost.');
-          }
-        }, 0);
-      };
+          if (attempt !== voiceStartRef.current) return;
+          try { recognition.start(); } catch {}
+        }, 80);
+      }
+    };
 
-      socket.onclose = event => {
-        if (attempt !== voiceStartRef.current) return;
-        voiceSocketRef.current = null;
-        if (event.code !== 1000 && !voiceDraftRef.current.trim()) {
-          cancelVoiceInput();
-        }
-      };
-
-      const source = context.createMediaStreamSource(stream);
-      const processor = context.createScriptProcessor(2048, 1, 1);
-      const silentGain = context.createGain();
-      silentGain.gain.value = 0;
-
-      processor.onaudioprocess = audioEvent => {
-        if (attempt !== voiceStartRef.current) return;
-        const activeSocket = voiceSocketRef.current;
-        if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) return;
-        const pcm = downsamplePcm16k(audioEvent.inputBuffer.getChannelData(0), context.sampleRate);
-        try {
-          activeSocket.send(JSON.stringify({
-            realtimeInput: {
-              audio: {
-                data: int16ToBase64(pcm),
-                mimeType: 'audio/pcm;rate=16000',
-              },
-            },
-          }));
-        } catch {}
-      };
-
-      source.connect(processor);
-      processor.connect(silentGain);
-      silentGain.connect(context.destination);
-      voiceSourceRef.current = source;
-      voiceProcessorRef.current = processor;
-      voiceSilentGainRef.current = silentGain;
-    } catch (error: any) {
-      if (attempt !== voiceStartRef.current) return;
+    try {
+      recognition.start();
+    } catch (error) {
       console.error('Speech-to-text start failed:', error);
       cancelVoiceInput();
-      const message = String(error?.message || 'Unable to start speech-to-text.');
-      if (/permission|denied|notallowed/i.test(message)) {
-        window.alert('Microphone permission was denied. Allow microphone access for localhost and try again.');
-      } else {
-        window.alert(`Speech-to-text could not start. ${message}`);
-      }
+      window.alert('Speech-to-text could not start. Please allow microphone access and try again.');
     }
-  }, [cancelVoiceInput, input, isProcessingFiles, isTyping, voiceInputActive]);
+  }, [cancelVoiceInput, cleanupVoiceRecognition, getRecognitionLanguage, input, isProcessingFiles, isTyping, voiceInputActive]);
 
   useEffect(() => () => {
     voiceStartRef.current += 1;
-    try { voiceSocketRef.current?.close(); } catch {}
-    voiceSocketRef.current = null;
-    cleanupVoiceAudio();
-  }, [cleanupVoiceAudio]);
-
-  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    voiceListeningRef.current = false;
+    cleanupVoiceRecognition();
+  }, [cleanupVoiceRecognition]);  const [selectedModel, setSelectedModel] = useState<string>(() => {
     try {
       const stored = localStorage.getItem(MODEL_STORAGE_KEY);
       return stored && MODEL_OPTIONS.some(option => option.id === stored)
@@ -1938,6 +1888,8 @@ const cleanMessageContent = (content: unknown): string => {
     setMessages([]);
     setEditingMessage(null);
   }, [user.id]);
+
+  if (loading) {
     return (
       <div className="flex items-center justify-center h-screen font-sans text-zinc-400 bg-white dark:bg-zinc-950 transition-colors duration-300">
         <motion.div
