@@ -41,6 +41,22 @@ const savePinnedIds = (ids: number[]) => {
   localStorage.setItem(PINNED_KEY, JSON.stringify(ids));
 };
 
+// Keep one normalized session shape throughout the Sidebar. The API may return
+// an id as a string while the React state/callbacks use numbers.
+const normalizeSessions = (items: Session[]): Session[] =>
+  items
+    .map(session => ({
+      ...session,
+      id: Number((session as any).id ?? (session as any).sessionId ?? (session as any).session_id),
+      sessionName: String(
+        (session as any).sessionName ??
+        (session as any).name ??
+        (session as any).title ??
+        'New Chat'
+      ),
+    }))
+    .filter(session => Number.isFinite(session.id));
+
 const getGroupLabel = (session: Session): string => {
   const raw = (session as any).createdAt || (session as any).created_at;
   if (!raw) return 'Recent';
@@ -470,6 +486,9 @@ function SessionList({
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
+                      // The parent owns the backend operation, but the Sidebar
+                      // receives an optimistic wrapper so the UI/count changes
+                      // immediately instead of waiting for the API round trip.
                       onClose();
                       onClearAll();
                     }}
@@ -872,25 +891,71 @@ export default function Sidebar({
     window.location.assign('/settings');
   }, [onSettings]);
 
-  // Normalize session IDs once at the Sidebar boundary. The backend may return
-  // IDs as strings while the React callbacks/types use numbers. Keeping one
-  // normalized shape prevents selection, pinning and deletion mismatches.
-  const normalizedSessions: Session[] = sessions
-    .map(session => ({
-      ...session,
-      id: Number(session.id),
-    }))
-    .filter(session => Number.isFinite(session.id));
+  // Normalize the server sessions once at the Sidebar boundary.
+  const normalizedSessions = normalizeSessions(sessions);
+
+  // Optimistic deletion state. The Sidebar should never wait for the backend
+  // round-trip before reflecting a user action. Chat.tsx remains the source of
+  // truth and will replace this view with the server-backed sessions when its
+  // `sessions` prop changes.
+  const [optimisticDeletedIds, setOptimisticDeletedIds] = useState<Set<number>>(
+    () => new Set()
+  );
+  const [optimisticClearAll, setOptimisticClearAll] = useState(false);
+
+  // Reconcile optimistic state with the parent source of truth. A deleted id
+  // is considered confirmed once it disappears from the parent sessions array.
+  useEffect(() => {
+    const serverIds = new Set(normalizedSessions.map(session => session.id));
+
+    setOptimisticDeletedIds(prev => {
+      if (prev.size === 0) return prev;
+      const next = new Set([...prev].filter(id => serverIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+
+    if (optimisticClearAll && normalizedSessions.length === 0) {
+      setOptimisticClearAll(false);
+    }
+  }, [sessions]);
+
+  const visibleSessions = optimisticClearAll
+    ? []
+    : normalizedSessions.filter(session => !optimisticDeletedIds.has(session.id));
+
+  const handleDeleteSessionOptimistic = useCallback((id: number) => {
+    const normalizedId = Number(id);
+    if (!Number.isFinite(normalizedId)) return;
+
+    // Paint the deletion immediately. No browser refresh and no API wait.
+    setOptimisticDeletedIds(prev => {
+      const next = new Set(prev);
+      next.add(normalizedId);
+      return next;
+    });
+
+    // Start the real backend deletion without blocking the UI.
+    onDeleteSession(normalizedId);
+  }, [onDeleteSession]);
+
+  const handleClearAllOptimistic = useCallback(() => {
+    // Paint an empty sidebar and zero chat count immediately.
+    setOptimisticClearAll(true);
+    setOptimisticDeletedIds(new Set());
+
+    // Start the backend operation without making the UI wait.
+    onClearAll();
+  }, [onClearAll]);
 
   const normalizedListProps = {
     user,
-    sessions: normalizedSessions,
+    sessions: visibleSessions,
     currentSessionId,
     onSelectSession,
     onNewSession,
-    onDeleteSession,
+    onDeleteSession: handleDeleteSessionOptimistic,
     onRenameSession,
-    onClearAll,
+    onClearAll: handleClearAllOptimistic,
     onLogout,
     onProfile: handleProfile,
     onSettings: handleSettings,
@@ -982,7 +1047,7 @@ export default function Sidebar({
               </button>
             </IconTooltip>
 
-            <IconTooltip label={`Chats (${normalizedSessions.length})`}>
+            <IconTooltip label={`Chats (${visibleSessions.length})`}>
               <button
                 onClick={expandDesktop}
                 aria-label="Chats"
