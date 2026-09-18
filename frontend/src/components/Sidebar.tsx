@@ -5,12 +5,42 @@ import {
   LogOut, Trash2, X, Search, SquarePen,
   MoreHorizontal, Pin, PinOff, Edit3,
   MessageCircle, Sun, Moon, Sparkles,
-  Settings2, UserCircle2, ChevronRight, PanelLeft,
+  Settings2, UserCircle2, ChevronRight,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import UserAvatar from './UserAvatar'; 
 import { chatApi } from '../lib/api';
 import StormLogo from './StormLogo';
+
+// ─── Smooth sidebar control icon ──────────────────────────────────────────────
+// Matches the compact rounded-rectangle control used in the sidebar header.
+function SidebarControlIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      aria-hidden="true"
+    >
+      <rect
+        x="3"
+        y="4"
+        width="18"
+        height="16"
+        rx="4"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      <path
+        d="M9 4.8V19.2"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Props {
@@ -931,7 +961,7 @@ export default function Sidebar({
           }`}
           onClick={e => e.stopPropagation()}
         >
-          <div className="relative flex items-center px-5 pt-5 pb-3 shrink-0">
+          <div className="relative flex items-center pl-5 pr-1 pt-5 pb-3 shrink-0">
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="w-8 h-8 bg-transparent rounded-xl flex items-center justify-center p-1.5 shrink-0">
                 <StormLogo className="w-full h-full text-zinc-900 dark:text-white" />
@@ -943,9 +973,9 @@ export default function Sidebar({
                 onClick={onMobileClose}
                 aria-label="Close sidebar"
                 title="Close sidebar"
-                className="absolute right-3 top-4 flex h-10 w-10 items-center justify-center rounded-2xl text-zinc-600 transition-all hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white"
+                className="absolute right-1 top-1/2 -translate-y-1/2 flex h-9 w-9 items-center justify-center rounded-xl text-zinc-600 transition-all duration-200 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white"
               >
-                <PanelLeft className="h-[19px] w-[19px]" strokeWidth={1.65} />
+                <SidebarControlIcon className="h-5 w-5" />
               </button>
             </IconTooltip>
           </div>
@@ -1038,7 +1068,7 @@ export default function Sidebar({
               className="twinkle-sidebar hidden lg:flex fixed inset-y-0 left-0 z-[2147483647] w-[360px] bg-white dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 flex-col h-full shadow-2xl"
               onClick={e => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between pl-5 pr-2 pt-5 pb-3 shrink-0">
+              <div className="flex items-center justify-between pl-5 pr-1 pt-5 pb-3 shrink-0">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-8 h-8 bg-transparent rounded-xl flex items-center justify-center p-1.5 shrink-0">
                     <StormLogo className="w-full h-full text-zinc-900 dark:text-white" />
@@ -1052,7 +1082,7 @@ export default function Sidebar({
                     title="Close sidebar"
                     className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-600 transition-all duration-200 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white"
                   >
-                    <PanelLeft className="h-[19px] w-[19px]" strokeWidth={1.65} />
+                    <SidebarControlIcon className="h-5 w-5" />
                   </button>
                 </IconTooltip>
               </div>
