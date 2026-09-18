@@ -1202,22 +1202,9 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   };
 
   const openFilePreview = async (file: File, objectUrl?: string) => {
-    const resolvedUrl = objectUrl || URL.createObjectURL(file);
-    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
-    const isMobile =
-      typeof window !== 'undefined' &&
-      window.matchMedia('(max-width: 767px)').matches;
-
-    // Mobile browsers are more reliable with their native PDF viewer than a
-    // blob URL rendered inside an iframe. Open it directly from the tap.
-    if (isPdf && isMobile) {
-      window.open(resolvedUrl, '_blank', 'noopener,noreferrer');
-      return;
-    }
-
     setPreviewFile(file);
     setPreviewText(null);
-    setPreviewUrl(resolvedUrl);
+    setPreviewUrl(objectUrl || URL.createObjectURL(file));
 
     const isDocx = /\.docx$/i.test(file.name) || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     const isTextLike = file.type.startsWith('text/') || /\.(txt|csv|tsv|json|xml|html?|md|markdown|rtf|js|jsx|ts|tsx|css|java|py|sql|yml|yaml)$/i.test(file.name);
@@ -1951,6 +1938,8 @@ const cleanMessageContent = (content: unknown): string => {
     setMessages([]);
     setEditingMessage(null);
   }, [user.id]);
+
+  if (loading) {
     return (
       <div className="flex items-center justify-center h-screen font-sans text-zinc-400 bg-white dark:bg-zinc-950 transition-colors duration-300">
         <motion.div
@@ -1958,7 +1947,7 @@ const cleanMessageContent = (content: unknown): string => {
           transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
           className="flex flex-col items-center gap-4"
         >
-          <StormLogo className="w-12 h-12 text-black dark:text-white" />
+          <StormLogo className="w-12 h-12 text-black dark:text-white transition-transform duration-500 ease-in-out hover:rotate-180" />
           <span className="tracking-widest text-[10px] font-black uppercase">Loading...</span>
         </motion.div>
       </div>
@@ -2559,46 +2548,20 @@ const cleanMessageContent = (content: unknown): string => {
                 />
 
                 {/* + attachment button */}
-                <motion.button
+                <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isTyping || isProcessingFiles}
                   aria-label="Attach files"
                   title="Attach files"
-                  whileHover={{ scale: 1.04, y: -1 }}
-                  whileTap={{ scale: 0.94, y: 0 }}
-                  transition={{
-                    type: 'spring',
-                    stiffness: 420,
-                    damping: 24,
-                    mass: 0.6,
-                  }}
                   className="group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
                 >
-                  <motion.span
-                    className="pointer-events-none absolute inset-0 rounded-2xl bg-zinc-1000/0 blur-md"
-                    whileHover={{ scale: 1.15, opacity: 0.18 }}
-                    transition={{ duration: 0.25, ease: 'easeOut' }}
-                  />
-
-                  <motion.span
-                    className="relative z-10 flex items-center justify-center"
-                    animate={isProcessingFiles ? { rotate: 90 } : { rotate: 0 }}
-                    whileHover={{ scale: 1.12 }}
-                    whileTap={{ scale: 0.9 }}
-                    transition={{
-                      type: 'spring',
-                      stiffness: 500,
-                      damping: 22,
-                    }}
-                  >
-                    {isProcessingFiles ? (
-                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
-                    ) : (
-                      <Plus className="h-[22px] w-[22px] stroke-[2.25]" />
-                    )}
-                  </motion.span>
-                </motion.button>
+                  {isProcessingFiles ? (
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700 dark:border-zinc-600 dark:border-t-zinc-200" />
+                  ) : (
+                    <Plus className="h-[22px] w-[22px] stroke-[2.25]" />
+                  )}
+                </button>
 
                 {/* Composer text / speech-to-text mode */}
                 {voiceInputActive ? (
