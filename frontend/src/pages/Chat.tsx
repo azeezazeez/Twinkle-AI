@@ -637,6 +637,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     interimResults: boolean;
     lang: string;
     maxAlternatives: number;
+    processLocally?: boolean;
     onstart: (() => void) | null;
     onresult: ((event: SpeechRecognitionResultEventLike) => void) | null;
     onerror: ((event: { error?: string }) => void) | null;
@@ -685,12 +686,14 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   }, []);
 
   const cancelVoiceInput = useCallback(() => {
+    const base = voiceBaseInputRef.current.trim();
     voiceStartRef.current += 1;
     cleanupVoiceRecognition();
     voiceDraftRef.current = '';
     voiceBaseInputRef.current = '';
     voiceRecognitionErrorRef.current = null;
     voiceListeningRef.current = false;
+    setInput(base);
     setVoiceDraftVersion(version => version + 1);
     setVoiceInputActive(false);
     window.setTimeout(() => inputRef.current?.focus(), 0);
@@ -753,6 +756,19 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     recognition.interimResults = true;
     recognition.lang = getRecognitionLanguage();
     recognition.maxAlternatives = 1;
+
+    // Prefer browser-local speech processing when the browser exposes it.
+    // This avoids the common Chrome/Brave Web Speech `network` error when a
+    // local speech language pack is available, while preserving the normal
+    // browser fallback when the feature is not supported.
+    try {
+      if ('processLocally' in recognition) {
+        recognition.processLocally = true;
+      }
+    } catch {
+      // Local processing is optional; use the browser's normal speech service.
+    }
+
     voiceRecognitionRef.current = recognition;
 
     recognition.onstart = () => {
@@ -789,8 +805,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         cancelVoiceInput();
         window.alert('No microphone was detected. Connect a microphone and try again.');
       } else if (error === 'network') {
-        cancelVoiceInput();
-        window.alert('Speech-to-text needs a network connection. Check your connection and try again.');
+        // Do not destroy the user's draft or show a blocking alert. Keep the
+        // composer in the voice state so the user can retry or reject it.
+        voiceListeningRef.current = false;
+        setVoiceInputActive(true);
       }
     };
 
@@ -2502,38 +2520,16 @@ const cleanMessageContent = (content: unknown): string => {
                   <div
                     className="relative flex min-h-[58px] w-full min-w-0 items-center gap-2 px-4 pt-3 pb-1 sm:min-h-[64px] sm:px-4 sm:pt-3"
                     aria-live="polite"
-                    aria-label="Listening for speech"
+                    aria-label="Voice input preview"
                   >
-                    <span className="shrink-0 text-[13px] font-medium text-zinc-400 sm:text-sm">
-                      Listening...
-                    </span>
-
-                    <div className="relative flex h-8 min-w-0 flex-1 items-center overflow-hidden">
-                      <div className="absolute inset-y-1 left-0 right-0 flex items-center gap-[4px] opacity-75">
-                        {Array.from({ length: 54 }, (_, index) => {
-                          const hasSpeech = voiceDraftVersion > 0;
-                          const height = hasSpeech
-                            ? 5 + ((index * 17) % 18)
-                            : 3 + ((index * 7) % 5);
-                          return (
-                            <motion.span
-                              key={index}
-                              className="w-[3px] shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600"
-                              animate={hasSpeech
-                                ? { scaleY: [0.55, 1.35, 0.7, 1.05, 0.55] }
-                                : { scaleY: [0.7, 1, 0.7] }}
-                              transition={{
-                                duration: 0.9 + (index % 5) * 0.08,
-                                repeat: Infinity,
-                                delay: index * 0.018,
-                                ease: 'easeInOut',
-                              }}
-                              style={{ height: `${height}px`, transformOrigin: 'center' }}
-                            />
-                          );
-                        })}
-                      </div>
-                    </div>
+                    <textarea
+                      ref={inputRef}
+                      value={voiceDraftRef.current ? `${voiceBaseInputRef.current ? `${voiceBaseInputRef.current} ` : ''}${voiceDraftRef.current}` : voiceBaseInputRef.current}
+                      readOnly
+                      rows={1}
+                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent p-0 text-[17px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:text-[18px] sm:min-h-[46px]"
+                      placeholder="Listening..."
+                    />
                   </div>
                 ) : (
                   <div className="relative w-full min-w-0 px-4 pt-3 pb-1 sm:px-4 sm:pt-3">
@@ -2653,7 +2649,35 @@ const cleanMessageContent = (content: unknown): string => {
                     </AnimatePresence>
                   </div>
 
-                  {!voiceInputActive && (
+                  {voiceInputActive ? (
+                    <div className="ml-auto flex shrink-0 items-center gap-1">
+                      {/* Reject voice text */}
+                      <motion.button
+                        type="button"
+                        onClick={cancelVoiceInput}
+                        aria-label="Reject voice text"
+                        title="Reject"
+                        whileHover={{ scale: 1.06 }}
+                        whileTap={{ scale: 0.9 }}
+                        className="flex h-10 w-10 items-center justify-center rounded-full text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white sm:h-11 sm:w-11"
+                      >
+                        <X className="h-[20px] w-[20px]" strokeWidth={2.1} />
+                      </motion.button>
+
+                      {/* Accept voice text */}
+                      <motion.button
+                        type="button"
+                        onClick={commitVoiceInput}
+                        aria-label="Accept voice text"
+                        title="Accept"
+                        whileHover={{ scale: 1.06 }}
+                        whileTap={{ scale: 0.9 }}
+                        className="flex h-10 w-10 items-center justify-center rounded-full bg-[#ec6aa8] text-white shadow-[0_8px_20px_rgba(236,106,168,.22)] transition hover:bg-[#e85f9f] sm:h-11 sm:w-11"
+                      >
+                        <Check className="h-[20px] w-[20px]" strokeWidth={2.2} />
+                      </motion.button>
+                    </div>
+                  ) : (
                     <motion.button
                       type="button"
                       onClick={startVoiceInput}
