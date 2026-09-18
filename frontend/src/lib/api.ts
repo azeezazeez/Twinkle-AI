@@ -7,7 +7,7 @@ const getTwinkleLanguage = (): string => {
 };
 
 const API_BASE = (
-  import.meta.env.VITE_API_BASE_URL || 'https://twinkle-ai-ype3.onrender.com/api'
+  import.meta.env.VITE_API_BASE_URL || '/api'
 ).replace(/\/$/, '');
 
 const GEMINI_LIVE_WS_ENDPOINT =
