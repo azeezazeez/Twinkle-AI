@@ -1045,6 +1045,27 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     }
   }, [onLogout]);
 
+  // When Live Talk finishes, the conversation has already been persisted by
+  // LiveTalkModal. Make that saved session the active chat and load its real
+  // database history into the main chat area.
+  const handleLiveSessionComplete = useCallback(async (sessionId: number) => {
+    if (!Number.isFinite(sessionId)) return;
+
+    // The normal currentSessionId effect would also fetch this session. Mark
+    // it as a one-time skip so we control the fetch here and avoid duplicate
+    // history requests/races.
+    skipMessageLoadRef.current = sessionId;
+    setCurrentSessionId(sessionId);
+    persistSessionId(sessionId);
+
+    try {
+      await loadMessages(sessionId);
+    } catch (error) {
+      console.error('Failed to load completed Live Talk:', error);
+      skipMessageLoadRef.current = null;
+    }
+  }, [loadMessages]);
+
   useEffect(() => { loadSessions(); }, [loadSessions]);
 
   useEffect(() => {
@@ -1708,16 +1729,25 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   };
 
   const confirmDeleteSession = async () => {
-    if (!sessionIdToDelete) return;
+    const id = sessionIdToDelete;
+    if (id == null) return;
+
     try {
-      await chatApi.deleteSession(sessionIdToDelete);
-      if (currentSessionId === sessionIdToDelete) {
+      await chatApi.deleteSession(id);
+
+      // Update the React source of truth immediately after the server
+      // confirms deletion. Sidebar receives this same array, so both
+      // desktop and mobile lists update without a browser refresh.
+      setSessions(prev => prev.filter(session => session.id !== id));
+
+      if (currentSessionId === id) {
         setCurrentSessionId(null);
         persistSessionId(null);
         setMessages([]);
       }
-    } catch (err) { console.error('Delete session failed:', err); }
-    finally {
+    } catch (err) {
+      console.error('Delete session failed:', err);
+    } finally {
       setSessionIdToDelete(null);
       setModalType('none');
     }
@@ -1748,11 +1778,17 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const confirmClearAll = async () => {
     try {
       await chatApi.clearSessions();
+
+      // Keep the client state in sync with the database immediately.
+      setSessions([]);
       setCurrentSessionId(null);
       persistSessionId(null);
       setMessages([]);
-    } catch (err) { console.error('Clear sessions failed:', err); }
-    finally { setModalType('none'); }
+    } catch (err) {
+      console.error('Clear sessions failed:', err);
+    } finally {
+      setModalType('none');
+    }
   };
 
   const handleLogout = async () => {
@@ -2517,8 +2553,8 @@ const cleanMessageContent = (content: unknown): string => {
                   <motion.span
                     className="relative z-10 flex items-center justify-center"
                     animate={isProcessingFiles ? { rotate: 90 } : { rotate: 0 }}
-                    whileHover={{ scale: 1.12, rotate: 180 }}
-                    whileTap={{ scale: 0.9, rotate: 180 }}
+                    whileHover={{ scale: 1.12 }}
+                    whileTap={{ scale: 0.9 }}
                     transition={{
                       type: 'spring',
                       stiffness: 500,
