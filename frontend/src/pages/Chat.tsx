@@ -958,7 +958,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   useEffect(() => {
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
-      inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 180)}px`;
+      const nextHeight = Math.min(inputRef.current.scrollHeight, 180);
+      inputRef.current.style.height = `${nextHeight}px`;
+      inputRef.current.style.overflowY =
+        inputRef.current.scrollHeight > 180 ? 'auto' : 'hidden';
     }
   }, [input]);
 
@@ -2706,11 +2709,13 @@ const cleanMessageContent = (content: unknown): string => {
                       }}
                       placeholder="Ask Anything"
                       rows={1}
-                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent px-1 py-1.5 text-[15px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:py-2.5"
+                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-hidden bg-transparent px-1 py-1.5 text-[15px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:py-2.5"
                       onInput={(e) => {
                         const t = e.target as HTMLTextAreaElement;
                         t.style.height = 'auto';
-                        t.style.height = `${Math.min(t.scrollHeight, 180)}px`;
+                        const nextHeight = Math.min(t.scrollHeight, 180);
+                        t.style.height = `${nextHeight}px`;
+                        t.style.overflowY = t.scrollHeight > 180 ? 'auto' : 'hidden';
                       }}
                     />
                   </div>
@@ -2746,9 +2751,8 @@ const cleanMessageContent = (content: unknown): string => {
 
                     <motion.span
                       className="relative z-10 flex items-center justify-center"
-                      animate={isProcessingFiles ? { rotate: 90 } : { rotate: 0 }}
-                      whileHover={{ scale: 1.12, rotate: 180 }}
-                      whileTap={{ scale: 0.9, rotate: 180 }}
+                      whileHover={{ scale: 1.12 }}
+                      whileTap={{ scale: 0.9 }}
                       transition={{
                         type: 'spring',
                         stiffness: 500,
