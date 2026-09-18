@@ -925,13 +925,16 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   }, []);
 
   const chooseModel = useCallback((modelId: string) => {
+    const nextModel = MODEL_OPTIONS.find(option => option.id === modelId);
+    if (!nextModel) return;
     if (modelId !== selectedModel) playModelSwitchSound();
-    setSelectedModel(modelId);
+    setSelectedModel(nextModel.id);
     setModelPickerOpen(false);
-    try { localStorage.setItem(MODEL_STORAGE_KEY, modelId); } catch {}
+    try { localStorage.setItem(MODEL_STORAGE_KEY, nextModel.id); } catch {}
   }, [selectedModel]);
 
-  const activeModel = MODEL_OPTIONS.find(m => m.id === selectedModel) || MODEL_OPTIONS[0];
+  const activeModel = MODEL_OPTIONS.find(m => m.id === selectedModel) ?? MODEL_OPTIONS[0];
+  const activeModelName = activeModel.name || activeModel.id;
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -944,6 +947,12 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   // (the newly created session after first send), so switching to any
   // OTHER existing session always loads its messages correctly.
   const skipMessageLoadRef = useRef<number | null>(null);
+
+  // Session synchronization guards. A session mutation can finish while an
+  // older GET /chat/sessions request is still in flight. Never allow that
+  // older response to overwrite the newer local state.
+  const sessionMutationVersionRef = useRef(0);
+  const sessionRequestVersionRef = useRef(0);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -966,16 +975,38 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
   // Load sessions & messages
   const loadSessions = useCallback(async () => {
+    const requestVersion = ++sessionRequestVersionRef.current;
+    const mutationVersionAtStart = sessionMutationVersionRef.current;
+
     try {
       const response = await chatApi.getSessions() as any;
-      setSessions(response.sessions || []);
+
+      // An older request must never overwrite state changed by a newer
+      // create/rename/delete/clear/live mutation.
+      if (requestVersion !== sessionRequestVersionRef.current) return;
+      if (mutationVersionAtStart !== sessionMutationVersionRef.current) return;
+
+      const remoteSessions = Array.isArray(response?.sessions)
+        ? response.sessions
+        : [];
+
+      setSessions(remoteSessions);
     } catch (err: any) {
+      if (requestVersion !== sessionRequestVersionRef.current) return;
       console.error('Failed to load sessions:', err);
       if (err.status === 401) onLogout();
     } finally {
-      setLoading(false);
+      if (requestVersion === sessionRequestVersionRef.current) {
+        setLoading(false);
+      }
     }
   }, [onLogout]);
+
+  // Reconcile the sidebar/session list after a successful server mutation.
+  // The mutation version makes this safe even when requests overlap.
+  const markSessionMutation = useCallback(() => {
+    sessionMutationVersionRef.current += 1;
+  }, []);
 
   const notifySessionsChanged = useCallback(() => {
     window.dispatchEvent(new CustomEvent('twinkle-sessions-changed'));
@@ -988,6 +1019,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       const detail = (event as CustomEvent<{ id: number; sessionName?: string }>).detail;
       if (!detail?.id) return;
 
+      markSessionMutation();
       const now = new Date().toISOString();
       setSessions(prev => {
         const existing = prev.find(session => session.id === detail.id);
@@ -1018,7 +1050,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
     window.addEventListener('twinkle-live-session-updated', handleLiveSessionUpdate);
     return () => window.removeEventListener('twinkle-live-session-updated', handleLiveSessionUpdate);
-  }, [user.id, notifySessionsChanged]);
+  }, [user.id, markSessionMutation, notifySessionsChanged]);
 
   const loadMessages = useCallback(async (sid: number) => {
     try {
@@ -1441,6 +1473,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       const activeSessionId = response.sessionId || currentSessionId;
 
       if (isNewSession && activeSessionId) {
+        markSessionMutation();
+
         // Store the new session's ID (not just `true`) so the
         // message-load effect skips ONLY this specific session's fetch.
         // Switching to any other session will still trigger a full load.
@@ -1450,10 +1484,17 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
         const now = new Date().toISOString();
         setSessions(prev => {
-          if (prev.some(session => session.id === activeSessionId)) return prev;
+          const existing = prev.find(session => Number(session.id) === Number(activeSessionId));
+          if (existing) {
+            return [
+              { ...existing, id: Number(activeSessionId), updatedAt: now },
+              ...prev.filter(session => Number(session.id) !== Number(activeSessionId)),
+            ];
+          }
+
           return [
             {
-              id: activeSessionId,
+              id: Number(activeSessionId),
               userId: user.id,
               sessionName: 'New Chat',
               createdAt: now,
@@ -1463,9 +1504,23 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           ];
         });
 
-        // The backend has confirmed creation. Tell the collapsed Sidebar to
-        // refresh its badge/count immediately.
+        // The backend has confirmed creation. Keep the UI synchronized now;
+        // do not wait for a browser refresh.
         notifySessionsChanged();
+      } else if (activeSessionId) {
+        // Existing chats are also changed by every successful message because
+        // the backend updates ChatSession.updatedAt. Keep that chat at the top
+        // of the same session list immediately.
+        markSessionMutation();
+        const now = new Date().toISOString();
+        setSessions(prev => {
+          const existing = prev.find(session => Number(session.id) === Number(activeSessionId));
+          if (!existing) return prev;
+          return [
+            { ...existing, updatedAt: now },
+            ...prev.filter(session => Number(session.id) !== Number(activeSessionId)),
+          ];
+        });
       }
 
       setIsTyping(false);
@@ -1505,6 +1560,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
               : 'New Chat';
 
           await chatApi.renameSession(activeSessionId, newTitle);
+          markSessionMutation();
           setTypingSessionTitle({ id: activeSessionId, title: newTitle });
 
           // Keep the Sidebar's sessions prop synchronized immediately.
@@ -1742,6 +1798,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
     try {
       await chatApi.deleteSession(deletedSessionId);
+      markSessionMutation();
 
       // Update React state immediately after the server confirms deletion.
       // This keeps the sidebar in sync without requiring a browser refresh.
@@ -1771,6 +1828,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
     try {
       await chatApi.renameSession(sid, trimmedName);
+      markSessionMutation();
 
       // Update the parent source of truth immediately. Both desktop and
       // mobile SessionList instances receive this same sessions array.
@@ -1790,6 +1848,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const confirmClearAll = async () => {
     try {
       await chatApi.clearSessions();
+      markSessionMutation();
 
       // Clear the local session collection as soon as the backend confirms
       // the operation so the sidebar updates immediately.
@@ -1945,6 +2004,8 @@ const cleanMessageContent = (content: unknown): string => {
     const sessionId = Number(rawSessionId);
     if (!Number.isFinite(sessionId)) return;
 
+    markSessionMutation();
+
     // Put the Live Talk session into the parent's source of truth before
     // selecting it. This keeps the session-validation effect from clearing
     // currentSessionId because it has not seen the new session yet.
@@ -1980,7 +2041,7 @@ const cleanMessageContent = (content: unknown): string => {
     setEditingMessage(null);
 
     await loadMessages(sessionId);
-  }, [user.id, loadMessages]);
+  }, [user.id, loadMessages, markSessionMutation]);
 
   if (loading) {
     return (
@@ -2728,7 +2789,7 @@ const cleanMessageContent = (content: unknown): string => {
                     className="group relative inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border-0 bg-transparent px-2 text-black shadow-none outline-none transition-colors hover:bg-zinc-100/70 dark:bg-transparent dark:text-white dark:hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50 sm:px-2.5"
                   >
                     <span className="max-w-[190px] truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:text-sm">
-                      {activeModel.name}
+                      {activeModelName}
                     </span>
                     <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
                   
