@@ -11,7 +11,7 @@ import LiveTalkModal from '../components/LiveTalkModal';
 import {
   ArrowDown, ArrowUp,
   Copy, Check, Edit2,
-  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, Mic, AudioLines, ExternalLink,
+  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, Mic, AudioLines,
 } from 'lucide-react';
 
 import ReactMarkdown from 'react-markdown';
@@ -1202,9 +1202,22 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   };
 
   const openFilePreview = async (file: File, objectUrl?: string) => {
+    const resolvedUrl = objectUrl || URL.createObjectURL(file);
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+    const isMobile =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(max-width: 767px)').matches;
+
+    // Mobile browsers are more reliable with their native PDF viewer than a
+    // blob URL rendered inside an iframe. Open it directly from the tap.
+    if (isPdf && isMobile) {
+      window.open(resolvedUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
     setPreviewFile(file);
     setPreviewText(null);
-    setPreviewUrl(objectUrl || URL.createObjectURL(file));
+    setPreviewUrl(resolvedUrl);
 
     const isDocx = /\.docx$/i.test(file.name) || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     const isTextLike = file.type.startsWith('text/') || /\.(txt|csv|tsv|json|xml|html?|md|markdown|rtf|js|jsx|ts|tsx|css|java|py|sql|yml|yaml)$/i.test(file.name);
@@ -1392,7 +1405,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     try {
       let response: any;
       const hasFiles = filesToSend && filesToSend.length > 0;
-      const finalMessage = messageText.trim();
+      const finalMessage = messageText.trim() || (hasFiles && filesToSend.some(f => f.type.startsWith('image/')) ? 'Image uploaded' : '');
 
       if (hasFiles) {
         response = await chatApi.sendMessageWithFiles(
@@ -1938,8 +1951,6 @@ const cleanMessageContent = (content: unknown): string => {
     setMessages([]);
     setEditingMessage(null);
   }, [user.id]);
-
-  if (loading) {
     return (
       <div className="flex items-center justify-center h-screen font-sans text-zinc-400 bg-white dark:bg-zinc-950 transition-colors duration-300">
         <motion.div
@@ -1947,7 +1958,7 @@ const cleanMessageContent = (content: unknown): string => {
           transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
           className="flex flex-col items-center gap-4"
         >
-          <StormLogo className="w-12 h-12 text-black dark:text-white transition-transform duration-500 ease-in-out hover:rotate-180" />
+          <StormLogo className="w-12 h-12 text-black dark:text-white" />
           <span className="tracking-widest text-[10px] font-black uppercase">Loading...</span>
         </motion.div>
       </div>
@@ -2491,74 +2502,41 @@ const cleanMessageContent = (content: unknown): string => {
             </AnimatePresence>
 
             <div className={`relative z-[60] flex w-full min-w-0 flex-col overflow-visible rounded-[24px] border border-zinc-200/90 bg-white shadow-[0_2px_18px_rgba(0,0,0,0.08)] transition-all dark:border-zinc-700/90 dark:bg-zinc-900 dark:shadow-black/20 ${justFinished ? 'animate-blink' : ''}`}>
-              {/* Selected-file preview strip.
-                  Use a horizontal scroller on small screens so attachments
-                  never get pushed below/clipped by the mobile composer. */}
+              {/* File preview strip (kept for consistency but never shown without UI trigger) */}
               <AnimatePresence>
                 {filePreviews.length > 0 && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="w-full min-w-0 border-b border-zinc-100 dark:border-zinc-800/70"
-                  >
-                    <div
-                      className="flex w-full min-w-0 gap-2 overflow-x-auto overflow-y-hidden px-2.5 pt-2.5 pb-2.5 sm:flex-wrap sm:overflow-x-visible sm:px-3 sm:pt-3 sm:pb-2.5"
-                      style={{ WebkitOverflowScrolling: 'touch' }}
-                    >
-                      {filePreviews.map(fp => {
-                        const extension = fp.file.name.split('.').pop()?.toUpperCase() || 'FILE';
-                        const isImage = fp.file.type.startsWith('image/') && Boolean(fp.preview);
-                        const isPdf = fp.file.type === 'application/pdf' || /\.pdf$/i.test(fp.file.name);
-
-                        return (
-                          <div key={fp.id} className="relative flex w-[76px] shrink-0 flex-col items-center gap-1 sm:w-20">
-                            <button
-                              type="button"
-                              onClick={() => void openFilePreview(fp.file, fp.preview)}
-                              className="group/preview relative block w-full min-w-0 text-left touch-manipulation"
-                              title={`Preview ${fp.file.name}`}
-                            >
-                              {isImage ? (
-                                <div className="h-[60px] w-[76px] overflow-hidden rounded-xl bg-zinc-200 shadow-sm ring-1 ring-inset ring-zinc-200/70 dark:bg-zinc-700 dark:ring-zinc-700 sm:h-16 sm:w-20">
-                                  <img
-                                    src={fp.preview}
-                                    alt={fp.file.name}
-                                    className="h-full w-full object-cover transition-transform group-hover/preview:scale-105"
-                                  />
-                                </div>
-                              ) : isPdf ? (
-                                /* Do not use an iframe for the tiny PDF thumbnail.
-                                   Android/iOS browsers can leave nested PDF viewers
-                                   blank at this size. The full preview still opens
-                                   from the card. */
-                                <div className="flex h-[60px] w-[76px] flex-col items-center justify-center gap-0.5 rounded-xl border border-zinc-200 bg-white shadow-sm transition-colors group-hover/preview:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:group-hover/preview:border-zinc-500 sm:h-16 sm:w-20">
-                                  <FileText className="h-6 w-6 text-zinc-800 dark:text-zinc-100" />
-                                  <span className="text-[8px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400">PDF</span>
-                                </div>
-                              ) : (
-                                <div className="flex h-[60px] w-[76px] flex-col items-center justify-center gap-0.5 rounded-xl border border-zinc-200 bg-zinc-100 shadow-sm transition-colors hover:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:hover:border-zinc-500 sm:h-16 sm:w-20">
-                                  <FileText className="h-6 w-6 text-zinc-800 dark:text-zinc-100" />
-                                  <span className="max-w-[62px] truncate text-[8px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400">{extension}</span>
-                                </div>
-                              )}
-                              <span className="mt-1 block max-w-full truncate text-[9px] font-medium text-zinc-500 dark:text-zinc-400" title={fp.file.name}>
-                                {fp.file.name}
-                              </span>
-                              <span className="block text-[8px] text-zinc-400">{formatFileSize(fp.file.size)}</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => removeFile(fp.id)}
-                              aria-label={`Remove ${fp.file.name}`}
-                              className="absolute -right-1 -top-1 flex h-[19px] w-[19px] items-center justify-center rounded-full bg-zinc-700 text-white shadow-md transition-transform hover:scale-105 hover:bg-zinc-600 dark:bg-zinc-500 dark:hover:bg-zinc-400"
-                            >
-                              <X className="h-2.5 w-2.5" />
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
+                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="flex flex-wrap gap-3 px-3 pt-3 pb-2.5 border-b border-zinc-100 dark:border-zinc-800/70">
+                    {filePreviews.map(fp => (
+                      <div key={fp.id} className="relative flex flex-col items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => void openFilePreview(fp.file, fp.preview)}
+                          className="group/preview relative block w-20 text-left"
+                          title={`Preview ${fp.file.name}`}
+                        >
+                          {fp.file.type.startsWith('image/') && fp.preview ? (
+                            <div className="w-20 h-16 rounded-xl overflow-hidden bg-zinc-200 dark:bg-zinc-700 shadow-sm border border-zinc-200/60 cursor-pointer">
+                              <img src={fp.preview} alt={fp.file.name} className="w-full h-full object-cover transition-transform group-hover/preview:scale-105" />
+                            </div>
+                          ) : fp.file.type === 'application/pdf' && fp.preview ? (
+                            <div className="relative w-20 h-16 rounded-xl overflow-hidden bg-white dark:bg-zinc-800 shadow-sm border border-zinc-200 dark:border-zinc-700 cursor-pointer">
+                              <iframe src={`${fp.preview}#page=1&view=FitH`} title={`Preview ${fp.file.name}`} className="pointer-events-none absolute inset-0 h-[288px] w-[360px] origin-top-left scale-[0.222] bg-white" />
+                              <div className="absolute inset-0 bg-transparent group-hover/preview:bg-zinc-1000/5 transition-colors" />
+                            </div>
+                          ) : (
+                            <div className="w-20 h-16 rounded-xl flex flex-col items-center justify-center gap-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 cursor-pointer hover:border-zinc-500 dark:hover:border-zinc-500/50 transition-colors">
+                              <FileText className="w-6 h-6 text-zinc-900 dark:text-zinc-100" />
+                              <span className="text-[8px] font-black uppercase text-zinc-500 dark:text-zinc-400">{fp.file.name.split('.').pop()?.toUpperCase() || 'FILE'}</span>
+                            </div>
+                          )}
+                          <span className="mt-1 block text-[9px] font-medium text-zinc-500 dark:text-zinc-400 truncate max-w-[80px]" title={fp.file.name}>{fp.file.name}</span>
+                          <span className="block text-[8px] text-zinc-400">{formatFileSize(fp.file.size)}</span>
+                        </button>
+                        <button onClick={() => removeFile(fp.id)} className="absolute -top-1.5 -right-1.5 w-[18px] h-[18px] rounded-full flex items-center justify-center bg-zinc-600 dark:bg-zinc-500 text-white shadow-md hover:bg-zinc-500">
+                          <X className="w-2.5 h-2.5" />
+                        </button>
+                      </div>
+                    ))}
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -2606,8 +2584,8 @@ const cleanMessageContent = (content: unknown): string => {
                   <motion.span
                     className="relative z-10 flex items-center justify-center"
                     animate={isProcessingFiles ? { rotate: 90 } : { rotate: 0 }}
-                    whileHover={{ scale: 1.12, rotate: 180 }}
-                    whileTap={{ scale: 0.9, rotate: 180 }}
+                    whileHover={{ scale: 1.12 }}
+                    whileTap={{ scale: 0.9 }}
                     transition={{
                       type: 'spring',
                       stiffness: 500,
@@ -2884,24 +2862,7 @@ const cleanMessageContent = (content: unknown): string => {
                 {previewFile.type.startsWith('image/') ? (
                   <div className="flex min-h-full items-center justify-center"><img src={previewUrl} alt={previewFile.name} className="max-h-full max-w-full rounded-xl object-contain shadow-lg" /></div>
                 ) : previewFile.type === 'application/pdf' ? (
-                  <div className="flex min-h-full w-full flex-col gap-3">
-                    <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800">
-                      <iframe
-                        src={`${previewUrl}#toolbar=1&navpanes=0&view=FitH`}
-                        title={`PDF preview: ${previewFile.name}`}
-                        className="h-full min-h-[62vh] w-full bg-white sm:min-h-[70vh]"
-                      />
-                    </div>
-                    <a
-                      href={previewUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mx-auto inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-transform active:scale-[0.98] sm:hidden dark:bg-white dark:text-zinc-900"
-                    >
-                      <ExternalLink className="h-4 w-4" />
-                      Open PDF in browser
-                    </a>
-                  </div>
+                  <iframe src={`${previewUrl}#toolbar=1&navpanes=0&view=FitH`} title={`PDF preview: ${previewFile.name}`} className="h-full min-h-[70vh] w-full rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800" />
                 ) : previewText !== null ? (
                   <pre className="mx-auto min-h-full max-w-4xl whitespace-pre-wrap break-words rounded-xl bg-white p-5 font-mono text-xs leading-relaxed text-zinc-800 shadow-sm dark:bg-zinc-900 dark:text-zinc-200">{previewText}</pre>
                 ) : (
