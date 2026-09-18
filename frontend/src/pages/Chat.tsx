@@ -977,6 +977,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     }
   }, [onLogout]);
 
+  const notifySessionsChanged = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('twinkle-sessions-changed'));
+  }, []);
+
   // Live Talk persists turns in the background. Update the same sidebar state
   // immediately instead of forcing another GET /chat/sessions request.
   useEffect(() => {
@@ -1007,11 +1011,14 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           ...prev,
         ];
       });
+
+      // Live Talk can create a session outside the normal send flow.
+      notifySessionsChanged();
     };
 
     window.addEventListener('twinkle-live-session-updated', handleLiveSessionUpdate);
     return () => window.removeEventListener('twinkle-live-session-updated', handleLiveSessionUpdate);
-  }, [user.id]);
+  }, [user.id, notifySessionsChanged]);
 
   const loadMessages = useCallback(async (sid: number) => {
     try {
@@ -1455,6 +1462,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
             ...prev,
           ];
         });
+
+        // The backend has confirmed creation. Tell the collapsed Sidebar to
+        // refresh its badge/count immediately.
+        notifySessionsChanged();
       }
 
       setIsTyping(false);
@@ -1735,6 +1746,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       // Update React state immediately after the server confirms deletion.
       // This keeps the sidebar in sync without requiring a browser refresh.
       setSessions(prev => prev.filter(session => session.id !== deletedSessionId));
+      notifySessionsChanged();
 
       if (currentSessionId === deletedSessionId) {
         setCurrentSessionId(null);
@@ -1782,6 +1794,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       // Clear the local session collection as soon as the backend confirms
       // the operation so the sidebar updates immediately.
       setSessions([]);
+      notifySessionsChanged();
       setTypingSessionTitle(null);
       setSessionIdToDelete(null);
       setCurrentSessionId(null);
