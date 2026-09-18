@@ -11,8 +11,10 @@ import com.nimbusds.jose.jwk.JWK;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -27,7 +29,6 @@ import org.springframework.web.client.RestTemplate;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.interfaces.RSAPublicKey;
-import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -43,32 +44,65 @@ public class OAuthService {
     private final RestTemplate restTemplate;
     private final UserRepository userRepository;
 
-    @Value("${app.frontend-url:https://twinkleai.vercel.app}")
+    // ========================================================================
+    // FRONTEND CONFIGURATION
+    // ========================================================================
+
+    /**
+     * Production frontend URL.
+     *
+     * application.properties:
+     *
+     * frontend.url=${FRONTEND_URL:https://twinkleai.vercel.app}
+     */
+    @Value("${frontend.url:https://twinkleai.vercel.app}")
     private String frontendUrl;
 
     // ========================================================================
-    // GOOGLE CONFIGURATION
+    // GOOGLE OAUTH CONFIGURATION
     // ========================================================================
 
-    @Value("${oauth.google.client-id:}")
+    /**
+     * Google OAuth Client ID.
+     */
+    @Value("${oauth.google.client-id}")
     private String googleClientId;
 
-    @Value("${oauth.google.client-secret:}")
+    /**
+     * Google OAuth Client Secret.
+     */
+    @Value("${oauth.google.client-secret}")
     private String googleClientSecret;
 
-    @Value("${oauth.google.redirect-uri:https://twinkleai.vercel.app/api/auth/oauth/google/callback}")
+    /**
+     * IMPORTANT:
+     *
+     * This MUST be the OAuth callback endpoint.
+     *
+     * Production:
+     * https://twinkleai.vercel.app/api/auth/oauth/google/callback
+     *
+     * Do not use:
+     * https://twinkleai.vercel.app
+     *
+     * Do not use:
+     * https://twinkle-ai-ype3.onrender.com/api/auth/oauth/google/callback
+     *
+     * The actual value should come from Render's environment variable:
+     *
+     * OAUTH_GOOGLE_REDIRECT_URI
+     */
+    @Value("${oauth.google.redirect-uri}")
     private String googleRedirectUri;
 
     // ========================================================================
-    // GOOGLE AUTHORIZATION
+    // GOOGLE AUTHORIZATION URL
     // ========================================================================
 
     /**
      * Creates Google's OAuth authorization URL.
      */
-    public String googleAuthorizationUrl(
-            String state
-    ) {
+    public String googleAuthorizationUrl(String state) {
 
         require(
                 googleClientId,
@@ -82,7 +116,17 @@ public class OAuthService {
 
         require(
                 googleRedirectUri,
-                "Google OAuth redirect URI is missing."
+                "Google OAuth redirect URI is missing. Set OAUTH_GOOGLE_REDIRECT_URI."
+        );
+
+        require(
+                state,
+                "Google OAuth state is missing."
+        );
+
+        log.info(
+                "Creating Google OAuth authorization URL with redirect URI: {}",
+                googleRedirectUri
         );
 
         return "https://accounts.google.com/o/oauth2/v2/auth"
@@ -104,9 +148,7 @@ public class OAuthService {
      * Exchanges the Google authorization code for tokens,
      * verifies the Google ID token and creates/finds the Twinkle user.
      */
-    public User googleUser(
-            String code
-    ) {
+    public User googleUser(String code) {
 
         require(
                 googleClientId,
@@ -120,7 +162,7 @@ public class OAuthService {
 
         require(
                 googleRedirectUri,
-                "Google OAuth redirect URI is missing."
+                "Google OAuth redirect URI is missing. Set OAUTH_GOOGLE_REDIRECT_URI."
         );
 
         require(
@@ -130,9 +172,11 @@ public class OAuthService {
 
         try {
 
-            // ================================================================
+            log.info("Starting Google authorization code exchange.");
+
+            // ====================================================================
             // 1. EXCHANGE AUTHORIZATION CODE
-            // ================================================================
+            // ====================================================================
 
             MultiValueMap<String, String> form =
                     new LinkedMultiValueMap<>();
@@ -152,6 +196,12 @@ public class OAuthService {
                     googleClientSecret
             );
 
+            /*
+             * IMPORTANT:
+             *
+             * This MUST be exactly the same redirect URI that was sent
+             * during the initial Google authorization request.
+             */
             form.add(
                     "redirect_uri",
                     googleRedirectUri
@@ -215,9 +265,13 @@ public class OAuthService {
                 );
             }
 
-            // ================================================================
+            log.info(
+                    "Google authorization code exchanged successfully."
+            );
+
+            // ====================================================================
             // 2. VERIFY GOOGLE ID TOKEN
-            // ================================================================
+            // ====================================================================
 
             JWTClaimsSet claims =
                     verifyGoogleIdToken(idToken);
@@ -239,9 +293,9 @@ public class OAuthService {
                             "email_verified"
                     );
 
-            // ================================================================
+            // ====================================================================
             // 3. VALIDATE USER INFORMATION
-            // ================================================================
+            // ====================================================================
 
             if (googleSubject == null
                     || googleSubject.isBlank()) {
@@ -266,9 +320,14 @@ public class OAuthService {
                 );
             }
 
-            // ================================================================
+            log.info(
+                    "Google identity verified successfully for email: {}",
+                    email
+            );
+
+            // ====================================================================
             // 4. FIND OR CREATE USER
-            // ================================================================
+            // ====================================================================
 
             return upsert(
                     email,
@@ -308,11 +367,13 @@ public class OAuthService {
      *
      * https://www.googleapis.com/oauth2/v3/certs
      */
-    private JWTClaimsSet verifyGoogleIdToken(
-            String idToken
-    ) {
+    private JWTClaimsSet verifyGoogleIdToken(String idToken) {
 
         try {
+
+            // ====================================================================
+            // Parse JWT
+            // ====================================================================
 
             SignedJWT jwt =
                     SignedJWT.parse(idToken);
@@ -320,9 +381,9 @@ public class OAuthService {
             JWSHeader header =
                     jwt.getHeader();
 
-            // ================================================================
+            // ====================================================================
             // Validate algorithm
-            // ================================================================
+            // ====================================================================
 
             if (!JWSAlgorithm.RS256.equals(
                     header.getAlgorithm()
@@ -333,9 +394,9 @@ public class OAuthService {
                 );
             }
 
-            // ================================================================
+            // ====================================================================
             // Get key ID
-            // ================================================================
+            // ====================================================================
 
             String keyId =
                     header.getKeyID();
@@ -348,9 +409,9 @@ public class OAuthService {
                 );
             }
 
-            // ================================================================
+            // ====================================================================
             // Fetch Google's public keys
-            // ================================================================
+            // ====================================================================
 
             ResponseEntity<String> keyResponse =
                     restTemplate.exchange(
@@ -369,9 +430,9 @@ public class OAuthService {
                 );
             }
 
-            // ================================================================
+            // ====================================================================
             // Parse JWKS
-            // ================================================================
+            // ====================================================================
 
             JWKSet jwkSet =
                     JWKSet.parse(
@@ -388,17 +449,17 @@ public class OAuthService {
                 );
             }
 
-            // ================================================================
+            // ====================================================================
             // Convert JWK to RSA public key
-            // ================================================================
+            // ====================================================================
 
             RSAPublicKey publicKey =
                     jwk.toRSAKey()
                             .toRSAPublicKey();
 
-            // ================================================================
+            // ====================================================================
             // Verify cryptographic signature
-            // ================================================================
+            // ====================================================================
 
             JWSVerifier verifier =
                     new RSASSAVerifier(
@@ -412,16 +473,16 @@ public class OAuthService {
                 );
             }
 
-            // ================================================================
+            // ====================================================================
             // Extract claims
-            // ================================================================
+            // ====================================================================
 
             JWTClaimsSet claims =
                     jwt.getJWTClaimsSet();
 
-            // ================================================================
+            // ====================================================================
             // Validate issuer
-            // ================================================================
+            // ====================================================================
 
             String issuer =
                     claims.getIssuer();
@@ -434,9 +495,9 @@ public class OAuthService {
                 );
             }
 
-            // ================================================================
+            // ====================================================================
             // Validate audience
-            // ================================================================
+            // ====================================================================
 
             List<String> audiences =
                     claims.getAudience();
@@ -451,9 +512,9 @@ public class OAuthService {
                 );
             }
 
-            // ================================================================
+            // ====================================================================
             // Validate expiration
-            // ================================================================
+            // ====================================================================
 
             Date expiration =
                     claims.getExpirationTime();
@@ -500,9 +561,9 @@ public class OAuthService {
             String provider
     ) {
 
-        // ================================================================
+        // ====================================================================
         // Validate email
-        // ================================================================
+        // ====================================================================
 
         if (email == null
                 || email.isBlank()
@@ -519,9 +580,9 @@ public class OAuthService {
                                 Locale.ROOT
                         );
 
-        // ================================================================
+        // ====================================================================
         // Find existing user
-        // ================================================================
+        // ====================================================================
 
         Optional<User> existing =
                 userRepository.findByEmail(email);
@@ -531,9 +592,9 @@ public class OAuthService {
                         User::new
                 );
 
-        // ================================================================
+        // ====================================================================
         // Create new OAuth user
-        // ================================================================
+        // ====================================================================
 
         if (user.getId() == null) {
 
@@ -548,14 +609,6 @@ public class OAuthService {
 
             /*
              * OAuth users don't use this password for Google login.
-             *
-             * IMPORTANT:
-             *
-             * UUID objects cannot be added directly:
-             *
-             * UUID.randomUUID() + UUID.randomUUID()
-             *
-             * Convert them to Strings first.
              */
             user.setPassword(
                     UUID.randomUUID().toString()
@@ -565,15 +618,15 @@ public class OAuthService {
             user.setVerified(true);
         }
 
-        // ================================================================
+        // ====================================================================
         // Set OAuth provider
-        // ================================================================
+        // ====================================================================
 
         user.setAuthProvider(provider);
 
-        // ================================================================
+        // ====================================================================
         // Set Google avatar
-        // ================================================================
+        // ====================================================================
 
         if (avatar != null
                 && !avatar.isBlank()) {
@@ -604,9 +657,9 @@ public class OAuthService {
             base =
                     at > 0
                             ? email.substring(
-                            0,
-                            at
-                    )
+                                    0,
+                                    at
+                            )
                             : "twinkle_user";
 
         } else {
@@ -614,7 +667,10 @@ public class OAuthService {
             base = name;
         }
 
+        // ====================================================================
         // Remove unsupported characters
+        // ====================================================================
+
         base =
                 base
                         .replaceAll(
@@ -636,7 +692,10 @@ public class OAuthService {
         int index =
                 1;
 
+        // ====================================================================
         // Prevent username collision
+        // ====================================================================
+
         while (
                 userRepository.existsByUsername(
                         candidate
@@ -653,7 +712,7 @@ public class OAuthService {
     }
 
     // ========================================================================
-    // HELPERS
+    // VALIDATION HELPER
     // ========================================================================
 
     private void require(
@@ -670,6 +729,10 @@ public class OAuthService {
         }
     }
 
+    // ========================================================================
+    // STRING HELPER
+    // ========================================================================
+
     private String stringValue(
             Object value
     ) {
@@ -678,6 +741,10 @@ public class OAuthService {
                 ? ""
                 : String.valueOf(value);
     }
+
+    // ========================================================================
+    // URL ENCODING
+    // ========================================================================
 
     private String enc(
             String value
