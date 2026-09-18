@@ -10,6 +10,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import UserAvatar from './UserAvatar'; 
 import StormLogo from './StormLogo';
+import { chatApi } from '../lib/api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Props {
@@ -828,6 +829,8 @@ export default function Sidebar({
   // immediately. The user can expand it with the sidebar icon.
   const [desktopCollapsed, setDesktopCollapsed] = useState(true);
   const [focusSearch, setFocusSearch] = useState(false);
+  const [chatCount, setChatCount] = useState(0);
+  const countSyncInFlightRef = useRef(false);
   useEffect(() => { onDesktopStateChange?.(false); }, [onDesktopStateChange]);
 
   const expandDesktop = useCallback(() => {
@@ -896,20 +899,71 @@ export default function Sidebar({
     onSettings: handleSettings,
   };
 
-  // Keep the collapsed Chats badge synchronized with the conversation that
-  // is already active. During a search/new-chat transition the parent
-  // sessions array can briefly lag behind currentSessionId; using the union
-  // here prevents the badge from showing 0/old data until another click forces
-  // a render. IDs are normalized so string/number API differences do not
-  // create duplicate or missing sessions.
+  // The Sidebar receives the session list from Chat.tsx, but the backend can
+  // change before that parent list has re-rendered (for example immediately
+  // after a Live Talk save). Keep a local count as a small, authoritative UI
+  // cache and merge the active session into it so an optimistic session is not
+  // lost from the badge.
   const activeSessionId = Number(currentSessionId);
-  const hasActiveSession =
-    Number.isFinite(activeSessionId) &&
+  const localChatCount =
+    normalizedSessions.length +
+    (Number.isFinite(activeSessionId) &&
     activeSessionId > 0 &&
-    normalizedSessions.some(session => session.id === activeSessionId);
-  const chatCount = hasActiveSession
-    ? normalizedSessions.length
-    : normalizedSessions.length + (Number.isFinite(activeSessionId) && activeSessionId > 0 ? 1 : 0);
+    !normalizedSessions.some(session => session.id === activeSessionId)
+      ? 1
+      : 0);
+
+  useEffect(() => {
+    setChatCount(localChatCount);
+  }, [localChatCount]);
+
+  const refreshChatCount = useCallback(async () => {
+    if (countSyncInFlightRef.current) return;
+    countSyncInFlightRef.current = true;
+
+    try {
+      const response = await chatApi.getSessions() as any;
+      const serverSessions = Array.isArray(response?.sessions)
+        ? response.sessions
+        : [];
+
+      const serverIds = new Set<number>();
+      for (const session of serverSessions) {
+        const id = Number(session?.id);
+        if (Number.isFinite(id) && id > 0) serverIds.add(id);
+      }
+
+      if (Number.isFinite(activeSessionId) && activeSessionId > 0) {
+        serverIds.add(activeSessionId);
+      }
+
+      setChatCount(serverIds.size);
+    } catch (error) {
+      // Never make the tooltip disappear because a background count request
+      // failed. The locally synchronized count remains usable.
+      console.debug('Chat count refresh failed:', error);
+      setChatCount(localChatCount);
+    } finally {
+      countSyncInFlightRef.current = false;
+    }
+  }, [activeSessionId, localChatCount]);
+
+  // Sync on mount and whenever another part of the chat UI announces a saved
+  // or deleted session. This avoids requiring the user to open the sidebar.
+  useEffect(() => {
+    void refreshChatCount();
+
+    const handleSessionChange = () => {
+      void refreshChatCount();
+    };
+
+    window.addEventListener('twinkle-chat-updated', handleSessionChange);
+    window.addEventListener('twinkle-live-session-updated', handleSessionChange);
+    return () => {
+      window.removeEventListener('twinkle-chat-updated', handleSessionChange);
+      window.removeEventListener('twinkle-live-session-updated', handleSessionChange);
+    };
+  }, [refreshChatCount]);
 
   return (
     <>
@@ -999,6 +1053,8 @@ export default function Sidebar({
 
             <IconTooltip label={`Chats (${chatCount})`}>
               <button
+                onMouseEnter={() => void refreshChatCount()}
+                onFocus={() => void refreshChatCount()}
                 onClick={expandDesktop}
                 aria-label="Chats"
                 className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-all"
