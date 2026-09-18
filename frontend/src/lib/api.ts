@@ -1,20 +1,6 @@
-const getTwinkleLanguage = (): string => {
-  try {
-    return localStorage.getItem('twinkle_app_language') || 'auto';
-  } catch {
-    return 'auto';
-  }
-};
-
-
-/* =========================================================
-   API CONFIGURATION
-   ========================================================= */
-
 const API_BASE = (
   import.meta.env.VITE_API_BASE_URL || '/api'
 ).replace(/\/$/, '');
-
 
 const GEMINI_LIVE_WS_ENDPOINT =
   'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained';
@@ -25,13 +11,11 @@ const RETRY_DELAY_MS = 450;
 const WAKE_ATTEMPTS = 1;
 const WAKE_DELAY_MS = 1_000;
 
-
 type ApiError = Error & {
   data?: unknown;
   email?: string;
   status?: number;
 };
-
 
 export interface ProcessedFile {
   id: string;
@@ -42,7 +26,6 @@ export interface ProcessedFile {
   size: number;
   preview?: string;
 }
-
 
 /* =========================================================
    FILE MIME HELPERS
@@ -81,10 +64,8 @@ const getMimeTypeFromFilename = (
 
     '.odt':
       'application/vnd.oasis.opendocument.text',
-
     '.ods':
       'application/vnd.oasis.opendocument.spreadsheet',
-
     '.odp':
       'application/vnd.oasis.opendocument.presentation',
 
@@ -107,7 +88,6 @@ const getMimeTypeFromFilename = (
   return 'application/octet-stream';
 };
 
-
 const normalizeFile = (file: File): File => {
   const detectedMime =
     file.type &&
@@ -128,7 +108,6 @@ const normalizeFile = (file: File): File => {
 
   return file;
 };
-
 
 /* =========================================================
    ABORTABLE DELAY
@@ -170,7 +149,6 @@ const signalAwareDelay = (
     );
   });
 
-
 /* =========================================================
    RENDER SERVER WAKE-UP
    ========================================================= */
@@ -188,6 +166,7 @@ export async function wakeUpServer(): Promise<void> {
           method: 'GET',
 
           /*
+           * IMPORTANT:
            * Always include the session cookie.
            */
           credentials: 'include',
@@ -201,8 +180,9 @@ export async function wakeUpServer(): Promise<void> {
       );
 
       /*
-       * Any response other than Render's temporary
-       * unavailable states means the server is reachable.
+       * Any response other than Render's typical
+       * temporary unavailable states means the
+       * server is reachable.
        */
       if (
         response.status !== 503 &&
@@ -222,7 +202,6 @@ export async function wakeUpServer(): Promise<void> {
   }
 }
 
-
 /* =========================================================
    HEADER NORMALIZATION
    ========================================================= */
@@ -230,7 +209,10 @@ export async function wakeUpServer(): Promise<void> {
 function normalizeHeaders(
   init?: HeadersInit
 ): Record<string, string> {
-  const result: Record<string, string> = {};
+  const result: Record<
+    string,
+    string
+  > = {};
 
   if (!init) {
     return result;
@@ -258,7 +240,6 @@ function normalizeHeaders(
 
   return result;
 }
-
 
 /* =========================================================
    FORM DATA CLONING
@@ -290,7 +271,6 @@ const cloneFormData = (
   return copy;
 };
 
-
 /* =========================================================
    FETCH RETRY ENGINE
    ========================================================= */
@@ -308,6 +288,8 @@ const attemptFetch = async (
       | undefined;
 
   /*
+   * IMPORTANT:
+   *
    * For every FormData retry we create
    * a completely new FormData body.
    */
@@ -395,7 +377,6 @@ const attemptFetch = async (
   }
 };
 
-
 /* =========================================================
    AUTHENTICATED FETCH
    ========================================================= */
@@ -419,13 +400,12 @@ export async function fetchWithAuth(
       options.headers
     );
 
-
-  /* =======================================================
-     CORS / PREFLIGHT FIX
-     ======================================================= */
-
   /*
-   * Do not add application/json to GET requests.
+   * =======================================================
+   * CORS / PREFLIGHT FIX
+   * =======================================================
+   *
+   * DO NOT add application/json to GET requests.
    *
    * GET requests such as:
    *
@@ -433,6 +413,9 @@ export async function fetchWithAuth(
    *   /api/auth/me
    *
    * do not need Content-Type.
+   *
+   * Adding Content-Type to GET can unnecessarily
+   * trigger a browser preflight request.
    */
 
   if (isFormData) {
@@ -483,7 +466,6 @@ export async function fetchWithAuth(
     }
   }
 
-
   let response: Response;
 
   try {
@@ -509,7 +491,6 @@ export async function fetchWithAuth(
       'Server is starting up, please wait a moment and try again.'
     );
   }
-
 
   /* =======================================================
      RESPONSE PARSING
@@ -555,7 +536,6 @@ export async function fetchWithAuth(
     };
   }
 
-
   /* =======================================================
      ERROR HANDLING
      ======================================================= */
@@ -572,7 +552,6 @@ export async function fetchWithAuth(
     const status = response.status;
 
     const friendlyMessages: Record<number, string> = {
-
       400:
         'The request could not be processed. Please check your input and try again.',
 
@@ -601,7 +580,7 @@ export async function fetchWithAuth(
         'The submitted information could not be processed.',
 
       429:
-        'The AI service is currently busy. Please wait a few seconds.',
+        'The AI provider temporarily rate-limited this request. Please wait a moment and try again.',
 
       500:
         'Something went wrong on the server. Please try again shortly.',
@@ -637,7 +616,6 @@ export async function fetchWithAuth(
   return data;
 }
 
-
 /* =========================================================
    AUTH API
    ========================================================= */
@@ -645,7 +623,7 @@ export async function fetchWithAuth(
 export const authApi = {
 
   /* =======================================================
-     REQUEST OTP
+     REQUEST OTP — UNIFIED LOGIN / SIGNUP
      ======================================================= */
 
   requestOtp: (
@@ -655,16 +633,11 @@ export const authApi = {
       `${API_BASE}/auth/request-otp`,
       {
         method: 'POST',
-
         body: JSON.stringify({
-          email:
-            email
-              .trim()
-              .toLowerCase(),
+          email: email.trim().toLowerCase(),
         }),
       }
     ),
-
 
   /* =======================================================
      NORMAL LOGIN
@@ -685,7 +658,6 @@ export const authApi = {
       }
     ),
 
-
   /* =======================================================
      SIGNUP
      ======================================================= */
@@ -705,7 +677,6 @@ export const authApi = {
       }
     ),
 
-
   /* =======================================================
      OTP VERIFICATION
      ======================================================= */
@@ -721,18 +692,11 @@ export const authApi = {
 
         body:
           JSON.stringify({
-            email:
-              email
-                .trim()
-                .toLowerCase(),
-
-            otpCode:
-              otpCode
-                .trim(),
+            email,
+            otpCode,
           }),
       }
     ),
-
 
   /* =======================================================
      RESEND OTP
@@ -749,13 +713,10 @@ export const authApi = {
         body:
           JSON.stringify({
             email:
-              email
-                .trim()
-                .toLowerCase(),
+              email.trim(),
           }),
       }
     ),
-
 
   /* =======================================================
      FORGOT PASSWORD
@@ -775,7 +736,6 @@ export const authApi = {
           }),
       }
     ),
-
 
   /* =======================================================
      RESET PASSWORD
@@ -800,7 +760,6 @@ export const authApi = {
       }
     ),
 
-
   /* =======================================================
      LOGOUT
      ======================================================= */
@@ -812,7 +771,6 @@ export const authApi = {
         method: 'POST',
       }
     ),
-
 
   /* =======================================================
      UPDATE PROFILE
@@ -835,7 +793,6 @@ export const authApi = {
       }
     ),
 
-
   /* =======================================================
      PROFILE STATS
      ======================================================= */
@@ -845,22 +802,29 @@ export const authApi = {
       `${API_BASE}/auth/profile/stats`
     ),
 
-
   /* =======================================================
      GOOGLE OAUTH
      ======================================================= */
 
   /*
-   * Google OAuth intentionally uses the same-origin
-   * Vercel /api path.
+   * Google is the ONLY OAuth provider.
    *
-   * Browser:
+   * The browser is intentionally redirected directly
+   * to the Spring Boot OAuth endpoint.
    *
+   * Flow:
+   *
+   * React
+   *   ↓
    * /api/auth/oauth/google
-   *
-   * Vercel rewrite:
-   *
-   * https://twinkle-ai-ype3.onrender.com/api/auth/oauth/google
+   *   ↓
+   * Google
+   *   ↓
+   * /api/auth/oauth/google/callback
+   *   ↓
+   * Spring session created
+   *   ↓
+   * Frontend
    */
 
   startGoogleOAuth: () => {
@@ -869,27 +833,42 @@ export const authApi = {
     );
   },
 
-
   /* =======================================================
      AUTH STATUS
      ======================================================= */
+
+  /*
+   * GET request:
+   * no Content-Type header is added.
+   *
+   * credentials: include is handled by
+   * fetchWithAuth().
+   */
 
   getStatus: () =>
     fetchWithAuth(
       `${API_BASE}/auth/status`
     ),
 
-
   /* =======================================================
      CURRENT USER
      ======================================================= */
+
+  /*
+   * This endpoint is especially important after
+   * Google OAuth.
+   *
+   * The frontend should call this after returning
+   * from Google's authentication flow so that the
+   * React auth state is populated from the Spring
+   * session.
+   */
 
   getProfile: () =>
     fetchWithAuth(
       `${API_BASE}/auth/me`
     ),
 };
-
 
 /* =========================================================
    CHAT API
@@ -906,7 +885,6 @@ export const chatApi = {
       `${API_BASE}/chat/sessions`
     ),
 
-
   /* =======================================================
      CHAT HISTORY
      ======================================================= */
@@ -917,7 +895,6 @@ export const chatApi = {
     fetchWithAuth(
       `${API_BASE}/chat/history/${sessionId}`
     ),
-
 
   /* =======================================================
      CREATE SESSION
@@ -931,11 +908,9 @@ export const chatApi = {
       }
     ),
 
-
   /* =======================================================
      LIVE TALK TURN PERSISTENCE
      ======================================================= */
-
   saveLiveTurn: (
     sessionId: number | null,
     userTranscript: string,
@@ -945,7 +920,6 @@ export const chatApi = {
       `${API_BASE}/chat/live/turn`,
       {
         method: 'POST',
-
         body: JSON.stringify({
           sessionId,
           userTranscript,
@@ -953,7 +927,6 @@ export const chatApi = {
         }),
       }
     ),
-
 
   /* =======================================================
      DELETE SESSION
@@ -968,7 +941,6 @@ export const chatApi = {
         method: 'DELETE',
       }
     ),
-
 
   /* =======================================================
      RENAME SESSION
@@ -991,7 +963,6 @@ export const chatApi = {
       }
     ),
 
-
   /* =======================================================
      GENERATE CHAT TITLE
      ======================================================= */
@@ -1011,7 +982,6 @@ export const chatApi = {
       }
     ),
 
-
   /* =======================================================
      CLEAR ALL SESSIONS
      ======================================================= */
@@ -1023,7 +993,6 @@ export const chatApi = {
         method: 'DELETE',
       }
     ),
-
 
   /* =======================================================
      NORMAL TEXT CHAT
@@ -1047,13 +1016,10 @@ export const chatApi = {
             message,
             sessionId,
             model,
-            language:
-              getTwinkleLanguage(),
           }),
       },
       CHAT_RETRIES
     ),
-
 
   /* =======================================================
      MULTIPART FILE CHAT
@@ -1066,16 +1032,53 @@ export const chatApi = {
     model: string,
     files: File[]
   ): Promise<unknown> => {
+    const validFiles = files.filter(
+      (file): file is File =>
+        file instanceof File &&
+        file.size > 0
+    );
 
-    const formData =
-      new FormData();
+    if (validFiles.length === 0) {
+      const error = new Error(
+        'Please select at least one valid file.'
+      ) as ApiError;
+      error.status = 400;
+      throw error;
+    }
 
+    const MAX_FILE_SIZE = 10 * 1024 * 1024;
+    const MAX_TOTAL_SIZE = 25 * 1024 * 1024;
+
+    let totalSize = 0;
+
+    for (const file of validFiles) {
+      if (file.size > MAX_FILE_SIZE) {
+        const error = new Error(
+          `"${file.name}" is too large. Maximum individual file size is 10 MB.`
+        ) as ApiError;
+        error.status = 413;
+        throw error;
+      }
+
+      totalSize += file.size;
+    }
+
+    if (totalSize > MAX_TOTAL_SIZE) {
+      const error = new Error(
+        'The total uploaded file size cannot exceed 25 MB per message.'
+      ) as ApiError;
+      error.status = 413;
+      throw error;
+    }
+
+    const formData = new FormData();
 
     formData.append(
       'message',
-      message ?? ''
+      typeof message === 'string'
+        ? message.trim()
+        : ''
     );
-
 
     if (
       sessionId !== null &&
@@ -1087,45 +1090,15 @@ export const chatApi = {
       );
     }
 
+    if (model && model.trim()) {
+      formData.append(
+        'model',
+        model.trim()
+      );
+    }
 
-    formData.append(
-      'model',
-      model
-    );
-
-
-    formData.append(
-      'language',
-      getTwinkleLanguage()
-    );
-
-
-    for (
-      const originalFile
-      of files
-    ) {
-
-      if (
-        !(
-          originalFile
-          instanceof File
-        )
-      ) {
-        continue;
-      }
-
-      if (
-        originalFile.size <= 0
-      ) {
-        continue;
-      }
-
-
-      const file =
-        normalizeFile(
-          originalFile
-        );
-
+    for (const originalFile of validFiles) {
+      const file = normalizeFile(originalFile);
 
       formData.append(
         'files',
@@ -1134,27 +1107,23 @@ export const chatApi = {
       );
     }
 
-
     /*
-     * NEVER SET CONTENT-TYPE MANUALLY.
+     * Do not set Content-Type manually.
+     * The browser creates the multipart boundary.
      *
-     * Browser generates the multipart boundary.
+     * Do not retry multipart AI requests in the browser. A 429 should
+     * reach the UI once instead of resubmitting the complete file payload.
      */
-
     return fetchWithAuth(
       `${API_BASE}/chat/send`,
       {
         method: 'POST',
-
         signal,
-
-        body:
-          formData,
+        body: formData,
       },
-      CHAT_RETRIES
+      0
     );
   },
-
 
   /* =======================================================
      LIVE CONVERSATION SAVE
@@ -1177,7 +1146,6 @@ export const chatApi = {
       }
     ),
 
-
   /* =======================================================
      SEARCH CHAT SESSIONS
      ======================================================= */
@@ -1190,7 +1158,6 @@ export const chatApi = {
         query
       )}`
     ),
-
 
   /* =======================================================
      SHARE SESSION
@@ -1207,7 +1174,6 @@ export const chatApi = {
     ),
 };
 
-
 /* =========================================================
    GEMINI LIVE TOKEN
    ========================================================= */
@@ -1215,8 +1181,44 @@ export const chatApi = {
 /**
  * Creates a short-lived Gemini Live API token
  * through the authenticated backend.
+ *
+ * The Spring Boot session cookie is included.
  */
 
+
+
+const decodeLiveWebSocketMessage = async (data: unknown): Promise<any> => {
+  if (typeof data === 'string') return JSON.parse(data);
+
+  if (data instanceof Blob) {
+    return JSON.parse(await data.text());
+  }
+
+  if (data instanceof ArrayBuffer) {
+    return JSON.parse(new TextDecoder().decode(new Uint8Array(data)));
+  }
+
+  if (ArrayBuffer.isView(data)) {
+    const view = data as ArrayBufferView;
+    const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+    return JSON.parse(new TextDecoder().decode(bytes));
+  }
+
+  throw new Error('Gemini Live API returned an unsupported WebSocket message type.');
+};
+
+const previewBase64ToInt16 = (base64: string): Int16Array => {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Int16Array(bytes.buffer);
+};
+
+/**
+ * Plays a real Gemini Live native-audio voice sample in the browser.
+ * This deliberately does not use window.speechSynthesis, so each Gemini
+ * voice preview actually uses the selected Gemini voice.
+ */
 type CachedLiveToken = {
   token: string;
   model: string;
@@ -1225,141 +1227,63 @@ type CachedLiveToken = {
   usesRemaining: number;
 };
 
+let cachedLiveToken: CachedLiveToken | null = null;
+let liveTokenPromise: Promise<CachedLiveToken> | null = null;
+let activeVoicePreviewStop: (() => void) | null = null;
+let voicePreviewGeneration = 0;
 
 const LIVE_TOKEN_REUSE_BUFFER_MS = 15_000;
 
-let cachedLiveToken:
-  CachedLiveToken | null = null;
-
-let liveTokenPromise:
-  Promise<CachedLiveToken> | null = null;
-
-let activeVoicePreviewStop:
-  (() => void) | null = null;
-
-let voicePreviewGeneration = 0;
-
-
-const invalidateCachedLiveToken = (
-  token?: string
-) => {
+const invalidateCachedLiveToken = (token?: string) => {
   if (!cachedLiveToken) return;
-
-  if (
-    !token ||
-    cachedLiveToken.token === token
-  ) {
-    cachedLiveToken = null;
-  }
+  if (!token || cachedLiveToken.token === token) cachedLiveToken = null;
 };
 
+const requestLiveToken = async (): Promise<CachedLiveToken> => {
+  let response: Response;
 
-const requestLiveToken =
-  async (): Promise<CachedLiveToken> => {
+  try {
+    response = await fetch(`${API_BASE}/live/token`, {
+      method: 'POST',
+      credentials: 'include',
+      cache: 'no-store',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      // Voice and language are deliberately NOT sent here. The ephemeral
+      // token leaves speechConfig unlocked so the client can choose any voice.
+      body: JSON.stringify({}),
+    });
+  } catch (error) {
+    console.error('Live token network error:', error);
+    throw new Error(
+      'Could not reach the Twinkle AI backend. Check that Spring Boot is running on port 8080.'
+    );
+  }
 
-    let response: Response;
+  const data = await response.json().catch(() => ({}));
 
-    try {
+  if (!response.ok) {
+    const serverMessage = typeof data?.error === 'string' ? data.error : '';
+    throw new Error(
+      serverMessage ||
+      `Live Talk token request failed (${response.status} ${response.statusText}).`
+    );
+  }
 
-      response =
-        await fetch(
-          `${API_BASE}/live/token`,
-          {
-            method: 'POST',
+  if (!data?.token) {
+    throw new Error('The backend responded successfully but did not return a Gemini Live token.');
+  }
 
-            credentials: 'include',
-
-            cache: 'no-store',
-
-            headers: {
-              Accept:
-                'application/json',
-
-              'Content-Type':
-                'application/json',
-            },
-
-            body:
-              JSON.stringify({}),
-          }
-        );
-
-    } catch (error) {
-
-      console.error(
-        'Live token network error:',
-        error
-      );
-
-      throw new Error(
-        'Could not reach the Twinkle AI backend. Check that Spring Boot is running on port 8080.'
-      );
-    }
-
-
-    const data =
-      await response
-        .json()
-        .catch(
-          () => ({})
-        );
-
-
-    if (!response.ok) {
-
-      const serverMessage =
-        typeof data?.error === 'string'
-          ? data.error
-          : '';
-
-      throw new Error(
-        serverMessage ||
-        `Live Talk token request failed (${response.status} ${response.statusText}).`
-      );
-    }
-
-
-    if (!data?.token) {
-
-      throw new Error(
-        'The backend responded successfully but did not return a Gemini Live token.'
-      );
-    }
-
-
-    return {
-      token:
-        String(data.token),
-
-      model:
-        String(
-          data.model ||
-          'gemini-3.8-live'
-        ),
-
-      expiresAt:
-        String(
-          data.expiresAt ||
-          ''
-        ),
-
-      newSessionExpiresAt:
-        String(
-          data.newSessionExpiresAt ||
-          ''
-        ),
-
-      usesRemaining:
-        Math.max(
-          1,
-          Number(
-            data.uses ||
-            10
-          )
-        ),
-    };
+  return {
+    token: String(data.token),
+    model: String(data.model || 'gemini-3.8-live'),
+    expiresAt: String(data.expiresAt || ''),
+    newSessionExpiresAt: String(data.newSessionExpiresAt || ''),
+    usesRemaining: Math.max(1, Number(data.uses || 10)),
   };
-
+};
 
 export async function createLiveToken(
   _voiceName = 'Charon',
@@ -1371,717 +1295,216 @@ export async function createLiveToken(
   expiresAt: string;
   newSessionExpiresAt?: string;
 }> {
-
   const now = Date.now();
 
-
-  if (
-    !forceRefresh &&
-    cachedLiveToken
-  ) {
-
-    const expiresAt =
-      Date.parse(
-        cachedLiveToken.expiresAt
-      );
-
-    const newSessionExpiresAt =
-      Date.parse(
-        cachedLiveToken
-          .newSessionExpiresAt
-      );
-
-
-    const usableUntil =
-      Math.min(
-        Number.isFinite(
-          expiresAt
-        )
-          ? expiresAt
-          : now + 60_000,
-
-        Number.isFinite(
-          newSessionExpiresAt
-        )
-          ? newSessionExpiresAt
-          : now + 60_000
-      );
-
+  if (!forceRefresh && cachedLiveToken) {
+    const expiresAt = Date.parse(cachedLiveToken.expiresAt);
+    const newSessionExpiresAt = Date.parse(cachedLiveToken.newSessionExpiresAt);
+    const usableUntil = Math.min(
+      Number.isFinite(expiresAt) ? expiresAt : now + 60_000,
+      Number.isFinite(newSessionExpiresAt) ? newSessionExpiresAt : now + 60_000
+    );
 
     if (
-      cachedLiveToken
-        .usesRemaining > 0 &&
-      usableUntil - now >
-        LIVE_TOKEN_REUSE_BUFFER_MS
+      cachedLiveToken.usesRemaining > 0 &&
+      usableUntil - now > LIVE_TOKEN_REUSE_BUFFER_MS
     ) {
-
-      cachedLiveToken
-        .usesRemaining -= 1;
-
-      return {
-        ...cachedLiveToken,
-      };
+      cachedLiveToken.usesRemaining -= 1;
+      return { ...cachedLiveToken };
     }
-
 
     cachedLiveToken = null;
   }
 
-
   if (!liveTokenPromise) {
-
-    liveTokenPromise =
-      requestLiveToken()
-        .finally(
-          () => {
-            liveTokenPromise = null;
-          }
-        );
+    liveTokenPromise = requestLiveToken().finally(() => {
+      liveTokenPromise = null;
+    });
   }
 
+  const fresh = await liveTokenPromise;
+  // Reserve one use for this session.
+  fresh.usesRemaining = Math.max(0, fresh.usesRemaining - 1);
+  cachedLiveToken = { ...fresh };
 
-  const fresh =
-    await liveTokenPromise;
-
-
-  fresh.usesRemaining =
-    Math.max(
-      0,
-      fresh.usesRemaining - 1
-    );
-
-
-  cachedLiveToken = {
-    ...fresh,
-  };
-
-
-  return {
-    ...fresh,
-  };
+  return { ...fresh };
 }
 
-
-/* =========================================================
-   GEMINI VOICE PREVIEW
-   ========================================================= */
-
+/**
+ * Plays a short Gemini 3.8 Live greeting using the selected model voice.
+ * The Live token is reused for multiple previews and the previous preview
+ * is cancelled when the user changes voices quickly.
+ */
 export async function previewGeminiVoice(
   voiceName: string,
   text = `Hello. This is ${voiceName}.`,
   language = 'auto'
 ): Promise<void> {
-
-  const generation =
-    ++voicePreviewGeneration;
-
-
+  const generation = ++voicePreviewGeneration;
   activeVoicePreviewStop?.();
 
+  const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
+  if (!AudioContextCtor) throw new Error('Web Audio is not supported in this browser.');
 
-  const AudioContextCtor =
-    window.AudioContext ||
-    (window as any)
-      .webkitAudioContext;
-
-
-  if (!AudioContextCtor) {
-    throw new Error(
-      'Web Audio is not supported in this browser.'
-    );
-  }
-
-
-  const context =
-    new AudioContextCtor();
-
-
+  const context = new AudioContextCtor();
   await context.resume();
 
+  const { token, model } = await createLiveToken(voiceName, language);
 
-  const {
-    token,
-    model,
-  } =
-    await createLiveToken(
-      voiceName,
-      language
-    );
-
-
-  if (
-    generation !==
-    voicePreviewGeneration
-  ) {
-
+  // A newer voice selection may have happened while the token request was
+  // in flight. Do not open an obsolete Gemini session in that case.
+  if (generation !== voicePreviewGeneration) {
     void context.close();
-
     return;
   }
 
-
-  const languageNames:
-    Record<string, string> = {
-
-    en: 'English',
-    hi: 'Hindi',
-    te: 'Telugu',
-    ta: 'Tamil',
-    kn: 'Kannada',
-    ml: 'Malayalam',
-
-    bn: 'Bengali',
-    mr: 'Marathi',
-    gu: 'Gujarati',
-    pa: 'Punjabi',
-    ur: 'Urdu',
-    ar: 'Arabic',
-
-    es: 'Spanish',
-    fr: 'French',
-    de: 'German',
-    it: 'Italian',
-    pt: 'Portuguese',
-    ru: 'Russian',
-
-    ja: 'Japanese',
-    ko: 'Korean',
-    zh: 'Chinese',
-    tr: 'Turkish',
-    vi: 'Vietnamese',
-    id: 'Indonesian',
-
-    th: 'Thai',
-    fil: 'Filipino',
+  const languageNames: Record<string, string> = {
+    en: 'English', hi: 'Hindi', te: 'Telugu', ta: 'Tamil', kn: 'Kannada', ml: 'Malayalam',
+    bn: 'Bengali', mr: 'Marathi', gu: 'Gujarati', pa: 'Punjabi', ur: 'Urdu', ar: 'Arabic',
+    es: 'Spanish', fr: 'French', de: 'German', it: 'Italian', pt: 'Portuguese', ru: 'Russian',
+    ja: 'Japanese', ko: 'Korean', zh: 'Chinese', tr: 'Turkish', vi: 'Vietnamese', id: 'Indonesian',
+    th: 'Thai', fil: 'Filipino',
   };
 
-
-  const selectedLanguage =
-    language || 'auto';
-
-
+  const selectedLanguage = language || 'auto';
   const languageInstruction =
-    selectedLanguage !== 'auto' &&
-    languageNames[
-      selectedLanguage
-    ]
+    selectedLanguage !== 'auto' && languageNames[selectedLanguage]
       ? ` Respond entirely in ${languageNames[selectedLanguage]}.`
       : '';
 
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let nextPlayTime = context.currentTime + 0.01;
+    let receivedAudio = false;
+    const sources = new Set<AudioBufferSourceNode>();
+    const socket = new WebSocket(
+      `${GEMINI_LIVE_WS_ENDPOINT}?access_token=${encodeURIComponent(token)}`
+    );
+    let timeoutId = 0;
 
-  return new Promise<void>(
-    (resolve, reject) => {
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      sources.forEach(source => { try { source.stop(); } catch {} });
+      sources.clear();
+      if (activeVoicePreviewStop === stop) activeVoicePreviewStop = null;
+      try { socket.close(1000, 'Voice preview complete'); } catch {}
+      void context.close();
+      if (error) reject(error); else resolve();
+    };
 
-      let settled = false;
+    const stop = () => finish();
+    activeVoicePreviewStop = stop;
 
-      let nextPlayTime =
-        context.currentTime +
-        0.01;
+    timeoutId = window.setTimeout(() => {
+      invalidateCachedLiveToken(token);
+      finish(new Error(`Voice preview for ${voiceName} timed out while connecting to Gemini Live.`));
+    }, 12_000);
 
-      let receivedAudio =
-        false;
-
-
-      const sources =
-        new Set<AudioBufferSourceNode>();
-
-
-      const socket =
-        new WebSocket(
-          `${GEMINI_LIVE_WS_ENDPOINT}?access_token=${encodeURIComponent(token)}`
-        );
-
-
-      let timeoutId = 0;
-
-
-      const finish = (
-        error?: Error
-      ) => {
-
-        if (settled) return;
-
-        settled = true;
-
-        window.clearTimeout(
-          timeoutId
-        );
-
-
-        sources.forEach(
-          source => {
-            try {
-              source.stop();
-            } catch {}
-          }
-        );
-
-
-        sources.clear();
-
-
-        if (
-          activeVoicePreviewStop ===
-          stop
-        ) {
-          activeVoicePreviewStop =
-            null;
-        }
-
-
-        try {
-          socket.close(
-            1000,
-            'Voice preview complete'
-          );
-        } catch {}
-
-
-        void context.close();
-
-
-        if (error) {
-          reject(error);
-        } else {
-          resolve();
-        }
-      };
-
-
-      const stop = () =>
-        finish();
-
-
-      activeVoicePreviewStop =
-        stop;
-
-
-      timeoutId =
-        window.setTimeout(
-          () => {
-
-            invalidateCachedLiveToken(
-              token
-            );
-
-            finish(
-              new Error(
-                `Voice preview for ${voiceName} timed out while connecting to Gemini Live.`
-              )
-            );
-          },
-          12_000
-        );
-
-
-      socket.onopen = () => {
-
-        socket.send(
-          JSON.stringify({
-            setup: {
-              model:
-                `models/${model || 'gemini-3.8-live'}`,
-
-              generationConfig: {
-                responseModalities:
-                  ['AUDIO'],
-
-                speechConfig: {
-                  voiceConfig: {
-                    prebuiltVoiceConfig: {
-                      voiceName,
-                    },
-                  },
-                },
-              },
-
-              systemInstruction: {
-                parts: [
-                  {
-                    text:
-                      `You are Twinkle AI. Speak exactly one short greeting using the user's provided text. ` +
-                      `Do not change the username, do not add an introduction, and stop immediately after the greeting.` +
-                      languageInstruction,
-                  },
-                ],
+    socket.onopen = () => {
+      socket.send(JSON.stringify({
+        setup: {
+          model: `models/${model || 'gemini-3.8-live'}`,
+          generationConfig: {
+            responseModalities: ['AUDIO'],
+            // Voice stays client-side so every one of Gemini's supported
+            // TTS voices can be selected independently.
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName },
               },
             },
-          })
-        );
-      };
+          },
+          systemInstruction: {
+            parts: [{
+              text:
+                `You are Twinkle AI. Speak exactly one short greeting using the user's provided text. ` +
+                `Do not change the username, do not add an introduction, and stop immediately after the greeting.` +
+                languageInstruction,
+            }],
+          },
+        },
+      }));
+    };
 
+    socket.onerror = () => {
+      invalidateCachedLiveToken(token);
+      finish(new Error(`Gemini could not preview ${voiceName}. Check the Live token and browser audio permission.`));
+    };
 
-      socket.onerror = () => {
+    socket.onclose = event => {
+      if (!settled && event.code !== 1000) {
+        invalidateCachedLiveToken(token);
+        const reason = event.reason ? `: ${event.reason}` : '';
+        finish(new Error(`Gemini voice preview disconnected (${event.code})${reason}.`));
+      }
+    };
 
-        invalidateCachedLiveToken(
-          token
-        );
+    socket.onmessage = async event => {
+      try {
+        const message = await decodeLiveWebSocketMessage(event.data);
 
-        finish(
-          new Error(
-            `Gemini could not preview ${voiceName}. Check the Live token and browser audio permission.`
-          )
-        );
-      };
-
-
-      socket.onclose = event => {
-
-        if (
-          !settled &&
-          event.code !== 1000
-        ) {
-
-          invalidateCachedLiveToken(
-            token
-          );
-
-          const reason =
-            event.reason
-              ? `: ${event.reason}`
-              : '';
-
-
-          finish(
-            new Error(
-              `Gemini voice preview disconnected (${event.code})${reason}.`
-            )
-          );
+        if (message.error) {
+          invalidateCachedLiveToken(token);
+          finish(new Error(message.error.message || `Gemini rejected the ${voiceName} voice preview.`));
+          return;
         }
-      };
 
+        if (message.setupComplete) {
+          socket.send(JSON.stringify({
+            clientContent: {
+              turns: [{ role: 'user', parts: [{ text }] }],
+              turnComplete: true,
+            },
+          }));
+          return;
+        }
 
-      socket.onmessage =
-        async event => {
+        const parts = message.serverContent?.modelTurn?.parts;
+        if (Array.isArray(parts)) {
+          for (const part of parts) {
+            const data = part?.inlineData?.data;
+            const mimeType = String(part?.inlineData?.mimeType || '');
+            if (!data || !mimeType.startsWith('audio/pcm')) continue;
 
-          try {
+            receivedAudio = true;
+            const pcm = previewBase64ToInt16(data);
+            if (!pcm.length) continue;
 
-            const message =
-              await decodeLiveWebSocketMessage(
-                event.data
-              );
-
-
-            if (message.error) {
-
-              invalidateCachedLiveToken(
-                token
-              );
-
-              finish(
-                new Error(
-                  message.error.message ||
-                  `Gemini rejected the ${voiceName} voice preview.`
-                )
-              );
-
-              return;
+            const buffer = context.createBuffer(1, pcm.length, 24000);
+            const channel = buffer.getChannelData(0);
+            for (let i = 0; i < pcm.length; i += 1) {
+              channel[i] = pcm[i] / 32768;
             }
 
+            const source = context.createBufferSource();
+            source.buffer = buffer;
+            // 1.12x makes the short greeting finish faster without changing
+            // the pitch. The first PCM chunk is still played immediately.
+            source.playbackRate.value = 1.12;
+            source.connect(context.destination);
+            sources.add(source);
 
-            if (
-              message.setupComplete
-            ) {
-
-              socket.send(
-                JSON.stringify({
-                  clientContent: {
-                    turns: [
-                      {
-                        role:
-                          'user',
-
-                        parts: [
-                          {
-                            text,
-                          },
-                        ],
-                      },
-                    ],
-
-                    turnComplete:
-                      true,
-                  },
-                })
-              );
-
-              return;
-            }
-
-
-            const parts =
-              message
-                .serverContent
-                ?.modelTurn
-                ?.parts;
-
-
-            if (
-              Array.isArray(parts)
-            ) {
-
-              for (
-                const part
-                of parts
-              ) {
-
-                const data =
-                  part
-                    ?.inlineData
-                    ?.data;
-
-
-                const mimeType =
-                  String(
-                    part
-                      ?.inlineData
-                      ?.mimeType ||
-                    ''
-                  );
-
-
-                if (
-                  !data ||
-                  !mimeType.startsWith(
-                    'audio/pcm'
-                  )
-                ) {
-                  continue;
-                }
-
-
-                receivedAudio =
-                  true;
-
-
-                const pcm =
-                  previewBase64ToInt16(
-                    data
-                  );
-
-
-                if (!pcm.length) {
-                  continue;
-                }
-
-
-                const buffer =
-                  context.createBuffer(
-                    1,
-                    pcm.length,
-                    24000
-                  );
-
-
-                const channel =
-                  buffer.getChannelData(
-                    0
-                  );
-
-
-                for (
-                  let i = 0;
-                  i < pcm.length;
-                  i += 1
-                ) {
-
-                  channel[i] =
-                    pcm[i] / 32768;
-                }
-
-
-                const source =
-                  context.createBufferSource();
-
-
-                source.buffer =
-                  buffer;
-
-
-                source.playbackRate.value =
-                  1.12;
-
-
-                source.connect(
-                  context.destination
-                );
-
-
-                sources.add(
-                  source
-                );
-
-
-                source.onended =
-                  () => {
-
-                    sources.delete(
-                      source
-                    );
-
-
-                    if (
-                      message
-                        .serverContent
-                        ?.turnComplete &&
-                      sources.size === 0
-                    ) {
-
-                      finish(
-                        receivedAudio
-                          ? undefined
-                          : new Error(
-                              `Gemini returned no audio for ${voiceName}.`
-                            )
-                      );
-                    }
-                  };
-
-
-                const startAt =
-                  Math.max(
-                    context.currentTime +
-                      0.005,
-                    nextPlayTime
-                  );
-
-
-                nextPlayTime =
-                  startAt +
-                  buffer.duration /
-                    1.12;
-
-
-                source.start(
-                  startAt
-                );
+            source.onended = () => {
+              sources.delete(source);
+              if (message.serverContent?.turnComplete && sources.size === 0) {
+                finish(receivedAudio ? undefined : new Error(`Gemini returned no audio for ${voiceName}.`));
               }
-            }
+            };
 
-
-            if (
-              message
-                .serverContent
-                ?.turnComplete &&
-              sources.size === 0
-            ) {
-
-              finish(
-                receivedAudio
-                  ? undefined
-                  : new Error(
-                      `Gemini returned no audio for ${voiceName}.`
-                    )
-              );
-            }
-
-          } catch (error) {
-
-            finish(
-              error instanceof Error
-                ? error
-                : new Error(
-                    'Invalid Gemini voice preview response.'
-                  )
-            );
+            const startAt = Math.max(context.currentTime + 0.005, nextPlayTime);
+            nextPlayTime = startAt + buffer.duration / 1.12;
+            source.start(startAt);
           }
-        };
-    }
-  );
+        }
+
+        if (message.serverContent?.turnComplete && sources.size === 0) {
+          finish(receivedAudio ? undefined : new Error(`Gemini returned no audio for ${voiceName}.`));
+        }
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error('Invalid Gemini voice preview response.'));
+      }
+    };
+  });
 }
-
-
-/* =========================================================
-   GEMINI LIVE MESSAGE HELPERS
-   ========================================================= */
-
-const decodeLiveWebSocketMessage =
-  async (
-    data: unknown
-  ): Promise<any> => {
-
-    if (
-      typeof data === 'string'
-    ) {
-      return JSON.parse(data);
-    }
-
-
-    if (
-      data instanceof Blob
-    ) {
-      return JSON.parse(
-        await data.text()
-      );
-    }
-
-
-    if (
-      data instanceof ArrayBuffer
-    ) {
-      return JSON.parse(
-        new TextDecoder().decode(
-          new Uint8Array(data)
-        )
-      );
-    }
-
-
-    if (
-      ArrayBuffer.isView(data)
-    ) {
-
-      const view =
-        data as ArrayBufferView;
-
-
-      const bytes =
-        new Uint8Array(
-          view.buffer,
-          view.byteOffset,
-          view.byteLength
-        );
-
-
-      return JSON.parse(
-        new TextDecoder().decode(
-          bytes
-        )
-      );
-    }
-
-
-    throw new Error(
-      'Gemini Live API returned an unsupported WebSocket message type.'
-    );
-  };
-
-
-const previewBase64ToInt16 =
-  (base64: string): Int16Array => {
-
-    const binary =
-      atob(base64);
-
-
-    const bytes =
-      new Uint8Array(
-        binary.length
-      );
-
-
-    for (
-      let i = 0;
-      i < binary.length;
-      i += 1
-    ) {
-
-      bytes[i] =
-        binary.charCodeAt(i);
-    }
-
-
-    return new Int16Array(
-      bytes.buffer
-    );
-  };
