@@ -1,0 +1,17 @@
+package com.ai.chatbot_backend.dto;
+
+import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
+
+@Data
+public class ChatRequest {
+    @NotBlank(message = "Message cannot be empty")
+    private String message;
+
+    private Long sessionId;
+
+    private String model;
+
+    /** Preferred response language: auto, en, hi, te, ... */
+    private String language;
+}
