@@ -609,18 +609,12 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     return () => window.clearInterval(interval);
   }, [typingSessionTitle]);
 
-  const normalizedSessions = sessions
-    .map(session => ({ ...session, id: Number(session.id) }))
-    .filter(session => Number.isFinite(session.id));
-
-  const sidebarSessions = normalizedSessions.map(session =>
+  const sidebarSessions = sessions.map(session =>
     typingSessionTitle?.id === session.id
       ? { ...session, sessionName: typedSessionTitle }
       : session
   );
-  const sessionToDelete = sessions.find(
-    session => Number(session.id) === Number(sessionIdToDelete)
-  );
+  const sessionToDelete = sessions.find(session => session.id === sessionIdToDelete);
   // Keep the chat interface clean on login; the sidebar opens only when requested.
 
   const voiceBaseInputRef = useRef('');
@@ -990,28 +984,21 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       const detail = (event as CustomEvent<{ id: number; sessionName?: string }>).detail;
       if (!detail?.id) return;
 
-      const sessionId = Number(detail.id);
-      if (!Number.isFinite(sessionId)) return;
-
       const now = new Date().toISOString();
       setSessions(prev => {
-        const existing = prev.find(session => Number(session.id) === sessionId);
+        const existing = prev.find(session => session.id === detail.id);
         if (existing) {
           const updated = {
             ...existing,
-            id: sessionId,
             sessionName: detail.sessionName || existing.sessionName,
             updatedAt: now,
           };
-          return [
-            updated,
-            ...prev.filter(session => Number(session.id) !== sessionId),
-          ];
+          return [updated, ...prev.filter(session => session.id !== detail.id)];
         }
 
         return [
           {
-            id: sessionId,
+            id: detail.id,
             userId: user.id,
             sessionName: detail.sessionName || 'Live Talk',
             createdAt: now,
@@ -1058,65 +1045,12 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     }
   }, [onLogout]);
 
-  // When Live Talk finishes, the conversation has already been persisted by
-  // LiveTalkModal. Make that saved session the active chat and load its real
-  // database history into the main chat area.
-  const handleLiveSessionComplete = useCallback(async (rawSessionId: number) => {
-    const sessionId = Number(rawSessionId);
-    if (!Number.isFinite(sessionId)) return;
-
-    // Live Talk creates/persists its own database session. Make that session
-    // the React source of truth BEFORE loading its messages. Do not use the
-    // normal "skip message load" path here: Live Talk needs the database
-    // history loaded into the main chat immediately after the modal closes.
-    const now = new Date().toISOString();
-
-    setSessions(prev => {
-      const existing = prev.find(session => Number(session.id) === sessionId);
-
-      if (existing) {
-        return [
-          { ...existing, id: sessionId, updatedAt: now },
-          ...prev.filter(session => Number(session.id) !== sessionId),
-        ];
-      }
-
-      return [
-        {
-          id: sessionId,
-          userId: user.id,
-          sessionName: 'Live Talk',
-          createdAt: now,
-          updatedAt: now,
-        },
-        ...prev,
-      ];
-    });
-
-    // The normal currentSessionId effect will see this ID as well. Mark it
-    // as a one-time skip so that Live Talk has exactly one authoritative
-    // history request instead of two competing requests.
-    skipMessageLoadRef.current = sessionId;
-
-    setCurrentSessionId(sessionId);
-    persistSessionId(sessionId);
-
-    // Fetch the authoritative database history immediately. The normal
-    // currentSessionId effect skips this exact ID once, so there is only one
-    // history request and no competing state update.
-    try {
-      await loadMessages(sessionId);
-    } catch (error) {
-      console.error('Failed to load completed Live Talk:', error);
-    }
-  }, [loadMessages, user.id]);
-
   useEffect(() => { loadSessions(); }, [loadSessions]);
 
   useEffect(() => {
     if (loading) return;
     if (currentSessionId !== null) {
-      const stillExists = sessions.some(s => Number(s.id) === Number(currentSessionId));
+      const stillExists = sessions.some(s => s.id === currentSessionId);
       if (!stillExists) {
         setCurrentSessionId(null);
         persistSessionId(null);
@@ -1774,23 +1708,25 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   };
 
   const confirmDeleteSession = async () => {
-    const id = sessionIdToDelete;
-    if (id == null) return;
+    if (sessionIdToDelete === null) return;
+
+    const deletedSessionId = sessionIdToDelete;
 
     try {
-      await chatApi.deleteSession(id);
+      await chatApi.deleteSession(deletedSessionId);
 
-      // Update the React source of truth immediately after the server
-      // confirms deletion. Sidebar receives this same array, so both
-      // desktop and mobile lists update without a browser refresh.
-      setSessions(prev =>
-        prev.filter(session => Number(session.id) !== Number(id))
-      );
+      // Update React state immediately after the server confirms deletion.
+      // This keeps the sidebar in sync without requiring a browser refresh.
+      setSessions(prev => prev.filter(session => session.id !== deletedSessionId));
 
-      if (Number(currentSessionId) === Number(id)) {
+      if (currentSessionId === deletedSessionId) {
         setCurrentSessionId(null);
         persistSessionId(null);
         setMessages([]);
+        setEditingMessage(null);
+        setTypingSessionTitle(current =>
+          current?.id === deletedSessionId ? null : current
+        );
       }
     } catch (err) {
       console.error('Delete session failed:', err);
@@ -1826,11 +1762,15 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     try {
       await chatApi.clearSessions();
 
-      // Keep the client state in sync with the database immediately.
+      // Clear the local session collection as soon as the backend confirms
+      // the operation so the sidebar updates immediately.
       setSessions([]);
+      setTypingSessionTitle(null);
+      setSessionIdToDelete(null);
       setCurrentSessionId(null);
       persistSessionId(null);
       setMessages([]);
+      setEditingMessage(null);
     } catch (err) {
       console.error('Clear sessions failed:', err);
     } finally {
@@ -1966,7 +1906,66 @@ const cleanMessageContent = (content: unknown): string => {
   };
 
 
-  if (loading) {
+  /**
+   * Called by LiveTalkModal only after its final turn has been persisted.
+   * Make that saved Live Talk session the active chat immediately so the
+   * normal chat area displays the complete transcript without a refresh.
+   */
+  const handleLiveSessionComplete = useCallback((rawSessionId: number) => {
+    const sessionId = Number(rawSessionId);
+    if (!Number.isFinite(sessionId)) return;
+
+    // LiveTalkModal calls this only after its final turn has been written to
+    // the backend. Put the saved session into the parent state FIRST, then
+    // make it active. This prevents the session-validation effect from
+    // clearing the active session before it has been inserted.
+    const now = new Date().toISOString();
+
+    setSessions(prev => {
+      const existing = prev.find(session => Number(session.id) === sessionId);
+
+      if (existing) {
+        return [
+          {
+            ...existing,
+            id: sessionId,
+            sessionName: existing.sessionName || 'Live Talk',
+            updatedAt: now,
+          },
+          ...prev.filter(session => Number(session.id) !== sessionId),
+        ];
+      }
+
+      return [
+        {
+          id: sessionId,
+          userId: user.id,
+          sessionName: 'Live Talk',
+          createdAt: now,
+          updatedAt: now,
+        },
+        ...prev,
+      ];
+    });
+
+    // Do not mark the Live Talk session as a normal newly-created chat.
+    // We explicitly load the persisted database history below.
+    skipMessageLoadRef.current = sessionId;
+    setCurrentSessionId(sessionId);
+    persistSessionId(sessionId);
+    setMessages([]);
+    setMessageAttachments({});
+    setEditingMessage(null);
+
+    // Load the actual persisted Live Talk transcript immediately. The
+    // currentSessionId effect sees skipMessageLoadRef and therefore does not
+    // issue a second request.
+    void loadMessages(sessionId).finally(() => {
+      if (skipMessageLoadRef.current === sessionId) {
+        skipMessageLoadRef.current = null;
+      }
+    });
+  }, [user.id, loadMessages]);
     return (
       <div className="flex items-center justify-center h-screen font-sans text-zinc-400 bg-white dark:bg-zinc-950 transition-colors duration-300">
         <motion.div
@@ -2600,8 +2599,8 @@ const cleanMessageContent = (content: unknown): string => {
                   <motion.span
                     className="relative z-10 flex items-center justify-center"
                     animate={isProcessingFiles ? { rotate: 90 } : { rotate: 0 }}
-                    whileHover={{ scale: 1.12 }}
-                    whileTap={{ scale: 0.9 }}
+                    whileHover={{ scale: 1.12, rotate: 180 }}
+                    whileTap={{ scale: 0.9, rotate: 180 }}
                     transition={{
                       type: 'spring',
                       stiffness: 500,
@@ -2842,6 +2841,7 @@ const cleanMessageContent = (content: unknown): string => {
 
       <LiveTalkModal
         open={liveTalkOpen}
+        userName={user.username || user.name}
         onClose={() => setLiveTalkOpen(false)}
         onSessionComplete={handleLiveSessionComplete}
       />
