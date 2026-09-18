@@ -43,7 +43,7 @@ public class OAuthService {
     private final RestTemplate restTemplate;
     private final UserRepository userRepository;
 
-    @Value("${app.frontend-url:http://localhost:5173}")
+    @Value("${app.frontend-url:https://twinkleai.vercel.app}")
     private String frontendUrl;
 
     // ========================================================================
@@ -56,7 +56,7 @@ public class OAuthService {
     @Value("${oauth.google.client-secret:}")
     private String googleClientSecret;
 
-    @Value("${oauth.google.redirect-uri:http://localhost:8080/api/auth/oauth/google/callback}")
+    @Value("${oauth.google.redirect-uri:https://twinkle-ai-ype3.onrender.com/api/auth/oauth/google/callback}")
     private String googleRedirectUri;
 
     // ========================================================================
