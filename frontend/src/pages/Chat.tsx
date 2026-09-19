@@ -2689,32 +2689,28 @@ const cleanMessageContent = (content: unknown): string => {
                     aria-label="Listening for voice input"
                   >
                     <span className="sr-only">Listening...</span>
-                    <div className="flex min-w-0 flex-1 items-center gap-[3px] overflow-hidden" aria-hidden="true">
-                      {Array.from({ length: 44 }, (_, index) => (
-                        <span
-                          key={index}
-                          className="h-1 w-1 shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600"
-                        />
-                      ))}
-                      <div className="ml-1 flex h-10 min-w-0 flex-1 items-center justify-center gap-[3px] overflow-hidden">
-                        {Array.from({ length: 30 }, (_, index) => {
-                          const heights = [10, 16, 25, 14, 34, 20, 40, 27, 48, 32, 56, 38, 50, 30, 44, 58, 36, 52, 28, 46, 34, 54, 24, 42, 30, 50, 22, 38, 18, 12];
-                          return (
-                            <motion.span
-                              key={index}
-                              className="w-[3px] shrink-0 rounded-full bg-zinc-500 dark:bg-zinc-400"
-                              animate={{ height: [Math.max(6, heights[index] * 0.55), heights[index], Math.max(6, heights[index] * 0.7)] }}
-                              transition={{ duration: 0.8 + (index % 5) * 0.08, repeat: Infinity, repeatType: 'mirror', ease: 'easeInOut', delay: index * 0.025 }}
-                            />
-                          );
-                        })}
-                      </div>
-                      {Array.from({ length: 6 }, (_, index) => (
-                        <span
-                          key={`tail-${index}`}
-                          className="h-1 w-1 shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600"
-                        />
-                      ))}
+                    <div className="flex h-10 min-w-0 flex-1 items-center gap-[3px] overflow-hidden" aria-hidden="true">
+                      {Array.from({ length: 42 }, (_, index) => {
+                        const heights = [8, 14, 22, 12, 30, 18, 38, 26, 48, 34, 56, 42, 30, 52, 40, 58, 34, 46, 28, 54, 36, 50, 24, 44, 32, 56, 40, 28, 48, 34, 52, 22, 42, 30, 50, 36, 46, 26, 38, 18, 28, 12];
+                        const height = heights[index];
+                        return (
+                          <motion.span
+                            key={index}
+                            className="w-[2.5px] shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500"
+                            animate={{
+                              height: [Math.max(4, height * 0.35), height, Math.max(5, height * 0.5)],
+                              opacity: [0.55, 1, 0.7],
+                            }}
+                            transition={{
+                              duration: 0.65 + (index % 6) * 0.07,
+                              repeat: Infinity,
+                              repeatType: 'mirror',
+                              ease: 'easeInOut',
+                              delay: index * 0.025,
+                            }}
+                          />
+                        );
+                      })}
                     </div>
 
                     <div className="ml-auto flex shrink-0 items-center gap-1">
