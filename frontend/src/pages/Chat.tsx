@@ -2072,6 +2072,8 @@ const cleanMessageContent = (content: unknown): string => {
     setMessages([]);
     setEditingMessage(null);
   }, [user.id]);
+
+  if (loading) {
     return (
       <div className="flex items-center justify-center h-screen font-sans text-zinc-400 bg-white dark:bg-zinc-950 transition-colors duration-300">
         <motion.div
