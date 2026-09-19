@@ -20,6 +20,115 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
+const PDFJS_MODULE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs';
+const PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
+
+const PdfPreview = ({
+  src,
+  fileName,
+}: {
+  src: string;
+  fileName: string;
+}) => {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+
+  useEffect(() => {
+    let cancelled = false;
+    let pdfDocument: any = null;
+
+    const renderPdf = async () => {
+      setStatus('loading');
+      try {
+        const pdfjs: any = await import(/* @vite-ignore */ PDFJS_MODULE_URL);
+        if (cancelled) return;
+        pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+
+        const loadingTask = pdfjs.getDocument({
+          url: src,
+          useWorkerFetch: true,
+          isEvalSupported: true,
+          disableAutoFetch: true,
+          disableStream: true,
+        });
+        pdfDocument = await loadingTask.promise;
+        if (cancelled || !hostRef.current) {
+          await pdfDocument?.destroy?.();
+          return;
+        }
+
+        const host = hostRef.current;
+        host.replaceChildren();
+        const isMobile = window.matchMedia('(max-width: 767px)').matches;
+        const pageCount = Math.min(Number(pdfDocument.numPages) || 1, isMobile ? 12 : 30);
+
+        for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+          if (cancelled || !hostRef.current) break;
+          const page = await pdfDocument.getPage(pageNumber);
+          const baseViewport = page.getViewport({ scale: 1 });
+          const availableWidth = Math.max(host.clientWidth - (isMobile ? 12 : 24), 180);
+          const maxScale = isMobile ? 1.15 : 1.65;
+          const scale = Math.min(availableWidth / baseViewport.width, maxScale);
+          const viewport = page.getViewport({ scale });
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d', { alpha: false });
+          if (!context) continue;
+
+          const outputScale = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2);
+          canvas.width = Math.ceil(viewport.width * outputScale);
+          canvas.height = Math.ceil(viewport.height * outputScale);
+          canvas.style.width = `${viewport.width}px`;
+          canvas.style.height = `${viewport.height}px`;
+          canvas.className = 'mx-auto mb-4 block max-w-full rounded-lg bg-white shadow-sm';
+
+          const label = document.createElement('div');
+          label.textContent = `Page ${pageNumber}`;
+          label.className = 'mb-1 text-center text-[10px] font-bold uppercase tracking-wider text-zinc-400';
+          host.appendChild(label);
+          host.appendChild(canvas);
+
+          context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+          await page.render({ canvasContext: context, viewport }).promise;
+        }
+
+        if (!cancelled) setStatus('ready');
+      } catch (error) {
+        console.error('PDF preview rendering failed:', error);
+        if (!cancelled) setStatus('error');
+      }
+    };
+
+    void renderPdf();
+    return () => {
+      cancelled = true;
+      try { void pdfDocument?.destroy?.(); } catch {}
+    };
+  }, [src]);
+
+  return (
+    <div className="relative min-h-full w-full">
+      {status === 'loading' && (
+        <div className="flex min-h-[50vh] items-center justify-center">
+          <div className="rounded-2xl bg-white px-5 py-4 text-center shadow-sm dark:bg-zinc-900">
+            <FileText className="mx-auto mb-2 h-8 w-8 text-zinc-400" />
+            <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">Loading PDF preview…</p>
+          </div>
+        </div>
+      )}
+      {status === 'error' && (
+        <div className="flex min-h-[50vh] items-center justify-center">
+          <div className="max-w-md rounded-2xl bg-white p-6 text-center shadow-sm dark:bg-zinc-900">
+            <FileText className="mx-auto mb-3 h-10 w-10 text-zinc-400" />
+            <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">PDF preview is unavailable</p>
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">The file is still attached and ready for AI analysis.</p>
+          </div>
+        </div>
+      )}
+      <div ref={hostRef} className={status === 'ready' ? 'w-full' : 'hidden'} aria-label={`PDF preview for ${fileName}`} />
+    </div>
+  );
+};
+
 interface Props {
   user: User;
   onLogout: () => void;
@@ -925,34 +1034,11 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   }, []);
 
   const chooseModel = useCallback((modelId: string) => {
-    if (!MODEL_OPTIONS.some(option => option.id === modelId)) return;
-
-    setSelectedModel(previousModel => {
-      if (modelId !== previousModel) playModelSwitchSound();
-
-      try {
-        localStorage.setItem(MODEL_STORAGE_KEY, modelId);
-      } catch {}
-
-      return modelId;
-    });
-
+    if (modelId !== selectedModel) playModelSwitchSound();
+    setSelectedModel(modelId);
     setModelPickerOpen(false);
-  }, []);
-
-  // Keep the selected model synchronized with localStorage so the same
-  // model remains selected after a refresh or a Chat component remount.
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(MODEL_STORAGE_KEY);
-
-      if (stored && MODEL_OPTIONS.some(option => option.id === stored)) {
-        setSelectedModel(previousModel =>
-          previousModel === stored ? previousModel : stored
-        );
-      }
-    } catch {}
-  }, []);
+    try { localStorage.setItem(MODEL_STORAGE_KEY, modelId); } catch {}
+  }, [selectedModel]);
 
   const activeModel = MODEL_OPTIONS.find(m => m.id === selectedModel) || MODEL_OPTIONS[0];
 
@@ -963,10 +1049,12 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const abortControllerRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  
+  // Stores the specific session ID that should skip one message load
+  // (the newly created session after first send), so switching to any
+  // OTHER existing session always loads its messages correctly.
   const skipMessageLoadRef = useRef<number | null>(null);
 
-  
+  // Auto-resize textarea
   useEffect(() => {
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
@@ -974,7 +1062,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     }
   }, [input]);
 
-  
+  // Clean up object URLs
   const filePreviewsRef = useRef(filePreviews);
   useEffect(() => { filePreviewsRef.current = filePreviews; }, [filePreviews]);
   useEffect(() => {
@@ -985,8 +1073,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     };
   }, []);
 
-
-  
+  // Load sessions & messages
   const loadSessions = useCallback(async () => {
     try {
       const response = await chatApi.getSessions() as any;
@@ -999,7 +1086,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     }
   }, [onLogout]);
 
-  
+  // Live Talk persists turns in the background. Update the same sidebar state
+  // immediately instead of forcing another GET /chat/sessions request.
   useEffect(() => {
     const handleLiveSessionUpdate = (event: Event) => {
       const detail = (event as CustomEvent<{ id: number; sessionName?: string }>).detail;
@@ -1340,9 +1428,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       );
     } finally {
       setIsProcessingFiles(false);
-
-      // After any file is selected, return the caret to the chat composer
-      // so the user can immediately type a message.
       window.setTimeout(() => {
         inputRef.current?.focus();
       }, 0);
@@ -1467,6 +1552,27 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         });
       }
 
+      // Update the sidebar immediately. Do not wait for the title-generation
+      // endpoint: file-only chats used to stay as "New Chat" until refresh.
+      if (isNewSession && activeSessionId) {
+        const fileNames = (filesToSend || []).map(file => file.name.trim()).filter(Boolean);
+        const immediateTitle = messageText.trim()
+          ? generateProfessionalChatTitle(messageText, Boolean(filesToSend?.length))
+          : fileNames.length === 1
+            ? fileNames[0].replace(/\.[^.]+$/, '').slice(0, 60)
+            : fileNames.length > 1
+              ? `${fileNames[0].replace(/\.[^.]+$/, '').slice(0, 45)} + ${fileNames.length - 1} file${fileNames.length - 1 === 1 ? '' : 's'}`
+              : 'File Analysis';
+
+        setSessions(prev =>
+          prev.map(session =>
+            session.id === activeSessionId
+              ? { ...session, sessionName: immediateTitle, updatedAt: new Date().toISOString() }
+              : session
+          )
+        );
+      }
+
       setIsTyping(false);
 
       const aiContent =
@@ -1494,9 +1600,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       // Generate and persist a professional AI-generated chat title.
       if ((isNewSession || regenerateTitle) && activeSessionId) {
         try {
-          const titleResponse: any = await chatApi.generateTitle(
-            finalMessage || 'File analysis'
-          );
+          const titleInput = finalMessage ||
+            (filesToSend || []).map(file => file.name).filter(Boolean).join(', ') ||
+            'File analysis';
+          const titleResponse: any = await chatApi.generateTitle(titleInput);
 
           const newTitle =
             typeof titleResponse?.title === 'string' && titleResponse.title.trim()
@@ -1834,33 +1941,10 @@ You can ask me questions, give me a file or image to analyze, ask for help with 
   return content;
 };
 
-const stripHtmlTagsOutsideCode = (value: string): string => {
-  // AI responses can occasionally contain literal HTML such as <br>, <p>,
-  // or <div>. Convert those tags to plain text/line breaks before Markdown
-  // rendering, while leaving fenced code blocks completely untouched.
-  const parts = value.split(/(```[\s\S]*?```)/g);
-  return parts
-    .map((part, index) => {
-      if (index % 2 === 1) return part;
-
-      return part
-        .replace(/&lt;br\s*\/?&gt;/gi, '\n')
-        .replace(/<br\s*\/?>(?=\s*)/gi, '\n')
-        .replace(/&lt;\/?(?:p|div|section|article|ul|ol|li|h[1-6]|strong|em|b|i|span)[^&]*?&gt;/gi, '\n')
-        .replace(/<\/?(?:p|div|section|article|ul|ol|li|h[1-6]|strong|em|b|i|span)[^>]*>/gi, '\n')
-        .replace(/<\/?[a-z][^>]*>/gi, '')
-        .replace(/&lt;\/?[a-z][^&]*?&gt;/gi, '');
-    })
-    .join('')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-};
-
 const cleanMessageContent = (content: unknown): string => {
     if (typeof content !== 'string') return '';
 
-    let cleaned = stripHtmlTagsOutsideCode(normalizeTwinkleIdentity(content));
-    cleaned = cleaned
+    let cleaned = normalizeTwinkleIdentity(content)
       // NEVER strip Markdown links here. Keeping the original [label](url)
       // structure lets ReactMarkdown preserve clickability while the
       // renderer below displays the complete URL as the visible text.
@@ -1988,8 +2072,6 @@ const cleanMessageContent = (content: unknown): string => {
     setMessages([]);
     setEditingMessage(null);
   }, [user.id]);
-
-  if (loading) {
     return (
       <div className="flex items-center justify-center h-screen font-sans text-zinc-400 bg-white dark:bg-zinc-950 transition-colors duration-300">
         <motion.div
@@ -2201,7 +2283,7 @@ const cleanMessageContent = (content: unknown): string => {
                                 : 'w-full rounded-2xl border border-zinc-200/80 dark:border-zinc-700/80 bg-white/70 dark:bg-zinc-900/40 px-4 py-3.5 md:px-5 md:py-4 shadow-sm text-zinc-900 dark:text-zinc-100'
                             }`}
                           >
-                            <div className="text-sm md:text-base leading-relaxed markdown-body max-w-none min-w-0 w-full break-words [overflow-wrap:anywhere] [&_*]:max-w-full [&_img]:h-auto [&_img]:max-w-full [&_table]:block [&_table]:w-full [&_table]:max-w-full [&_table]:overflow-x-auto [&_td]:break-words [&_th]:break-words">
+                            <div className="text-sm md:text-base leading-relaxed markdown-body max-w-none min-w-0 w-full break-words [overflow-wrap:anywhere]">
                               {isEditing ? (
                                 <div className="flex flex-col gap-3 w-full min-w-0 p-1">
                                   <textarea
@@ -2557,10 +2639,10 @@ const cleanMessageContent = (content: unknown): string => {
                             <div className="w-20 h-16 rounded-xl overflow-hidden bg-zinc-200 dark:bg-zinc-700 shadow-sm border border-zinc-200/60 cursor-pointer">
                               <img src={fp.preview} alt={fp.file.name} className="w-full h-full object-cover transition-transform group-hover/preview:scale-105" />
                             </div>
-                          ) : fp.file.type === 'application/pdf' && fp.preview ? (
-                            <div className="relative w-20 h-16 rounded-xl overflow-hidden bg-white dark:bg-zinc-800 shadow-sm border border-zinc-200 dark:border-zinc-700 cursor-pointer">
-                              <iframe src={`${fp.preview}#page=1&view=FitH`} title={`Preview ${fp.file.name}`} className="pointer-events-none absolute inset-0 h-[288px] w-[360px] origin-top-left scale-[0.222] bg-white" />
-                              <div className="absolute inset-0 bg-transparent group-hover/preview:bg-zinc-1000/5 transition-colors" />
+                          ) : fp.file.type === 'application/pdf' ? (
+                            <div className="flex h-16 w-20 flex-col items-center justify-center gap-1 rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-800 cursor-pointer hover:border-zinc-400 dark:hover:border-zinc-500">
+                              <FileText className="h-6 w-6 text-zinc-800 dark:text-zinc-100" />
+                              <span className="text-[8px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400">PDF</span>
                             </div>
                           ) : (
                             <div className="w-20 h-16 rounded-xl flex flex-col items-center justify-center gap-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 cursor-pointer hover:border-zinc-500 dark:hover:border-zinc-500/50 transition-colors">
@@ -2582,7 +2664,7 @@ const cleanMessageContent = (content: unknown): string => {
 
               <div
                 ref={modelPickerRef}
-                className="twinkle-composer-row relative z-[200] flex min-w-0 flex-col"
+                className="twinkle-composer-row relative z-[200] flex min-w-0 items-center gap-1.5 px-2.5 py-2 sm:gap-2 sm:px-3 sm:py-2.5 md:px-4"
               >
                 {/* Hidden file input */}
                 <input
@@ -2597,79 +2679,108 @@ const cleanMessageContent = (content: unknown): string => {
                   }}
                 />
 
-                {/* Main prompt area — always above the action row */}
+                {/* + attachment button */}
+                <motion.button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isTyping || isProcessingFiles}
+                  aria-label="Attach files"
+                  title="Attach files"
+                  whileHover={{ scale: 1.04, y: -1 }}
+                  whileTap={{ scale: 0.94, y: 0 }}
+                  transition={{
+                    type: 'spring',
+                    stiffness: 420,
+                    damping: 24,
+                    mass: 0.6,
+                  }}
+                  className="group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                >
+                  <motion.span
+                    className="pointer-events-none absolute inset-0 rounded-2xl bg-zinc-1000/0 blur-md"
+                    whileHover={{ scale: 1.15, opacity: 0.18 }}
+                    transition={{ duration: 0.25, ease: 'easeOut' }}
+                  />
+
+                  <motion.span
+                    className="relative z-10 flex items-center justify-center"
+                    animate={isProcessingFiles ? { rotate: 90 } : { rotate: 0 }}
+                    whileHover={{ scale: 1.12, rotate: 180 }}
+                    whileTap={{ scale: 0.9, rotate: 180 }}
+                    transition={{
+                      type: 'spring',
+                      stiffness: 500,
+                      damping: 22,
+                    }}
+                  >
+                    {isProcessingFiles ? (
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
+                    ) : (
+                      <Plus className="h-[22px] w-[22px] stroke-[2.25]" />
+                    )}
+                  </motion.span>
+                </motion.button>
+
+                {/* Composer text / speech-to-text mode */}
                 {voiceInputActive ? (
                   <div
-                    className="relative flex min-h-[58px] w-full min-w-0 items-center gap-3 px-4 pt-3 pb-1 sm:min-h-[64px] sm:px-4 sm:pt-3"
+                    className="relative flex min-w-0 flex-1 items-center gap-2 px-1 sm:gap-3"
                     aria-live="polite"
-                    aria-label="Listening for voice input"
+                    aria-label="Listening for speech"
                   >
-                    <div className="flex min-w-0 flex-1 items-center gap-3">
-                      <div className="relative flex h-9 w-9 shrink-0 items-center justify-center">
-                        <motion.span
-                          aria-hidden="true"
-                          className="absolute inset-0 rounded-full bg-[#ec6aa8]/20"
-                          animate={{ scale: [1, 1.35, 1], opacity: [0.55, 0, 0.55] }}
-                          transition={{ duration: 1.5, repeat: Infinity, ease: 'easeOut' }}
-                        />
-                        <motion.span
-                          aria-hidden="true"
-                          className="relative flex h-8 w-8 items-center justify-center rounded-full bg-[#ec6aa8] text-white shadow-sm"
-                          animate={{ scale: [1, 1.04, 1] }}
-                          transition={{ duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
-                        >
-                          <Mic className="h-[17px] w-[17px]" strokeWidth={2.1} />
-                        </motion.span>
+                    <span className="shrink-0 text-[13px] font-medium text-zinc-400 sm:text-sm">
+                      Listening...
+                    </span>
+
+                    <div className="relative flex h-8 min-w-0 flex-1 items-center overflow-hidden">
+                      <div className="absolute inset-y-1 left-0 right-0 flex items-center gap-[4px] opacity-75">
+                        {Array.from({ length: 54 }, (_, index) => {
+                          const hasSpeech = voiceDraftVersion > 0;
+                          const height = hasSpeech
+                            ? 5 + ((index * 17) % 18)
+                            : 3 + ((index * 7) % 5);
+                          return (
+                            <motion.span
+                              key={index}
+                              className="w-[3px] shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600"
+                              animate={hasSpeech
+                                ? { scaleY: [0.55, 1.35, 0.7, 1.05, 0.55] }
+                                : { scaleY: [0.7, 1, 0.7] }}
+                              transition={{
+                                duration: 0.9 + (index % 5) * 0.08,
+                                repeat: Infinity,
+                                delay: index * 0.018,
+                                ease: 'easeInOut',
+                              }}
+                              style={{ height: `${height}px`, transformOrigin: 'center' }}
+                            />
+                          );
+                        })}
                       </div>
-
-                      <span className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
-                        Listening
-                      </span>
-
-                      <span className="flex items-center gap-1" aria-hidden="true">
-                        {[0, 1, 2].map(index => (
-                          <motion.span
-                            key={index}
-                            className="h-1.5 w-1.5 rounded-full bg-zinc-400 dark:bg-zinc-500"
-                            animate={{ opacity: [0.3, 1, 0.3], y: [0, -2, 0] }}
-                            transition={{
-                              duration: 0.9,
-                              repeat: Infinity,
-                              ease: 'easeInOut',
-                              delay: index * 0.15,
-                            }}
-                          />
-                        ))}
-                      </span>
                     </div>
 
-                    <div className="ml-auto flex shrink-0 items-center gap-1">
-                      <motion.button
-                        type="button"
-                        onClick={cancelVoiceInput}
-                        aria-label="Reject voice text"
-                        title="Reject"
-                        whileHover={{ scale: 1.06 }}
-                        whileTap={{ scale: 0.9 }}
-                        className="flex h-10 w-10 items-center justify-center rounded-full text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white sm:h-11 sm:w-11"
-                      >
-                        <X className="h-[20px] w-[20px]" strokeWidth={2.1} />
-                      </motion.button>
-                      <motion.button
-                        type="button"
-                        onClick={commitVoiceInput}
-                        aria-label="Accept voice text"
-                        title="Accept"
-                        whileHover={{ scale: 1.06 }}
-                        whileTap={{ scale: 0.9 }}
-                        className="flex h-10 w-10 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-11"
-                      >
-                        <Check className="h-[21px] w-[21px]" strokeWidth={2.2} />
-                      </motion.button>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={cancelVoiceInput}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-800 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                      aria-label="Discard voice input"
+                      title="Discard"
+                    >
+                      <X className="h-5 w-5" strokeWidth={2.1} />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={commitVoiceInput}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                      aria-label="Use voice input"
+                      title="Use voice input"
+                    >
+                      <Check className="h-5 w-5" strokeWidth={2.1} />
+                    </button>
                   </div>
                 ) : (
-                  <div className="relative w-full min-w-0 px-4 pt-3 pb-1 sm:px-4 sm:pt-3">
+                  <div className="relative min-w-0 flex-1 flex items-center">
                     <textarea
                       ref={inputRef}
                       value={input}
@@ -2682,7 +2793,7 @@ const cleanMessageContent = (content: unknown): string => {
                       }}
                       placeholder="Ask Anything"
                       rows={1}
-                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent p-0 text-[17px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:text-[18px] sm:min-h-[46px]"
+                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent px-1 py-2 text-[15px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:min-h-[46px] sm:py-2.5"
                       onInput={(e) => {
                         const t = e.target as HTMLTextAreaElement;
                         t.style.height = 'auto';
@@ -2692,126 +2803,106 @@ const cleanMessageContent = (content: unknown): string => {
                   </div>
                 )}
 
-                {/* Bottom action row: plus → model → mic → send/live talk */}
-                <div className="flex w-full min-w-0 items-center gap-1 px-2.5 pb-2.5 pt-1.5 sm:gap-2 sm:px-3 sm:pb-3 sm:pt-1.5 md:px-4">
-                  {/* + attachment button */}
+                {/* Think / model selector */}
+                <div className="relative shrink-0">
                   <motion.button
                     type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isTyping || isProcessingFiles}
-                    aria-label="Attach files"
-                    title="Attach files"
-                    whileHover={{ scale: 1.04 }}
-                    whileTap={{ scale: 0.94 }}
-                    className="group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                    onClick={() => setModelPickerOpen(prev => !prev)}
+                    disabled={isTyping}
+                    aria-haspopup="listbox"
+                    aria-expanded={modelPickerOpen}
+                    whileHover={{ y: -1 }}
+                    whileTap={{ scale: 0.97 }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                    className="group relative inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border-0 bg-transparent px-2 text-black shadow-none outline-none transition-colors hover:bg-zinc-100/70 dark:bg-transparent dark:text-white dark:hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50 sm:px-2.5"
                   >
-                    {isProcessingFiles ? (
-                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
-                    ) : (
-                      <Plus className="h-[22px] w-[22px] stroke-[2.25]" />
-                    )}
+                    <span className="max-w-[190px] truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:text-sm">
+                      {activeModel.name}
+                    </span>
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
+                  
                   </motion.button>
 
-                  <div className="min-w-0 flex-1" />
-
-                  {/* Model selector */}
-                  <div className="relative shrink-0">
-                    <motion.button
-                      type="button"
-                      onClick={() => setModelPickerOpen(prev => !prev)}
-                      disabled={isTyping}
-                      aria-haspopup="listbox"
-                      aria-expanded={modelPickerOpen}
-                      whileHover={{ y: -1 }}
-                      whileTap={{ scale: 0.97 }}
-                      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                      className="group relative inline-flex h-10 shrink-0 items-center gap-1 rounded-lg border-0 bg-transparent px-1.5 text-black shadow-none outline-none transition-colors hover:bg-zinc-100/70 dark:bg-transparent dark:text-white dark:hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50 sm:gap-1.5 sm:px-2"
-                    >
-                      <span className="max-w-[135px] truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:max-w-[190px] sm:text-sm">
-                        {MODEL_OPTIONS.find(model => model.id === selectedModel)?.name || MODEL_OPTIONS[0].name}
-                      </span>
-                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
-                    </motion.button>
-
-                    <AnimatePresence>
-                      {modelPickerOpen && (
-                        <motion.div
-                          initial={{ opacity: 0, y: 8, scale: 0.97 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, y: 8, scale: 0.97 }}
-                          transition={{ duration: 0.16, ease: 'easeOut' }}
-                          role="listbox"
-                          aria-label="Select AI model"
-                          className="fixed bottom-[calc(104px+env(safe-area-inset-bottom,0px))] left-2 z-[99999] w-[min(360px,calc(100vw-16px))] max-w-[calc(100vw-16px)] max-h-[min(360px,calc(100dvh-150px))] overflow-y-auto overflow-x-hidden rounded-xl border border-zinc-200/90 bg-white/95 p-1.5 shadow-2xl shadow-zinc-900/20 backdrop-blur-2xl dark:border-zinc-700/90 dark:bg-zinc-900/95 dark:shadow-black/50 sm:absolute sm:bottom-[calc(100%+8px)] sm:left-auto sm:right-0 sm:w-[360px] sm:max-w-[calc(100vw-24px)] sm:max-h-[420px] sm:overflow-hidden sm:rounded-2xl sm:p-2"
-                        >
-                          <div className="px-2 pb-2 pt-1">
-                            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400 dark:text-zinc-500">
-                              Select AI model
-                            </p>
-                          </div>
-                          <div className="space-y-1">
-                            {MODEL_OPTIONS.map(option => {
-                              const Icon = option.icon;
-                              const selected = option.id === selectedModel;
-                              return (
-                                <motion.button
-                                  key={option.id}
-                                  type="button"
-                                  role="option"
-                                  aria-selected={selected}
-                                  onPointerDown={(event) => {
-                                    event.stopPropagation();
-                                    chooseModel(option.id);
-                                  }}
-                                  onClick={(event) => event.preventDefault()}
-                                  whileHover={{ x: 2 }}
-                                  whileTap={{ scale: 0.985 }}
-                                  transition={{ type: 'spring', stiffness: 450, damping: 28 }}
-                                  className={`flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-all ${selected ? 'border-zinc-500 bg-zinc-100 shadow-sm dark:border-zinc-500 dark:bg-zinc-950/40' : 'border-transparent hover:border-zinc-200 hover:bg-zinc-50 dark:hover:border-zinc-700 dark:hover:bg-zinc-800/80'}`}
-                                >
-                                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${selected ? 'bg-black text-white shadow-md' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'}`}>
-                                    <Icon className="h-4 w-4" />
+                  <AnimatePresence>
+                    {modelPickerOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 8, scale: 0.97 }}
+                        transition={{ duration: 0.16, ease: 'easeOut' }}
+                        role="listbox"
+                        aria-label="Select AI model"
+                        className="fixed bottom-[calc(88px+env(safe-area-inset-bottom,0px))] right-2 z-[99999] w-[min(360px,calc(100vw-16px))] max-w-[calc(100vw-16px)] max-h-[min(360px,calc(100dvh-180px))] overflow-y-auto overflow-x-hidden rounded-xl border border-zinc-200/90 bg-white/95 p-1.5 shadow-2xl shadow-zinc-900/20 backdrop-blur-2xl dark:border-zinc-700/90 dark:bg-zinc-900/95 dark:shadow-black/50 sm:absolute sm:bottom-[calc(100%+8px)] sm:right-0 sm:w-[360px] sm:max-w-[calc(100vw-24px)] sm:max-h-[420px] sm:overflow-hidden sm:rounded-2xl sm:p-2"
+                      >
+                        <div className="px-2 pb-2 pt-1">
+                          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400 dark:text-zinc-500">
+                            Select AI model
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          {MODEL_OPTIONS.map(option => {
+                            const Icon = option.icon;
+                            const selected = option.id === selectedModel;
+                            return (
+                              <motion.button
+                                key={option.id}
+                                type="button"
+                                role="option"
+                                aria-selected={selected}
+                                onClick={() => chooseModel(option.id)}
+                                whileHover={{ x: 2 }}
+                                whileTap={{ scale: 0.985 }}
+                                transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+                                className={`flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-all ${selected ? 'border-zinc-500 bg-zinc-100 shadow-sm dark:border-zinc-500 dark:bg-zinc-950/40' : 'border-transparent hover:border-zinc-200 hover:bg-zinc-50 dark:hover:border-zinc-700 dark:hover:bg-zinc-800/80'}`}
+                              >
+                                <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${selected ? 'bg-black text-white shadow-md' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'}`}>
+                                  <Icon className="h-4 w-4" />
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="flex items-center gap-2">
+                                    <span className="truncate text-xs font-medium text-zinc-800 dark:text-zinc-100">{option.name}</span>
                                   </span>
-                                  <span className="min-w-0 flex-1">
-                                    <span className="flex items-center gap-2">
-                                      <span className="truncate text-xs font-medium text-zinc-800 dark:text-zinc-100">{option.name}</span>
-                                    </span>
-                                    <span className="mt-0.5 block truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
-                                      {option.description}{option.vision ? ' · Vision' : ''}
-                                    </span>
+                                  <span className="mt-0.5 block truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
+                                    {option.description}{option.vision ? ' · Vision' : ''}
                                   </span>
-                                  {selected && <Check className="h-4 w-4 shrink-0 text-zinc-600 dark:text-zinc-300" />}
-                                </motion.button>
-                              );
-                            })}
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
+                                </span>
+                                {selected && <Check className="h-4 w-4 shrink-0 text-zinc-600 dark:text-zinc-600 dark:text-zinc-300" />}
+                              </motion.button>
+                            );
+                          })}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
 
-                  {!voiceInputActive && (
-                    <motion.button
-                      type="button"
-                      onClick={startVoiceInput}
-                      disabled={isTyping || isProcessingFiles}
-                      aria-label="Voice input"
-                      title="Voice input"
-                      whileHover={{ scale: 1.06 }}
-                      whileTap={{ scale: 0.9 }}
-                      className="flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-9"
-                    >
-                      <Mic className="h-[20px] w-[20px]" strokeWidth={2} />
-                    </motion.button>
-                  )}
+                {!voiceInputActive && (
+                  <motion.button
+                    type="button"
+                    onClick={startVoiceInput}
+                    disabled={isTyping || isProcessingFiles}
+                    aria-label="Voice input"
+                    title="Voice input"
+                    whileHover={{ scale: 1.06 }}
+                    whileTap={{ scale: 0.9 }}
+                    className="flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-9"
+                  >
+                    <Mic className="h-[20px] w-[20px]" strokeWidth={2} />
+                  </motion.button>
+                )}
 
-                  {/* Live Talk / Send */}
+                {/* Live Talk / Send occupy the same action slot, like ChatGPT. */}
+                <AnimatePresence mode="wait" initial={false}>
                   {!isTyping && !input.trim() && filePreviews.length === 0 ? (
                     <motion.button
+                      key="live-talk"
                       type="button"
                       onClick={() => setLiveTalkOpen(true)}
                       aria-label="Open Live Talk"
                       title="Live Talk"
+                      initial={{ opacity: 0, scale: 0.88, y: 2 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.88, y: 2 }}
                       whileHover={{ scale: 1.06 }}
                       whileTap={{ scale: 0.92 }}
                       className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#ec6aa8] text-white shadow-[0_8px_20px_rgba(236,106,168,.22)] transition hover:bg-[#e85f9f] sm:h-11 sm:w-11"
@@ -2820,13 +2911,18 @@ const cleanMessageContent = (content: unknown): string => {
                     </motion.button>
                   ) : (
                     <motion.button
+                      key="send"
                       type="button"
                       onClick={isTyping ? handleStopResponse : () => handleSendMessage()}
                       disabled={!input.trim() && (!Array.isArray(filePreviews) || filePreviews.length === 0) && !isTyping}
                       aria-label={isTyping ? 'Stop response' : 'Send message'}
                       title={isTyping ? 'Stop response' : 'Send message'}
+                      initial={{ opacity: 0, scale: 0.88, y: 2 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.88, y: 2 }}
                       whileHover={{ scale: isTyping || input.trim() || filePreviews.length ? 1.06 : 1, y: -1 }}
                       whileTap={{ scale: 0.92 }}
+                      transition={{ type: 'spring', stiffness: 450, damping: 25 }}
                       className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isTyping ? 'border-[#ec6aa8] bg-[#ec6aa8] text-white shadow-[#ec6aa8]/20' : 'border-zinc-300 bg-white hover:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-800 dark:hover:border-zinc-500'}`}
                     >
                       {isTyping ? (
@@ -2838,7 +2934,7 @@ const cleanMessageContent = (content: unknown): string => {
                       )}
                     </motion.button>
                   )}
-                </div>
+                </AnimatePresence>
               </div>
 
             </div>
@@ -2887,7 +2983,7 @@ const cleanMessageContent = (content: unknown): string => {
                 {previewFile.type.startsWith('image/') ? (
                   <div className="flex min-h-full items-center justify-center"><img src={previewUrl} alt={previewFile.name} className="max-h-full max-w-full rounded-xl object-contain shadow-lg" /></div>
                 ) : previewFile.type === 'application/pdf' ? (
-                  <iframe src={`${previewUrl}#toolbar=1&navpanes=0&view=FitH`} title={`PDF preview: ${previewFile.name}`} className="h-full min-h-[70vh] w-full rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800" />
+                  <PdfPreview src={previewUrl} fileName={previewFile.name} />
                 ) : previewText !== null ? (
                   <pre className="mx-auto min-h-full max-w-4xl whitespace-pre-wrap break-words rounded-xl bg-white p-5 font-mono text-xs leading-relaxed text-zinc-800 shadow-sm dark:bg-zinc-900 dark:text-zinc-200">{previewText}</pre>
                 ) : (
