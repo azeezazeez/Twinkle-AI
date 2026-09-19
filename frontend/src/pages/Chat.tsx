@@ -916,6 +916,50 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       };
       voiceMeterFrameRef.current = requestAnimationFrame(updateVoiceMeter);
 
+      // Start the microphone audio pipeline immediately after getUserMedia().
+      // Do not wait for the token or WebSocket connection. Audio is buffered
+      // until the socket becomes ready, so the first spoken words are preserved.
+      const processor = context.createScriptProcessor(2048, 1, 1);
+      const silentGain = context.createGain();
+      silentGain.gain.value = 0;
+
+      processor.onaudioprocess = audioEvent => {
+        if (attempt !== voiceStartRef.current) return;
+
+        const pcm = downsamplePcm16k(
+          audioEvent.inputBuffer.getChannelData(0),
+          context.sampleRate,
+        );
+        const encodedPcm = int16ToBase64(pcm);
+        const activeSocket = voiceSocketRef.current;
+
+        if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
+          // Keep a short rolling buffer while the token/WebSocket connects.
+          voicePendingPcmRef.current.push(encodedPcm);
+          if (voicePendingPcmRef.current.length > 80) {
+            voicePendingPcmRef.current.shift();
+          }
+          return;
+        }
+
+        try {
+          activeSocket.send(JSON.stringify({
+            realtimeInput: {
+              audio: {
+                data: encodedPcm,
+                mimeType: 'audio/pcm;rate=16000',
+              },
+            },
+          }));
+        } catch {}
+      };
+
+      source.connect(processor);
+      processor.connect(silentGain);
+      silentGain.connect(context.destination);
+      voiceProcessorRef.current = processor;
+      voiceSilentGainRef.current = silentGain;
+
       const { token, model } = await liveTokenPromise;
       if (attempt !== voiceStartRef.current) return;
 
@@ -1002,40 +1046,9 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         }
       };
 
-      const processor = context.createScriptProcessor(2048, 1, 1);
-      const silentGain = context.createGain();
-      silentGain.gain.value = 0;
-
-      processor.onaudioprocess = audioEvent => {
-        if (attempt !== voiceStartRef.current) return;
-        const pcm = downsamplePcm16k(audioEvent.inputBuffer.getChannelData(0), context.sampleRate);
-        const encodedPcm = int16ToBase64(pcm);
-        const activeSocket = voiceSocketRef.current;
-        if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
-          // Preserve a short amount of speech captured while the websocket is
-          // still connecting, so the first spoken words are not lost.
-          voicePendingPcmRef.current.push(encodedPcm);
-          if (voicePendingPcmRef.current.length > 80) voicePendingPcmRef.current.shift();
-          return;
-        }
-        try {
-          activeSocket.send(JSON.stringify({
-            realtimeInput: {
-              audio: {
-                data: encodedPcm,
-                mimeType: 'audio/pcm;rate=16000',
-              },
-            },
-          }));
-        } catch {}
-      };
-
-      source.connect(processor);
-      processor.connect(silentGain);
-      silentGain.connect(context.destination);
+      // The microphone processor was already connected immediately after
+      // getUserMedia(), before token/WebSocket setup completed.
       voiceSourceRef.current = source;
-      voiceProcessorRef.current = processor;
-      voiceSilentGainRef.current = silentGain;
     } catch (error: any) {
       if (attempt !== voiceStartRef.current) return;
       console.error('Speech-to-text start failed:', error);
@@ -2773,14 +2786,18 @@ const cleanMessageContent = (content: unknown): string => {
                           return (
                             <motion.span
                               key={index}
-                              className="h-[8px] min-w-0 flex-1 max-w-[4px] shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500"
+                              className="min-w-0 flex-1 max-w-[4px] shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500"
+                              style={{
+                                height: `${Math.max(10, height)}px`,
+                                transformOrigin: 'center',
+                              }}
                               animate={{
-                                height: [`${Math.max(8, height * 0.65)}px`, `${Math.max(8, height)}px`, `${Math.max(8, height * 0.65)}px`],
+                                scaleY: [0.55, 1, 0.55],
                               }}
                               transition={{
-                                duration: 2.2 + (index % 6) * 0.12,
+                                duration: 3.6,
                                 repeat: Infinity,
-                                delay: index * 0.025,
+                                delay: index * 0.045,
                                 ease: 'easeInOut',
                               }}
                             />
