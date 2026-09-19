@@ -83,6 +83,7 @@ const PdfPreview = ({
   compact?: boolean;
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const canvasHostRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
 
   useEffect(() => {
@@ -91,56 +92,49 @@ const PdfPreview = ({
 
     const renderPdf = async () => {
       setStatus('loading');
-
       try {
-        // Load PDF.js only in the browser. Using a client-side renderer avoids
-        // Android Chrome handing the Blob URL to its native PDF viewer.
         const pdfjs: any = await import(/* @vite-ignore */ PDFJS_MODULE_URL);
         if (cancelled) return;
-
         pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
 
         const loadingTask = pdfjs.getDocument({
           url: src,
           useWorkerFetch: true,
           isEvalSupported: true,
+          disableAutoFetch: true,
+          disableStream: true,
         });
 
         pdfDocument = await loadingTask.promise;
-        if (cancelled || !containerRef.current) {
+        if (cancelled || !canvasHostRef.current) {
           await pdfDocument?.destroy?.();
           return;
         }
 
-        const container = containerRef.current;
-        container.replaceChildren();
-
+        const host = canvasHostRef.current;
+        host.replaceChildren();
+        const isMobile = window.matchMedia('(max-width: 767px)').matches;
         const pageCount = compact
           ? 1
-          : Math.min(Number(pdfDocument.numPages) || 1, 30);
+          : Math.min(Number(pdfDocument.numPages) || 1, isMobile ? 12 : 30);
 
         for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
-          if (cancelled) break;
+          if (cancelled || !canvasHostRef.current) break;
 
           const page = await pdfDocument.getPage(pageNumber);
           const baseViewport = page.getViewport({ scale: 1 });
-
           const availableWidth = Math.max(
-            compact ? 120 : container.clientWidth - 24,
+            compact ? 120 : host.clientWidth - (isMobile ? 12 : 24),
             120
           );
-
-          const scale = compact
-            ? Math.min(availableWidth / baseViewport.width, 1)
-            : Math.min(availableWidth / baseViewport.width, 1.65);
-
+          const maxScale = compact ? 1 : isMobile ? 1.15 : 1.65;
+          const scale = Math.min(availableWidth / baseViewport.width, maxScale);
           const viewport = page.getViewport({ scale });
           const canvas = document.createElement('canvas');
           const context = canvas.getContext('2d', { alpha: false });
-
           if (!context) continue;
 
-          const outputScale = Math.min(window.devicePixelRatio || 1, 2);
+          const outputScale = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2);
           canvas.width = Math.ceil(viewport.width * outputScale);
           canvas.height = Math.ceil(viewport.height * outputScale);
           canvas.style.width = `${viewport.width}px`;
@@ -152,20 +146,13 @@ const PdfPreview = ({
           if (!compact) {
             const pageLabel = document.createElement('div');
             pageLabel.textContent = `Page ${pageNumber}`;
-            pageLabel.className =
-              'mb-1 text-center text-[10px] font-bold uppercase tracking-wider text-zinc-400';
-            container.appendChild(pageLabel);
+            pageLabel.className = 'mb-1 text-center text-[10px] font-bold uppercase tracking-wider text-zinc-400';
+            host.appendChild(pageLabel);
           }
 
-          container.appendChild(canvas);
-
+          host.appendChild(canvas);
           context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
-          await page.render({
-            canvasContext: context,
-            viewport,
-          }).promise;
-
-          if (compact) break;
+          await page.render({ canvasContext: context, viewport }).promise;
         }
 
         if (!cancelled) setStatus('ready');
@@ -176,25 +163,18 @@ const PdfPreview = ({
     };
 
     void renderPdf();
-
     return () => {
       cancelled = true;
-      try {
-        void pdfDocument?.destroy?.();
-      } catch {
-        // Ignore PDF.js cleanup errors during unmount.
-      }
+      try { void pdfDocument?.destroy?.(); } catch {}
+      if (canvasHostRef.current) canvasHostRef.current.replaceChildren();
     };
   }, [src, compact]);
 
   if (status === 'error') {
     return (
-      <div
-        className={
-          compact
-            ? 'flex h-full w-full flex-col items-center justify-center gap-1 bg-zinc-100 dark:bg-zinc-800'
-            : 'flex min-h-[60vh] w-full flex-col items-center justify-center gap-3 rounded-xl bg-white p-8 dark:bg-zinc-900'
-        }
+      <div className={compact
+        ? 'flex h-full w-full flex-col items-center justify-center gap-1 bg-zinc-100 dark:bg-zinc-800'
+        : 'flex min-h-[60vh] w-full flex-col items-center justify-center gap-3 rounded-xl bg-white p-8 dark:bg-zinc-900'}
       >
         <FileText className="h-8 w-8 text-zinc-500" />
         <span className="text-center text-xs font-semibold text-zinc-500">
@@ -208,27 +188,19 @@ const PdfPreview = ({
     <div
       ref={containerRef}
       aria-label={`PDF preview: ${fileName}`}
-      className={
-        compact
-          ? 'relative flex h-full w-full items-center justify-center overflow-hidden bg-white dark:bg-zinc-800'
-          : 'mx-auto w-full max-w-4xl'
-      }
+      className={compact
+        ? 'relative flex h-full w-full items-center justify-center overflow-hidden bg-white dark:bg-zinc-800'
+        : 'relative mx-auto w-full max-w-4xl'}
     >
+      <div ref={canvasHostRef} className={compact ? 'h-full w-full' : 'w-full'} />
       {status === 'loading' && (
-        <div
-          className={
-            compact
-              ? 'absolute inset-0 z-10 flex items-center justify-center bg-white dark:bg-zinc-800'
-              : 'flex min-h-[60vh] items-center justify-center rounded-xl bg-white dark:bg-zinc-900'
-          }
+        <div className={compact
+          ? 'absolute inset-0 z-10 flex items-center justify-center bg-white dark:bg-zinc-800'
+          : 'absolute inset-0 flex min-h-[60vh] items-center justify-center rounded-xl bg-white dark:bg-zinc-900'}
         >
           <div className="flex flex-col items-center gap-2">
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700 dark:border-zinc-700 dark:border-t-zinc-200" />
-            {!compact && (
-              <span className="text-xs font-medium text-zinc-500">
-                Rendering PDF…
-              </span>
-            )}
+            {!compact && <span className="text-xs font-medium text-zinc-500">Rendering PDF…</span>}
           </div>
         </div>
       )}
