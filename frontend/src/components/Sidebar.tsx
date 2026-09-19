@@ -476,7 +476,7 @@ function SessionList({
 
       {/* Session list */}
       <div className="px-4 pb-2 shrink-0">
-        <div className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Chats</div>
+        <div className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Recents</div>
       </div>
       <div
         className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 pb-4"
@@ -956,6 +956,7 @@ export default function Sidebar({
             <div className="flex items-center gap-2 shrink-0">
               <ThemeToggleButton />
 
+              <div className="relative group/close-sidebar">
               <motion.button
                 type="button"
                 onClick={onMobileClose}
@@ -972,8 +973,15 @@ export default function Sidebar({
                   shadow-sm transition-all duration-200"
               >
                 
-                              <PanelLeft className="w-4 h-4" strokeWidth={1.8} />
+                              <PanelLeft className="w-5 h-5" strokeWidth={1.8} />
               </motion.button>
+                <div className="absolute right-0 top-full mt-2 px-3 py-1.5
+                  bg-zinc-900 text-white text-xs font-bold rounded-lg whitespace-nowrap
+                  pointer-events-none z-[300] shadow-lg opacity-0
+                  group-hover/close-sidebar:opacity-100 transition-opacity duration-150">
+                  Close Sidebar
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1073,6 +1081,7 @@ export default function Sidebar({
                   <h2 className="text-xl font-medium tracking-tight text-zinc-900/90 dark:text-white/90">Twinkle</h2>
                 </div>
 
+                <div className="relative group/close-sidebar">
                 <motion.button
                   type="button"
                   onClick={collapseDesktop}
@@ -1088,8 +1097,15 @@ export default function Sidebar({
                     hover:border-zinc-300 dark:hover:border-zinc-600
                     shadow-sm transition-all duration-200"
                 >
-                  <PanelLeft className="w-4 h-4" strokeWidth={1.8} />
+                  <PanelLeft className="w-5 h-5" strokeWidth={1.8} />
                 </motion.button>
+                  <div className="absolute right-0 top-full mt-2 px-3 py-1.5
+                    bg-zinc-900 text-white text-xs font-bold rounded-lg whitespace-nowrap
+                    pointer-events-none z-[300] shadow-lg opacity-0
+                    group-hover/close-sidebar:opacity-100 transition-opacity duration-150">
+                    Close Sidebar
+                  </div>
+                </div>
               </div>
 
               <SessionList
