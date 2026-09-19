@@ -963,7 +963,7 @@ export default function Sidebar({
                 title="Close sidebar"
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.92 }}
-                className="flex h-9 w-9 items-center justify-center rounded-full
+                className="flex h-9 w-9 items-center justify-center rounded-[14px]
                   bg-zinc-100 dark:bg-zinc-800
                   border border-zinc-200 dark:border-zinc-700
                   text-zinc-500 dark:text-zinc-400
@@ -1080,7 +1080,7 @@ export default function Sidebar({
                   title="Close sidebar"
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.92 }}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[14px]
                     bg-zinc-100 dark:bg-zinc-800
                     border border-zinc-200 dark:border-zinc-700
                     text-zinc-500 dark:text-zinc-400
