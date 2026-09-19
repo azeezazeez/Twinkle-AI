@@ -78,6 +78,10 @@ public class GroqService {
             String requestedModel,
             String requestedLanguage) {
 
+        if (apiKey == null || apiKey.isBlank() || apiKey.equalsIgnoreCase("YOUR_GROQ_API_KEY")) {
+            throw new AIServiceException("Groq API key is not configured.");
+        }
+
         String resolvedModel = resolveModel(requestedModel);
         List<Map<String, Object>> messages = buildHistory(conversationHistory, requestedLanguage);
 
@@ -204,8 +208,15 @@ public class GroqService {
                 HttpEntity<Map<String, Object>> entity =
                         new HttpEntity<>(requestBody, headers);
 
+                String endpoint = apiUrl == null ? "" : apiUrl.trim().replaceAll("/+$", "")
+                        + "/chat/completions";
+
+                if (endpoint.isBlank() || !endpoint.startsWith("http")) {
+                    throw new AIServiceException("Groq API URL is not configured correctly.");
+                }
+
                 ResponseEntity<Map> response = restTemplate.postForEntity(
-                        apiUrl + "/chat/completions",
+                        endpoint,
                         entity,
                         Map.class
                 );
