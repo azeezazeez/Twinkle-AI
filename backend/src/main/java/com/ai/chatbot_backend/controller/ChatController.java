@@ -55,6 +55,7 @@ public class ChatController {
     private static final int MAX_IMAGES_PER_MESSAGE = 3;
     private static final long MAX_TOTAL_IMAGE_BYTES = 15L * 1024L * 1024L;
     private static final long MAX_TOTAL_ATTACHMENT_BYTES = 25L * 1024L * 1024L;
+    private static final long MAX_SINGLE_FILE_BYTES = 10L * 1024L * 1024L;
 
     private final GroqService groqService;
     private final GeminiService geminiService;
@@ -153,6 +154,17 @@ public class ChatController {
     // =========================================================
     // STATUS
     // =========================================================
+
+    // Render/platform health check.
+    @GetMapping("/")
+    public ResponseEntity<Map<String, Object>> root() {
+        Map<String, Object> response = new HashMap<>();
+        response.put("status", "UP");
+        response.put("service", "Twinkle AI Backend");
+        response.put("message", "Backend is running");
+        return ResponseEntity.ok(response);
+    }
+
 
     @GetMapping("/status")
     public ResponseEntity<Map<String, Object>> getStatus() {
@@ -258,6 +270,13 @@ public class ChatController {
                     String filename = safeFilename(
                             file.getOriginalFilename()
                     );
+
+                    if (file.getSize() > MAX_SINGLE_FILE_BYTES) {
+                        throw new IllegalArgumentException(
+                                "File is too large: " + filename
+                                        + ". Maximum size is 10MB per file."
+                        );
+                    }
 
                     if (file.getSize() > MAX_TOTAL_ATTACHMENT_BYTES) {
                         throw new IllegalArgumentException(
