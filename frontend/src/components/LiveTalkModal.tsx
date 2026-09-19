@@ -425,11 +425,6 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
 
   const startInput = useCallback(async () => {
     if (endingRef.current) return;
-    const socket = socketRef.current;
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-      throw new Error('Live Talk is not connected yet.');
-    }
-
     if (processorRef.current) return;
 
     const stream = streamRef.current ?? await navigator.mediaDevices.getUserMedia({
@@ -542,6 +537,10 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
       const context = new AudioContextCtor();
       audioContextRef.current = context;
       await context.resume();
+
+      // Start microphone capture before any token/network work so Live Talk
+      // becomes an active listening session as soon as the modal opens.
+      await startInputRef.current?.();
 
       const { token, model } = await createLiveToken(voiceName, appLanguage);
       if (endingRef.current || attempt !== connectAttemptRef.current) return;
@@ -680,7 +679,10 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     if (!open) return;
     setTranscript('');
     setError('');
-    setStatus('Connecting…');
+    // Activate the listening UI immediately; microphone/network initialization
+    // continues underneath it without making the user wait for a connection.
+    setListening(true);
+    setStatus('Listening');
     endingRef.current = false;
     userTurnRef.current = '';
     assistantTurnRef.current = '';
