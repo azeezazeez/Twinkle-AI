@@ -6,10 +6,10 @@ import { chatApi, authApi, createLiveToken } from '../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
 import StormLogo from '../components/StormLogo';
 import ConfirmationModal from '../components/ConfirmationModal';
-import LiveTalkModal from '../components/LiveTalkModal';
+import LiveTalkModal from '../components/LiveTalkModal'; 
 
 import {
-  ArrowDown, ArrowUp,
+  ArrowDown, ArrowUp, 
   Copy, Check, Edit2,
   X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, Mic, AudioLines,
 } from 'lucide-react';
