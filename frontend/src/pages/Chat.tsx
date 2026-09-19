@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import React from 'react';
 import { User, Session, Message } from '../types';
 import Sidebar from '../components/Sidebar';
-import { chatApi, authApi } from '../lib/api';
+import { chatApi, authApi, createLiveToken } from '../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
 import StormLogo from '../components/StormLogo';
 import ConfirmationModal from '../components/ConfirmationModal';
@@ -26,6 +26,167 @@ interface Props {
   onProfile?: () => void;
   onSettings?: () => void;
 }
+
+
+type PdfJsModule = {
+  getDocument: (source: { url: string }) => { promise: Promise<any> };
+  GlobalWorkerOptions: { workerSrc: string };
+};
+
+let pdfJsLoader: Promise<PdfJsModule> | null = null;
+
+const loadPdfJs = (): Promise<PdfJsModule> => {
+  if (pdfJsLoader) return pdfJsLoader;
+
+  pdfJsLoader = new Promise((resolve, reject) => {
+    const existing = (window as any).pdfjsLib as PdfJsModule | undefined;
+    if (existing) {
+      resolve(existing);
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    script.async = true;
+    script.onload = () => {
+      const pdfjs = (window as any).pdfjsLib as PdfJsModule | undefined;
+      if (!pdfjs) {
+        reject(new Error('PDF renderer failed to load.'));
+        return;
+      }
+      pdfjs.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      resolve(pdfjs);
+    };
+    script.onerror = () => reject(new Error('PDF renderer could not be loaded.'));
+    document.head.appendChild(script);
+  });
+
+  return pdfJsLoader;
+};
+
+const MobileSafePdfPreview = ({ url, fileName }: { url: string; fileName: string }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [rendering, setRendering] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let renderTask: any = null;
+
+    const renderPdf = async () => {
+      setRendering(true);
+      setError(false);
+
+      try {
+        const pdfjs = await loadPdfJs();
+        if (cancelled || !containerRef.current) return;
+
+        const pdf = await pdfjs.getDocument({ url }).promise;
+        if (cancelled || !containerRef.current) return;
+
+        const container = containerRef.current;
+        container.innerHTML = '';
+
+        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+          if (cancelled) return;
+
+          const page = await pdf.getPage(pageNumber);
+          const baseViewport = page.getViewport({ scale: 1 });
+          const availableWidth = Math.max(container.clientWidth - 16, 280);
+          const scale = availableWidth / baseViewport.width;
+          const viewport = page.getViewport({ scale });
+
+          const pageShell = document.createElement('div');
+          pageShell.className =
+            'mx-auto mb-4 w-full overflow-hidden rounded-xl bg-white shadow-sm';
+          pageShell.style.maxWidth = `${Math.ceil(viewport.width)}px`;
+
+          const canvas = document.createElement('canvas');
+          const outputScale = Math.min(window.devicePixelRatio || 1, 2);
+          canvas.width = Math.ceil(viewport.width * outputScale);
+          canvas.height = Math.ceil(viewport.height * outputScale);
+          canvas.style.width = `${Math.ceil(viewport.width)}px`;
+          canvas.style.height = `${Math.ceil(viewport.height)}px`;
+          canvas.className = 'block h-auto w-full';
+
+          pageShell.appendChild(canvas);
+          container.appendChild(pageShell);
+
+          const context = canvas.getContext('2d', { alpha: false });
+          if (!context) throw new Error('Canvas rendering is unavailable.');
+
+          renderTask = page.render({
+            canvasContext: context,
+            viewport,
+            transform:
+              outputScale !== 1
+                ? [outputScale, 0, 0, outputScale, 0, 0]
+                : undefined,
+          });
+
+          await renderTask.promise;
+        }
+
+        if (!cancelled) setRendering(false);
+      } catch (renderError) {
+        console.error('PDF preview rendering failed:', renderError);
+        if (!cancelled) {
+          setRendering(false);
+          setError(true);
+        }
+      }
+    };
+
+    void renderPdf();
+
+    return () => {
+      cancelled = true;
+      try {
+        renderTask?.cancel?.();
+      } catch {
+        // Ignore cancellation errors during unmount.
+      }
+    };
+  }, [url]);
+
+  if (error) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center p-6">
+        <div className="max-w-md rounded-2xl bg-white p-8 text-center shadow-sm dark:bg-zinc-900">
+          <FileText className="mx-auto mb-4 h-12 w-12 text-zinc-700 dark:text-zinc-200" />
+          <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100">
+            {fileName}
+          </h3>
+          <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+            PDF preview could not be rendered on this device.
+          </p>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-5 inline-flex items-center rounded-xl bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white dark:bg-white dark:text-zinc-900"
+          >
+            Open PDF
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative min-h-full">
+      {rendering && (
+        <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-center py-6">
+          <div className="rounded-full bg-white/95 px-4 py-2 text-xs font-medium text-zinc-500 shadow-sm dark:bg-zinc-900/95 dark:text-zinc-400">
+            Loading PDF preview…
+          </div>
+        </div>
+      )}
+      <div ref={containerRef} className="mx-auto w-full max-w-4xl" />
+    </div>
+  );
+};
 
 const CodeBlock = ({ language, value }: { language: string; value: string }) => {
   const [copied, setCopied] = useState(false);
@@ -609,248 +770,268 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     return () => window.clearInterval(interval);
   }, [typingSessionTitle]);
 
-  // Show the persisted session title immediately. The previous typing
-  // animation briefly replaced the real title with its first character.
-  const sidebarSessions = sessions;
+  const sidebarSessions = sessions.map(session =>
+    typingSessionTitle?.id === session.id
+      ? { ...session, sessionName: typedSessionTitle }
+      : session
+  );
   const sessionToDelete = sessions.find(session => session.id === sessionIdToDelete);
   // Keep the chat interface clean on login; the sidebar opens only when requested.
 
-  // Browser-native speech recognition is used for composer dictation. It is
-  // considerably more reliable for short dictation on mobile/desktop browsers
-  // than keeping a second Gemini Live WebSocket open just for transcription.
-  type SpeechRecognitionResultEventLike = {
-    resultIndex: number;
-    results: {
-      length: number;
-      [index: number]: {
-        isFinal: boolean;
-        length: number;
-        [index: number]: { transcript: string };
-      };
-    };
-  };
-
-  type SpeechRecognitionInstance = {
-    continuous: boolean;
-    interimResults: boolean;
-    lang: string;
-    maxAlternatives: number;
-    processLocally?: boolean;
-    onstart: (() => void) | null;
-    onresult: ((event: SpeechRecognitionResultEventLike) => void) | null;
-    onerror: ((event: { error?: string }) => void) | null;
-    onend: (() => void) | null;
-    start: () => void;
-    stop: () => void;
-    abort: () => void;
-  };
-
-  type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance;
-
   const voiceBaseInputRef = useRef('');
   const voiceDraftRef = useRef('');
-  const voiceRecognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const voiceSocketRef = useRef<WebSocket | null>(null);
+  const voiceStreamRef = useRef<MediaStream | null>(null);
+  const voiceAudioContextRef = useRef<AudioContext | null>(null);
+  const voiceSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const voiceProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const voiceSilentGainRef = useRef<GainNode | null>(null);
   const voiceStartRef = useRef(0);
-  const voiceRecognitionErrorRef = useRef<string | null>(null);
-  const voiceListeningRef = useRef(false);
+  const voiceTurnCompleteResolverRef = useRef<(() => void) | null>(null);
   const [voiceDraftVersion, setVoiceDraftVersion] = useState(0);
 
-  const getRecognitionLanguage = useCallback(() => {
-    try {
-      const code = localStorage.getItem('twinkle_app_language') || 'auto';
-      const map: Record<string, string> = {
-        en: 'en-IN', hi: 'hi-IN', te: 'te-IN', ta: 'ta-IN', kn: 'kn-IN',
-        ml: 'ml-IN', bn: 'bn-IN', mr: 'mr-IN', gu: 'gu-IN', pa: 'pa-IN',
-        ur: 'ur-PK', ar: 'ar-SA', es: 'es-ES', fr: 'fr-FR', de: 'de-DE',
-        it: 'it-IT', pt: 'pt-PT', ru: 'ru-RU', ja: 'ja-JP', ko: 'ko-KR',
-        zh: 'zh-CN', tr: 'tr-TR', vi: 'vi-VN', id: 'id-ID', th: 'th-TH',
-        fil: 'fil-PH',
-      };
-      return map[code] || 'en-IN';
-    } catch {
-      return 'en-IN';
-    }
-  }, []);
+  const cleanupVoiceAudio = useCallback(() => {
+    try { voiceProcessorRef.current?.disconnect(); } catch {}
+    try { voiceSourceRef.current?.disconnect(); } catch {}
+    try { voiceSilentGainRef.current?.disconnect(); } catch {}
+    voiceProcessorRef.current = null;
+    voiceSourceRef.current = null;
+    voiceSilentGainRef.current = null;
 
-  const cleanupVoiceRecognition = useCallback(() => {
-    const recognition = voiceRecognitionRef.current;
-    voiceRecognitionRef.current = null;
-    if (!recognition) return;
-    recognition.onstart = null;
-    recognition.onresult = null;
-    recognition.onerror = null;
-    recognition.onend = null;
-    try { recognition.abort(); } catch {}
+    voiceStreamRef.current?.getTracks().forEach(track => track.stop());
+    voiceStreamRef.current = null;
+
+    const context = voiceAudioContextRef.current;
+    voiceAudioContextRef.current = null;
+    if (context) void context.close().catch(() => undefined);
   }, []);
 
   const cancelVoiceInput = useCallback(() => {
-    const base = voiceBaseInputRef.current.trim();
     voiceStartRef.current += 1;
-    cleanupVoiceRecognition();
+    try {
+      const socket = voiceSocketRef.current;
+      if (socket?.readyState === WebSocket.OPEN) socket.close(1000, 'cancelled');
+      else socket?.close();
+    } catch {}
+    voiceSocketRef.current = null;
+    voiceTurnCompleteResolverRef.current?.();
+    voiceTurnCompleteResolverRef.current = null;
+    cleanupVoiceAudio();
     voiceDraftRef.current = '';
     voiceBaseInputRef.current = '';
-    voiceRecognitionErrorRef.current = null;
-    voiceListeningRef.current = false;
-    setInput(base);
     setVoiceDraftVersion(version => version + 1);
     setVoiceInputActive(false);
     window.setTimeout(() => inputRef.current?.focus(), 0);
-  }, [cleanupVoiceRecognition]);
+  }, [cleanupVoiceAudio]);
 
-  const commitVoiceInput = useCallback(() => {
+  const commitVoiceInput = useCallback(async () => {
     if (!voiceInputActive) return;
+
+    // Stop capturing immediately, but give Gemini a short window to deliver
+    // the final input-transcription chunk before we commit it to the composer.
+    try {
+      const socket = voiceSocketRef.current;
+      if (socket?.readyState === WebSocket.OPEN) {
+        try {
+          socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
+        } catch {}
+
+        await new Promise<void>(resolve => {
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timer);
+            if (voiceTurnCompleteResolverRef.current === finish) {
+              voiceTurnCompleteResolverRef.current = null;
+            }
+            resolve();
+          };
+          const timer = window.setTimeout(finish, 550);
+          voiceTurnCompleteResolverRef.current = finish;
+        });
+      }
+    } catch {}
 
     const base = voiceBaseInputRef.current.trim();
     const spoken = voiceDraftRef.current.trim();
     const combined = `${base}${base && spoken ? ' ' : ''}${spoken}`.trim();
 
     voiceStartRef.current += 1;
-    cleanupVoiceRecognition();
+    try { voiceSocketRef.current?.close(1000, 'committed'); } catch {}
+    voiceSocketRef.current = null;
+    voiceTurnCompleteResolverRef.current?.();
+    voiceTurnCompleteResolverRef.current = null;
+    cleanupVoiceAudio();
+
+    setInput(combined);
     voiceDraftRef.current = '';
     voiceBaseInputRef.current = '';
-    voiceRecognitionErrorRef.current = null;
-    voiceListeningRef.current = false;
-    setInput(combined);
     setVoiceDraftVersion(version => version + 1);
     setVoiceInputActive(false);
     window.setTimeout(() => inputRef.current?.focus(), 0);
-  }, [cleanupVoiceRecognition, voiceInputActive]);
+  }, [cleanupVoiceAudio, voiceInputActive]);
 
-  const startVoiceInput = useCallback(() => {
+  const startVoiceInput = useCallback(async () => {
     if (voiceInputActive || isTyping || isProcessingFiles) return;
 
-    const SpeechRecognitionCtor = (
-      window as Window & {
-        SpeechRecognition?: SpeechRecognitionConstructor;
-        webkitSpeechRecognition?: SpeechRecognitionConstructor;
-      }
-    ).SpeechRecognition || (
-      window as Window & {
-        SpeechRecognition?: SpeechRecognitionConstructor;
-        webkitSpeechRecognition?: SpeechRecognitionConstructor;
-      }
-    ).webkitSpeechRecognition;
-
-    if (!SpeechRecognitionCtor) {
-      window.alert(
-        'Speech-to-text is not supported by this browser. Please use the latest Chrome or Edge and allow microphone access.'
-      );
+    if (!navigator.mediaDevices?.getUserMedia) {
+      window.alert('Microphone access is not supported in this browser. Please use a current Chrome, Edge, or Safari browser.');
       return;
     }
-
-    // Stop a stale recognition instance before starting a new one.
-    cleanupVoiceRecognition();
 
     const attempt = ++voiceStartRef.current;
     voiceBaseInputRef.current = input.trim();
     voiceDraftRef.current = '';
-    voiceRecognitionErrorRef.current = null;
-    voiceListeningRef.current = true;
     setVoiceDraftVersion(version => version + 1);
     setVoiceInputActive(true);
 
-    const recognition = new SpeechRecognitionCtor();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = getRecognitionLanguage();
-    recognition.maxAlternatives = 1;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
 
-    voiceRecognitionRef.current = recognition;
-
-    recognition.onstart = () => {
-      if (attempt !== voiceStartRef.current) return;
-      voiceListeningRef.current = true;
-      setVoiceInputActive(true);
-    };
-
-    recognition.onresult = event => {
-      if (attempt !== voiceStartRef.current) return;
-
-      // Rebuild the complete transcript from the recognition result set.
-      // This avoids duplicated/interleaved text when Chrome emits interim
-      // results followed by their final versions.
-      let transcript = '';
-      for (let i = 0; i < event.results.length; i += 1) {
-        transcript += event.results[i][0]?.transcript || '';
+      if (attempt !== voiceStartRef.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
       }
+      voiceStreamRef.current = stream;
 
-      voiceDraftRef.current = transcript.replace(/\s+/g, ' ').trim();
-      setVoiceDraftVersion(version => version + 1);
-    };
+      const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextCtor) throw new Error('Web Audio is not supported in this browser.');
+      const context = new AudioContextCtor();
+      voiceAudioContextRef.current = context;
+      if (context.state === 'suspended') await context.resume();
 
-    recognition.onerror = event => {
+      const { token, model } = await createLiveToken('Charon', 'auto', true);
       if (attempt !== voiceStartRef.current) return;
-      const error = String(event?.error || 'unknown');
-      voiceRecognitionErrorRef.current = error;
-      console.error('Twinkle speech-to-text error:', error);
 
-      if (error === 'not-allowed' || error === 'service-not-allowed') {
-        cancelVoiceInput();
-        window.alert('Microphone permission was denied. Allow microphone access for Twinkle and try again.');
-      } else if (error === 'audio-capture') {
-        cancelVoiceInput();
-        window.alert('No microphone was detected. Connect a microphone and try again.');
-      } else if (error === 'language-not-supported') {
-        // Some Chromium-based browsers do not support regional language codes
-        // such as en-IN for Web Speech. Retry with the widely supported
-        // English locale instead of leaving the microphone unusable.
+      const socket = new WebSocket(
+        `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}`
+      );
+      voiceSocketRef.current = socket;
+
+      socket.onopen = () => {
+        if (attempt !== voiceStartRef.current) return;
+        socket.send(JSON.stringify({
+          setup: {
+            model: `models/${model}`,
+            generationConfig: { responseModalities: ['AUDIO'] },
+            systemInstruction: {
+              parts: [{
+                text: `Twinkle AI speech-to-text mode. Transcribe the user's speech accurately. Preserve the user's wording and language. The selected language is ${getSpeechLanguage()}. Do not translate the user's speech. Do not answer the user.`,
+              }],
+            },
+            inputAudioTranscription: {},
+            realtimeInputConfig: {
+              automaticActivityDetection: {
+                disabled: false,
+                prefixPaddingMs: 250,
+                silenceDurationMs: 900,
+              },
+            },
+          },
+        }));
+      };
+
+      socket.onmessage = async event => {
+        if (attempt !== voiceStartRef.current) return;
         try {
-          recognition.lang = 'en-US';
-          voiceRecognitionErrorRef.current = null;
-          voiceListeningRef.current = true;
-          setVoiceInputActive(true);
-        } catch {
+          let message: any;
+          if (typeof event.data === 'string') message = JSON.parse(event.data);
+          else if (event.data instanceof Blob) message = JSON.parse(await event.data.text());
+          else if (event.data instanceof ArrayBuffer) message = JSON.parse(new TextDecoder().decode(new Uint8Array(event.data)));
+          else return;
+
+          if (message?.error) throw new Error(message.error.message || 'Speech transcription service returned an error.');
+
+          const text = String(message?.serverContent?.inputTranscription?.text || '');
+          if (text) {
+            voiceDraftRef.current += text;
+            setVoiceDraftVersion(version => version + 1);
+          }
+
+          if (message?.serverContent?.turnComplete) {
+            voiceTurnCompleteResolverRef.current?.();
+          }
+        } catch (error) {
+          console.error('Twinkle speech transcription error:', error);
+        }
+      };
+
+      socket.onerror = () => {
+        if (attempt !== voiceStartRef.current) return;
+        console.error('Twinkle speech transcription WebSocket error.');
+        window.setTimeout(() => {
+          if (attempt === voiceStartRef.current && !voiceDraftRef.current.trim()) {
+            cancelVoiceInput();
+            window.alert('Speech-to-text could not connect. Please check your internet connection and allow microphone access for localhost.');
+          }
+        }, 0);
+      };
+
+      socket.onclose = event => {
+        if (attempt !== voiceStartRef.current) return;
+        voiceSocketRef.current = null;
+        if (event.code !== 1000 && !voiceDraftRef.current.trim()) {
           cancelVoiceInput();
         }
-      } else if (error === 'network') {
-        // Chromium's Web Speech service can report a transient network error.
-        // Retry the same recognition session once without logging the error or
-        // clearing the user's draft. This keeps the microphone usable without
-        // changing any other chat behavior.
-        voiceRecognitionErrorRef.current = null;
-        voiceListeningRef.current = true;
-        setVoiceInputActive(true);
-        window.setTimeout(() => {
-          if (attempt !== voiceStartRef.current) return;
-          try {
-            recognition.lang = 'en-US';
-            recognition.start();
-          } catch {
-            // If the browser still cannot start its speech service, leave the
-            // voice composer active so the user can retry or reject it.
-            voiceListeningRef.current = false;
-          }
-        }, 250);
-      }
-    };
+      };
 
-    recognition.onend = () => {
+      const source = context.createMediaStreamSource(stream);
+      const processor = context.createScriptProcessor(2048, 1, 1);
+      const silentGain = context.createGain();
+      silentGain.gain.value = 0;
+
+      processor.onaudioprocess = audioEvent => {
+        if (attempt !== voiceStartRef.current) return;
+        const activeSocket = voiceSocketRef.current;
+        if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) return;
+        const pcm = downsamplePcm16k(audioEvent.inputBuffer.getChannelData(0), context.sampleRate);
+        try {
+          activeSocket.send(JSON.stringify({
+            realtimeInput: {
+              audio: {
+                data: int16ToBase64(pcm),
+                mimeType: 'audio/pcm;rate=16000',
+              },
+            },
+          }));
+        } catch {}
+      };
+
+      source.connect(processor);
+      processor.connect(silentGain);
+      silentGain.connect(context.destination);
+      voiceSourceRef.current = source;
+      voiceProcessorRef.current = processor;
+      voiceSilentGainRef.current = silentGain;
+    } catch (error: any) {
       if (attempt !== voiceStartRef.current) return;
-
-      // Chrome can end recognition after a pause even when continuous=true.
-      // Automatically restart while the user remains in listening mode.
-      if (!voiceRecognitionErrorRef.current && voiceListeningRef.current) {
-        window.setTimeout(() => {
-          if (attempt !== voiceStartRef.current) return;
-          try { recognition.start(); } catch {}
-        }, 80);
-      }
-    };
-
-    try {
-      recognition.start();
-    } catch (error) {
       console.error('Speech-to-text start failed:', error);
       cancelVoiceInput();
-      window.alert('Speech-to-text could not start. Please allow microphone access and try again.');
+      const message = String(error?.message || 'Unable to start speech-to-text.');
+      if (/permission|denied|notallowed/i.test(message)) {
+        window.alert('Microphone permission was denied. Allow microphone access for localhost and try again.');
+      } else {
+        window.alert(`Speech-to-text could not start. ${message}`);
+      }
     }
-  }, [cancelVoiceInput, cleanupVoiceRecognition, getRecognitionLanguage, input, isProcessingFiles, isTyping, voiceInputActive]);
+  }, [cancelVoiceInput, input, isProcessingFiles, isTyping, voiceInputActive]);
 
   useEffect(() => () => {
     voiceStartRef.current += 1;
-    voiceListeningRef.current = false;
-    cleanupVoiceRecognition();
-  }, [cleanupVoiceRecognition]);  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    try { voiceSocketRef.current?.close(); } catch {}
+    voiceSocketRef.current = null;
+    cleanupVoiceAudio();
+  }, [cleanupVoiceAudio]);
+
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
     try {
       const stored = localStorage.getItem(MODEL_STORAGE_KEY);
       return stored && MODEL_OPTIONS.some(option => option.id === stored)
@@ -905,34 +1086,11 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   }, []);
 
   const chooseModel = useCallback((modelId: string) => {
-    if (!MODEL_OPTIONS.some(option => option.id === modelId)) return;
-
-    setSelectedModel(previousModel => {
-      if (modelId !== previousModel) playModelSwitchSound();
-
-      try {
-        localStorage.setItem(MODEL_STORAGE_KEY, modelId);
-      } catch {}
-
-      return modelId;
-    });
-
+    if (modelId !== selectedModel) playModelSwitchSound();
+    setSelectedModel(modelId);
     setModelPickerOpen(false);
-  }, []);
-
-  // Keep the selected model synchronized with localStorage so the same
-  // model remains selected after a refresh or a Chat component remount.
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(MODEL_STORAGE_KEY);
-
-      if (stored && MODEL_OPTIONS.some(option => option.id === stored)) {
-        setSelectedModel(previousModel =>
-          previousModel === stored ? previousModel : stored
-        );
-      }
-    } catch {}
-  }, []);
+    try { localStorage.setItem(MODEL_STORAGE_KEY, modelId); } catch {}
+  }, [selectedModel]);
 
   const activeModel = MODEL_OPTIONS.find(m => m.id === selectedModel) || MODEL_OPTIONS[0];
 
@@ -943,10 +1101,12 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const abortControllerRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  
+  // Stores the specific session ID that should skip one message load
+  // (the newly created session after first send), so switching to any
+  // OTHER existing session always loads its messages correctly.
   const skipMessageLoadRef = useRef<number | null>(null);
 
-  
+  // Auto-resize textarea
   useEffect(() => {
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
@@ -954,7 +1114,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     }
   }, [input]);
 
-  
+  // Clean up object URLs
   const filePreviewsRef = useRef(filePreviews);
   useEffect(() => { filePreviewsRef.current = filePreviews; }, [filePreviews]);
   useEffect(() => {
@@ -965,22 +1125,11 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     };
   }, []);
 
-
-  
+  // Load sessions & messages
   const loadSessions = useCallback(async () => {
     try {
       const response = await chatApi.getSessions() as any;
-      const loadedSessions: Session[] = response.sessions || [];
-      setSessions(loadedSessions);
-
-      // Restore the last active conversation after a browser refresh.
-      // Only restore it when the session still exists for the current user.
-      const persistedId = readPersistedSessionId();
-      if (persistedId !== null && loadedSessions.some(session => session.id === persistedId)) {
-        setCurrentSessionId(persistedId);
-      } else if (persistedId !== null) {
-        persistSessionId(null);
-      }
+      setSessions(response.sessions || []);
     } catch (err: any) {
       console.error('Failed to load sessions:', err);
       if (err.status === 401) onLogout();
@@ -989,7 +1138,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     }
   }, [onLogout]);
 
-  
+  // Live Talk persists turns in the background. Update the same sidebar state
+  // immediately instead of forcing another GET /chat/sessions request.
   useEffect(() => {
     const handleLiveSessionUpdate = (event: Event) => {
       const detail = (event as CustomEvent<{ id: number; sessionName?: string }>).detail;
@@ -1330,12 +1480,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       );
     } finally {
       setIsProcessingFiles(false);
-
-      // After any file is selected, return the caret to the chat composer
-      // so the user can immediately type a message.
-      window.setTimeout(() => {
-        inputRef.current?.focus();
-      }, 0);
     }
   };
 
@@ -1484,13 +1628,9 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       // Generate and persist a professional AI-generated chat title.
       if ((isNewSession || regenerateTitle) && activeSessionId) {
         try {
-          const titleInput =
-            finalMessage ||
-            (hasFiles
-              ? filesToSend.map(file => file.name).join(', ')
-              : 'File analysis');
-
-          const titleResponse: any = await chatApi.generateTitle(titleInput);
+          const titleResponse: any = await chatApi.generateTitle(
+            finalMessage || 'File analysis'
+          );
 
           const newTitle =
             typeof titleResponse?.title === 'string' && titleResponse.title.trim()
@@ -1828,33 +1968,10 @@ You can ask me questions, give me a file or image to analyze, ask for help with 
   return content;
 };
 
-const stripHtmlTagsOutsideCode = (value: string): string => {
-  // AI responses can occasionally contain literal HTML such as <br>, <p>,
-  // or <div>. Convert those tags to plain text/line breaks before Markdown
-  // rendering, while leaving fenced code blocks completely untouched.
-  const parts = value.split(/(```[\s\S]*?```)/g);
-  return parts
-    .map((part, index) => {
-      if (index % 2 === 1) return part;
-
-      return part
-        .replace(/&lt;br\s*\/?&gt;/gi, '\n')
-        .replace(/<br\s*\/?>(?=\s*)/gi, '\n')
-        .replace(/&lt;\/?(?:p|div|section|article|ul|ol|li|h[1-6]|strong|em|b|i|span)[^&]*?&gt;/gi, '\n')
-        .replace(/<\/?(?:p|div|section|article|ul|ol|li|h[1-6]|strong|em|b|i|span)[^>]*>/gi, '\n')
-        .replace(/<\/?[a-z][^>]*>/gi, '')
-        .replace(/&lt;\/?[a-z][^&]*?&gt;/gi, '');
-    })
-    .join('')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-};
-
 const cleanMessageContent = (content: unknown): string => {
     if (typeof content !== 'string') return '';
 
-    let cleaned = stripHtmlTagsOutsideCode(normalizeTwinkleIdentity(content));
-    cleaned = cleaned
+    let cleaned = normalizeTwinkleIdentity(content)
       // NEVER strip Markdown links here. Keeping the original [label](url)
       // structure lets ReactMarkdown preserve clickability while the
       // renderer below displays the complete URL as the visible text.
@@ -1982,8 +2099,6 @@ const cleanMessageContent = (content: unknown): string => {
     setMessages([]);
     setEditingMessage(null);
   }, [user.id]);
-
-  if (loading) {
     return (
       <div className="flex items-center justify-center h-screen font-sans text-zinc-400 bg-white dark:bg-zinc-950 transition-colors duration-300">
         <motion.div
@@ -2195,7 +2310,7 @@ const cleanMessageContent = (content: unknown): string => {
                                 : 'w-full rounded-2xl border border-zinc-200/80 dark:border-zinc-700/80 bg-white/70 dark:bg-zinc-900/40 px-4 py-3.5 md:px-5 md:py-4 shadow-sm text-zinc-900 dark:text-zinc-100'
                             }`}
                           >
-                            <div className="text-sm md:text-base leading-relaxed markdown-body max-w-none min-w-0 w-full break-words [overflow-wrap:anywhere] [&_*]:max-w-full [&_img]:h-auto [&_img]:max-w-full [&_table]:block [&_table]:w-full [&_table]:max-w-full [&_table]:overflow-x-auto [&_td]:break-words [&_th]:break-words">
+                            <div className="text-sm md:text-base leading-relaxed markdown-body max-w-none min-w-0 w-full break-words [overflow-wrap:anywhere]">
                               {isEditing ? (
                                 <div className="flex flex-col gap-3 w-full min-w-0 p-1">
                                   <textarea
@@ -2576,7 +2691,7 @@ const cleanMessageContent = (content: unknown): string => {
 
               <div
                 ref={modelPickerRef}
-                className="twinkle-composer-row relative z-[200] flex min-w-0 flex-col md:flex-row md:items-center md:gap-1"
+                className="twinkle-composer-row relative z-[200] flex min-w-0 items-center gap-1.5 px-2.5 py-2 sm:gap-2 sm:px-3 sm:py-2.5 md:px-4"
               >
                 {/* Hidden file input */}
                 <input
@@ -2591,69 +2706,108 @@ const cleanMessageContent = (content: unknown): string => {
                   }}
                 />
 
-                {/* Main prompt area — always above the action row */}
+                {/* + attachment button */}
+                <motion.button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isTyping || isProcessingFiles}
+                  aria-label="Attach files"
+                  title="Attach files"
+                  whileHover={{ scale: 1.04, y: -1 }}
+                  whileTap={{ scale: 0.94, y: 0 }}
+                  transition={{
+                    type: 'spring',
+                    stiffness: 420,
+                    damping: 24,
+                    mass: 0.6,
+                  }}
+                  className="group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                >
+                  <motion.span
+                    className="pointer-events-none absolute inset-0 rounded-2xl bg-zinc-1000/0 blur-md"
+                    whileHover={{ scale: 1.15, opacity: 0.18 }}
+                    transition={{ duration: 0.25, ease: 'easeOut' }}
+                  />
+
+                  <motion.span
+                    className="relative z-10 flex items-center justify-center"
+                    animate={isProcessingFiles ? { rotate: 90 } : { rotate: 0 }}
+                    whileHover={{ scale: 1.12, rotate: 180 }}
+                    whileTap={{ scale: 0.9, rotate: 180 }}
+                    transition={{
+                      type: 'spring',
+                      stiffness: 500,
+                      damping: 22,
+                    }}
+                  >
+                    {isProcessingFiles ? (
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
+                    ) : (
+                      <Plus className="h-[22px] w-[22px] stroke-[2.25]" />
+                    )}
+                  </motion.span>
+                </motion.button>
+
+                {/* Composer text / speech-to-text mode */}
                 {voiceInputActive ? (
                   <div
-                    className="relative flex min-h-[58px] w-full min-w-0 items-center gap-3 px-4 pt-3 pb-1 sm:min-h-[64px] sm:px-4 sm:pt-3"
+                    className="relative flex min-w-0 flex-1 items-center gap-2 px-1 sm:gap-3"
                     aria-live="polite"
-                    aria-label="Listening for voice input"
+                    aria-label="Listening for speech"
                   >
-                    <span className="sr-only">Listening...</span>
-                    <div className="flex min-w-0 flex-1 items-center gap-[3px] overflow-hidden" aria-hidden="true">
-                      {Array.from({ length: 44 }, (_, index) => (
-                        <span
-                          key={index}
-                          className="h-1 w-1 shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600"
-                        />
-                      ))}
-                      <div className="ml-1 flex h-10 min-w-0 flex-1 items-center justify-center gap-[3px] overflow-hidden">
-                        {Array.from({ length: 30 }, (_, index) => {
-                          const heights = [10, 16, 25, 14, 34, 20, 40, 27, 48, 32, 56, 38, 50, 30, 44, 58, 36, 52, 28, 46, 34, 54, 24, 42, 30, 50, 22, 38, 18, 12];
+                    <span className="shrink-0 text-[13px] font-medium text-zinc-400 sm:text-sm">
+                      Listening...
+                    </span>
+
+                    <div className="relative flex h-8 min-w-0 flex-1 items-center overflow-hidden">
+                      <div className="absolute inset-y-1 left-0 right-0 flex items-center gap-[4px] opacity-75">
+                        {Array.from({ length: 54 }, (_, index) => {
+                          const hasSpeech = voiceDraftVersion > 0;
+                          const height = hasSpeech
+                            ? 5 + ((index * 17) % 18)
+                            : 3 + ((index * 7) % 5);
                           return (
                             <motion.span
                               key={index}
-                              className="w-[3px] shrink-0 rounded-full bg-zinc-500 dark:bg-zinc-400"
-                              animate={{ height: [Math.max(6, heights[index] * 0.55), heights[index], Math.max(6, heights[index] * 0.7)] }}
-                              transition={{ duration: 0.8 + (index % 5) * 0.08, repeat: Infinity, repeatType: 'mirror', ease: 'easeInOut', delay: index * 0.025 }}
+                              className="w-[3px] shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600"
+                              animate={hasSpeech
+                                ? { scaleY: [0.55, 1.35, 0.7, 1.05, 0.55] }
+                                : { scaleY: [0.7, 1, 0.7] }}
+                              transition={{
+                                duration: 0.9 + (index % 5) * 0.08,
+                                repeat: Infinity,
+                                delay: index * 0.018,
+                                ease: 'easeInOut',
+                              }}
+                              style={{ height: `${height}px`, transformOrigin: 'center' }}
                             />
                           );
                         })}
                       </div>
-                      {Array.from({ length: 6 }, (_, index) => (
-                        <span
-                          key={`tail-${index}`}
-                          className="h-1 w-1 shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600"
-                        />
-                      ))}
                     </div>
 
-                    <div className="ml-auto flex shrink-0 items-center gap-1">
-                      <motion.button
-                        type="button"
-                        onClick={cancelVoiceInput}
-                        aria-label="Reject voice text"
-                        title="Reject"
-                        whileHover={{ scale: 1.06 }}
-                        whileTap={{ scale: 0.9 }}
-                        className="flex h-10 w-10 items-center justify-center rounded-full text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white sm:h-11 sm:w-11"
-                      >
-                        <X className="h-[20px] w-[20px]" strokeWidth={2.1} />
-                      </motion.button>
-                      <motion.button
-                        type="button"
-                        onClick={commitVoiceInput}
-                        aria-label="Accept voice text"
-                        title="Accept"
-                        whileHover={{ scale: 1.06 }}
-                        whileTap={{ scale: 0.9 }}
-                        className="flex h-10 w-10 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-11"
-                      >
-                        <Check className="h-[21px] w-[21px]" strokeWidth={2.2} />
-                      </motion.button>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={cancelVoiceInput}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-800 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                      aria-label="Discard voice input"
+                      title="Discard"
+                    >
+                      <X className="h-5 w-5" strokeWidth={2.1} />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={commitVoiceInput}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                      aria-label="Use voice input"
+                      title="Use voice input"
+                    >
+                      <Check className="h-5 w-5" strokeWidth={2.1} />
+                    </button>
                   </div>
                 ) : (
-                  <div className="relative w-full min-w-0 px-4 pt-3 pb-1 sm:px-4 sm:pt-3 md:order-2 md:flex-1 md:px-2 md:pt-0 md:pb-0">
+                  <div className="relative min-w-0 flex-1 flex items-center">
                     <textarea
                       ref={inputRef}
                       value={input}
@@ -2666,7 +2820,7 @@ const cleanMessageContent = (content: unknown): string => {
                       }}
                       placeholder="Ask Anything"
                       rows={1}
-                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent p-0 text-[17px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:text-[18px] sm:min-h-[46px]"
+                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent px-1 py-2 text-[15px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:min-h-[46px] sm:py-2.5"
                       onInput={(e) => {
                         const t = e.target as HTMLTextAreaElement;
                         t.style.height = 'auto';
@@ -2676,126 +2830,106 @@ const cleanMessageContent = (content: unknown): string => {
                   </div>
                 )}
 
-                {/* Bottom action row: plus → model → mic → send/live talk */}
-                <div className="flex w-full min-w-0 items-center gap-1 px-2.5 pb-2.5 pt-1.5 sm:gap-2 sm:px-3 sm:pb-3 sm:pt-1.5 md:contents">
-                  {/* + attachment button */}
+                {/* Think / model selector */}
+                <div className="relative shrink-0">
                   <motion.button
                     type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isTyping || isProcessingFiles}
-                    aria-label="Attach files"
-                    title="Attach files"
-                    whileHover={{ scale: 1.04 }}
-                    whileTap={{ scale: 0.94 }}
-                    className="group relative order-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                    onClick={() => setModelPickerOpen(prev => !prev)}
+                    disabled={isTyping}
+                    aria-haspopup="listbox"
+                    aria-expanded={modelPickerOpen}
+                    whileHover={{ y: -1 }}
+                    whileTap={{ scale: 0.97 }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                    className="group relative inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border-0 bg-transparent px-2 text-black shadow-none outline-none transition-colors hover:bg-zinc-100/70 dark:bg-transparent dark:text-white dark:hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50 sm:px-2.5"
                   >
-                    {isProcessingFiles ? (
-                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
-                    ) : (
-                      <Plus className="h-[22px] w-[22px] stroke-[2.25]" />
-                    )}
+                    <span className="max-w-[190px] truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:text-sm">
+                      {activeModel.name}
+                    </span>
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
+                  
                   </motion.button>
 
-                  <div className="min-w-0 flex-1" />
-
-                  {/* Model selector */}
-                  <div className="relative order-3 shrink-0">
-                    <motion.button
-                      type="button"
-                      onClick={() => setModelPickerOpen(prev => !prev)}
-                      disabled={isTyping}
-                      aria-haspopup="listbox"
-                      aria-expanded={modelPickerOpen}
-                      whileHover={{ y: -1 }}
-                      whileTap={{ scale: 0.97 }}
-                      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                      className="group relative inline-flex h-10 shrink-0 items-center gap-1 rounded-lg border-0 bg-transparent px-1.5 text-black shadow-none outline-none transition-colors hover:bg-zinc-100/70 dark:bg-transparent dark:text-white dark:hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50 sm:gap-1.5 sm:px-2"
-                    >
-                      <span className="max-w-[135px] truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:max-w-[190px] sm:text-sm">
-                        {MODEL_OPTIONS.find(model => model.id === selectedModel)?.name || MODEL_OPTIONS[0].name}
-                      </span>
-                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
-                    </motion.button>
-
-                    <AnimatePresence>
-                      {modelPickerOpen && (
-                        <motion.div
-                          initial={{ opacity: 0, y: 8, scale: 0.97 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, y: 8, scale: 0.97 }}
-                          transition={{ duration: 0.16, ease: 'easeOut' }}
-                          role="listbox"
-                          aria-label="Select AI model"
-                          className="fixed bottom-[calc(104px+env(safe-area-inset-bottom,0px))] left-2 z-[99999] w-[min(360px,calc(100vw-16px))] max-w-[calc(100vw-16px)] max-h-[min(360px,calc(100dvh-150px))] overflow-y-auto overflow-x-hidden rounded-xl border border-zinc-200/90 bg-white/95 p-1.5 shadow-2xl shadow-zinc-900/20 backdrop-blur-2xl dark:border-zinc-700/90 dark:bg-zinc-900/95 dark:shadow-black/50 sm:absolute sm:bottom-[calc(100%+8px)] sm:left-auto sm:right-0 sm:w-[360px] sm:max-w-[calc(100vw-24px)] sm:max-h-[420px] sm:overflow-hidden sm:rounded-2xl sm:p-2"
-                        >
-                          <div className="px-2 pb-2 pt-1">
-                            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400 dark:text-zinc-500">
-                              Select AI model
-                            </p>
-                          </div>
-                          <div className="space-y-1">
-                            {MODEL_OPTIONS.map(option => {
-                              const Icon = option.icon;
-                              const selected = option.id === selectedModel;
-                              return (
-                                <motion.button
-                                  key={option.id}
-                                  type="button"
-                                  role="option"
-                                  aria-selected={selected}
-                                  onPointerDown={(event) => {
-                                    event.stopPropagation();
-                                    chooseModel(option.id);
-                                  }}
-                                  onClick={(event) => event.preventDefault()}
-                                  whileHover={{ x: 2 }}
-                                  whileTap={{ scale: 0.985 }}
-                                  transition={{ type: 'spring', stiffness: 450, damping: 28 }}
-                                  className={`flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-all ${selected ? 'border-zinc-500 bg-zinc-100 shadow-sm dark:border-zinc-500 dark:bg-zinc-950/40' : 'border-transparent hover:border-zinc-200 hover:bg-zinc-50 dark:hover:border-zinc-700 dark:hover:bg-zinc-800/80'}`}
-                                >
-                                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${selected ? 'bg-black text-white shadow-md' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'}`}>
-                                    <Icon className="h-4 w-4" />
+                  <AnimatePresence>
+                    {modelPickerOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 8, scale: 0.97 }}
+                        transition={{ duration: 0.16, ease: 'easeOut' }}
+                        role="listbox"
+                        aria-label="Select AI model"
+                        className="fixed bottom-[calc(88px+env(safe-area-inset-bottom,0px))] right-2 z-[99999] w-[min(360px,calc(100vw-16px))] max-w-[calc(100vw-16px)] max-h-[min(360px,calc(100dvh-180px))] overflow-y-auto overflow-x-hidden rounded-xl border border-zinc-200/90 bg-white/95 p-1.5 shadow-2xl shadow-zinc-900/20 backdrop-blur-2xl dark:border-zinc-700/90 dark:bg-zinc-900/95 dark:shadow-black/50 sm:absolute sm:bottom-[calc(100%+8px)] sm:right-0 sm:w-[360px] sm:max-w-[calc(100vw-24px)] sm:max-h-[420px] sm:overflow-hidden sm:rounded-2xl sm:p-2"
+                      >
+                        <div className="px-2 pb-2 pt-1">
+                          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400 dark:text-zinc-500">
+                            Select AI model
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          {MODEL_OPTIONS.map(option => {
+                            const Icon = option.icon;
+                            const selected = option.id === selectedModel;
+                            return (
+                              <motion.button
+                                key={option.id}
+                                type="button"
+                                role="option"
+                                aria-selected={selected}
+                                onClick={() => chooseModel(option.id)}
+                                whileHover={{ x: 2 }}
+                                whileTap={{ scale: 0.985 }}
+                                transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+                                className={`flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-all ${selected ? 'border-zinc-500 bg-zinc-100 shadow-sm dark:border-zinc-500 dark:bg-zinc-950/40' : 'border-transparent hover:border-zinc-200 hover:bg-zinc-50 dark:hover:border-zinc-700 dark:hover:bg-zinc-800/80'}`}
+                              >
+                                <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${selected ? 'bg-black text-white shadow-md' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'}`}>
+                                  <Icon className="h-4 w-4" />
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="flex items-center gap-2">
+                                    <span className="truncate text-xs font-medium text-zinc-800 dark:text-zinc-100">{option.name}</span>
                                   </span>
-                                  <span className="min-w-0 flex-1">
-                                    <span className="flex items-center gap-2">
-                                      <span className="truncate text-xs font-medium text-zinc-800 dark:text-zinc-100">{option.name}</span>
-                                    </span>
-                                    <span className="mt-0.5 block truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
-                                      {option.description}{option.vision ? ' · Vision' : ''}
-                                    </span>
+                                  <span className="mt-0.5 block truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
+                                    {option.description}{option.vision ? ' · Vision' : ''}
                                   </span>
-                                  {selected && <Check className="h-4 w-4 shrink-0 text-zinc-600 dark:text-zinc-300" />}
-                                </motion.button>
-                              );
-                            })}
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
+                                </span>
+                                {selected && <Check className="h-4 w-4 shrink-0 text-zinc-600 dark:text-zinc-600 dark:text-zinc-300" />}
+                              </motion.button>
+                            );
+                          })}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
 
-                  {!voiceInputActive && (
-                    <motion.button
-                      type="button"
-                      onClick={startVoiceInput}
-                      disabled={isTyping || isProcessingFiles}
-                      aria-label="Voice input"
-                      title="Voice input"
-                      whileHover={{ scale: 1.06 }}
-                      whileTap={{ scale: 0.9 }}
-                      className="order-4 flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-9"
-                    >
-                      <Mic className="h-[20px] w-[20px]" strokeWidth={2} />
-                    </motion.button>
-                  )}
+                {!voiceInputActive && (
+                  <motion.button
+                    type="button"
+                    onClick={startVoiceInput}
+                    disabled={isTyping || isProcessingFiles}
+                    aria-label="Voice input"
+                    title="Voice input"
+                    whileHover={{ scale: 1.06 }}
+                    whileTap={{ scale: 0.9 }}
+                    className="flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-9"
+                  >
+                    <Mic className="h-[20px] w-[20px]" strokeWidth={2} />
+                  </motion.button>
+                )}
 
-                  {/* Live Talk / Send */}
+                {/* Live Talk / Send occupy the same action slot, like ChatGPT. */}
+                <AnimatePresence mode="wait" initial={false}>
                   {!isTyping && !input.trim() && filePreviews.length === 0 ? (
                     <motion.button
+                      key="live-talk"
                       type="button"
                       onClick={() => setLiveTalkOpen(true)}
                       aria-label="Open Live Talk"
                       title="Live Talk"
+                      initial={{ opacity: 0, scale: 0.88, y: 2 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.88, y: 2 }}
                       whileHover={{ scale: 1.06 }}
                       whileTap={{ scale: 0.92 }}
                       className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#ec6aa8] text-white shadow-[0_8px_20px_rgba(236,106,168,.22)] transition hover:bg-[#e85f9f] sm:h-11 sm:w-11"
@@ -2804,14 +2938,19 @@ const cleanMessageContent = (content: unknown): string => {
                     </motion.button>
                   ) : (
                     <motion.button
+                      key="send"
                       type="button"
                       onClick={isTyping ? handleStopResponse : () => handleSendMessage()}
                       disabled={!input.trim() && (!Array.isArray(filePreviews) || filePreviews.length === 0) && !isTyping}
                       aria-label={isTyping ? 'Stop response' : 'Send message'}
                       title={isTyping ? 'Stop response' : 'Send message'}
+                      initial={{ opacity: 0, scale: 0.88, y: 2 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.88, y: 2 }}
                       whileHover={{ scale: isTyping || input.trim() || filePreviews.length ? 1.06 : 1, y: -1 }}
                       whileTap={{ scale: 0.92 }}
-                      className={`relative order-5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isTyping ? 'border-[#ec6aa8] bg-[#ec6aa8] text-white shadow-[#ec6aa8]/20' : 'border-zinc-300 bg-white hover:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-800 dark:hover:border-zinc-500'}`}
+                      transition={{ type: 'spring', stiffness: 450, damping: 25 }}
+                      className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isTyping ? 'border-[#ec6aa8] bg-[#ec6aa8] text-white shadow-[#ec6aa8]/20' : 'border-zinc-300 bg-white hover:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-800 dark:hover:border-zinc-500'}`}
                     >
                       {isTyping ? (
                         <span className="relative flex h-full w-full items-center justify-center">
@@ -2822,7 +2961,7 @@ const cleanMessageContent = (content: unknown): string => {
                       )}
                     </motion.button>
                   )}
-                </div>
+                </AnimatePresence>
               </div>
 
             </div>
@@ -2871,7 +3010,7 @@ const cleanMessageContent = (content: unknown): string => {
                 {previewFile.type.startsWith('image/') ? (
                   <div className="flex min-h-full items-center justify-center"><img src={previewUrl} alt={previewFile.name} className="max-h-full max-w-full rounded-xl object-contain shadow-lg" /></div>
                 ) : previewFile.type === 'application/pdf' ? (
-                  <iframe src={`${previewUrl}#toolbar=1&navpanes=0&view=FitH`} title={`PDF preview: ${previewFile.name}`} className="h-full min-h-[70vh] w-full rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800" />
+                  <MobileSafePdfPreview url={previewUrl} fileName={previewFile.name} />
                 ) : previewText !== null ? (
                   <pre className="mx-auto min-h-full max-w-4xl whitespace-pre-wrap break-words rounded-xl bg-white p-5 font-mono text-xs leading-relaxed text-zinc-800 shadow-sm dark:bg-zinc-900 dark:text-zinc-200">{previewText}</pre>
                 ) : (
