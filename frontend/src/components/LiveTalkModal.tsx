@@ -174,7 +174,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
   const socketRef = useRef<WebSocket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const processorRef = useRef<AudioWorkletNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const silentGainRef = useRef<GainNode | null>(null);
   const audioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
@@ -188,6 +188,43 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
   const userTurnRef = useRef('');
   const assistantTurnRef = useRef('');
   const endingRef = useRef(false);
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+
+  const releaseWakeLock = useCallback(async () => {
+    const wakeLock = wakeLockRef.current;
+    wakeLockRef.current = null;
+    if (!wakeLock) return;
+    try { await wakeLock.release(); } catch {}
+  }, []);
+
+  const requestWakeLock = useCallback(async () => {
+    if (!('wakeLock' in navigator) || !navigator.wakeLock) return;
+    if (document.visibilityState !== 'visible') return;
+    try {
+      if (wakeLockRef.current?.released === false) return;
+      wakeLockRef.current = await navigator.wakeLock.request('screen');
+    } catch {
+      // Screen Wake Lock is optional and can be denied by the browser/device.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      void releaseWakeLock();
+      return;
+    }
+
+    void requestWakeLock();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && open) {
+        void requestWakeLock();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [open, requestWakeLock, releaseWakeLock]);
 
   const [connected, setConnected] = useState(false);
   const [listening, setListening] = useState(false);
@@ -352,7 +389,8 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     audioContextRef.current = null;
     setConnected(false);
     setStatus('Live Talk ended');
-  }, [cleanupAudioInput, closeSocket, stopAudioPlayback]);
+    void releaseWakeLock();
+  }, [cleanupAudioInput, closeSocket, releaseWakeLock, stopAudioPlayback]);
 
   const playPcm24k = useCallback(async (base64: string) => {
     if (endingRef.current) return;
@@ -413,20 +451,24 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     audioContextRef.current = context;
     if (context.state === 'suspended') await context.resume();
 
+    const workletUrl = new URL('../audio/pcm-capture-worklet.ts', import.meta.url);
+    await context.audioWorklet.addModule(workletUrl);
+
     const source = context.createMediaStreamSource(stream);
-    const processor = context.createScriptProcessor(2048, 1, 1);
+    const processor = new AudioWorkletNode(context, 'twinkle-pcm-capture');
     const silentGain = context.createGain();
     silentGain.gain.value = 0;
 
-    processor.onaudioprocess = event => {
+    processor.port.onmessage = event => {
       const activeSocket = socketRef.current;
       if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) return;
-      const pcm = downsampleTo16k(event.inputBuffer.getChannelData(0), context.sampleRate);
+
+      const pcmBytes = new Uint8Array(event.data as ArrayBuffer);
       try {
         activeSocket.send(JSON.stringify({
           realtimeInput: {
             audio: {
-              data: bytesToBase64(new Uint8Array(pcm.buffer)),
+              data: bytesToBase64(pcmBytes),
               mimeType: 'audio/pcm;rate=16000',
             },
           },
@@ -653,24 +695,13 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     // Persist the final partial turn, if any. If the last completed turn was
     // already saved, reuse the existing session ID instead of creating or
     // saving anything again.
-    // Always wait for both the final turn and any already-running save.
-    // A completed turn may have cleared the refs while its network request is
-    // still in flight. If we only inspect hasFinalTurn here, Chat.tsx can be
-    // opened before that database write finishes.
-    const finalTurnPromise = hasFinalTurn
+    const savePromise = hasFinalTurn
       ? persistCompletedTurn()
       : Promise.resolve(existingSessionId);
-    const pendingSave = liveSavePromiseRef.current ?? Promise.resolve();
-    const pendingSession = liveSessionPromiseRef.current ?? Promise.resolve(existingSessionId);
 
-    const savePromise = Promise.all([finalTurnPromise, pendingSave, pendingSession])
-      .then(results => {
-        const ids = results.map(Number).filter(Number.isFinite);
-        return ids.length > 0 ? ids[ids.length - 1] : liveSessionIdRef.current;
-      });
-
-    // Close the Live Talk UI immediately. The parent callback is fired only
-    // after all persistence promises have settled.
+    // Close the Live Talk UI immediately. The parent callback is deliberately
+    // fired only after the final save finishes, so Chat.tsx can safely load
+    // the complete database transcript.
     cleanup();
     onClose();
 
