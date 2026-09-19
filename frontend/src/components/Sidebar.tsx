@@ -5,7 +5,7 @@ import {
   LogOut, Trash2, X, Search, SquarePen,
   MoreHorizontal, Pin, PinOff, Edit3,
   MessageCircle, Sun, Moon, Sparkles, Mic,
-  Settings2, UserCircle2, ChevronRight, PanelLeftClose,
+  Settings2, UserCircle2, ChevronRight, PanelLeft,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import UserAvatar from './UserAvatar'; 
@@ -954,6 +954,8 @@ export default function Sidebar({
               <h2 className="text-lg font-medium tracking-tight text-zinc-900/90 dark:text-white/90">Twinkle</h2>
             </div>
             <div className="flex items-center gap-2 shrink-0">
+              <ThemeToggleButton />
+
               <motion.button
                 type="button"
                 onClick={onMobileClose}
@@ -969,10 +971,9 @@ export default function Sidebar({
                   hover:border-zinc-300 dark:hover:border-zinc-600
                   shadow-sm transition-all duration-200"
               >
-                <X className="w-4 h-4" strokeWidth={1.8} />
+                
+                              <PanelLeft className="w-4 h-4" strokeWidth={1.8} />
               </motion.button>
-
-              <ThemeToggleButton />
             </div>
           </div>
 
@@ -1065,17 +1066,30 @@ export default function Sidebar({
               onClick={e => e.stopPropagation()}
             >
               <div className="flex items-center justify-between px-5 pt-5 pb-2 shrink-0">
-                <button
-                  onClick={collapseDesktop}
-                  className="flex items-center gap-2.5 group"
-                  title="Close sidebar"
-                >
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-600 transition group-hover:bg-zinc-100 group-hover:text-zinc-950 dark:text-zinc-300 dark:group-hover:bg-zinc-900 dark:group-hover:text-white">
-                    <PanelLeftClose className="h-5 w-5" strokeWidth={1.7} />
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 bg-transparent rounded-xl flex items-center justify-center p-1.5 shrink-0">
+                    <StormLogo className="w-full h-full text-zinc-900 dark:text-white" />
                   </div>
                   <h2 className="text-xl font-medium tracking-tight text-zinc-900/90 dark:text-white/90">Twinkle</h2>
-                </button>
-                <ThemeToggleButton />
+                </div>
+
+                <motion.button
+                  type="button"
+                  onClick={collapseDesktop}
+                  aria-label="Close sidebar"
+                  title="Close sidebar"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.92 }}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full
+                    bg-zinc-100 dark:bg-zinc-800
+                    border border-zinc-200 dark:border-zinc-700
+                    text-zinc-500 dark:text-zinc-400
+                    hover:text-zinc-700 dark:hover:text-zinc-200
+                    hover:border-zinc-300 dark:hover:border-zinc-600
+                    shadow-sm transition-all duration-200"
+                >
+                  <PanelLeft className="w-4 h-4" strokeWidth={1.8} />
+                </motion.button>
               </div>
 
               <SessionList
