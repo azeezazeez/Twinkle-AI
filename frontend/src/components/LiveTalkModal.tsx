@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Mic, MicOff } from 'lucide-react';
 import { chatApi, createLiveToken } from '../lib/api';
 import { APP_LANGUAGE_KEY, getLanguageInstruction, type AppLanguage } from '../lib/i18n';
+import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw';
 
 type Props = {
   open: boolean;
@@ -447,8 +448,20 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     audioContextRef.current = context;
     if (context.state === 'suspended') await context.resume();
 
-    const workletUrl = new URL('../audio/pcm-capture-worklet.js', import.meta.url);
-    await context.audioWorklet.addModule(workletUrl);
+    // Load the TypeScript worklet source as raw text and create a Blob with
+    // an explicit JavaScript MIME type. This avoids Vite/Vercel serving the
+    // .ts asset as video/mp2t (the error shown in Chrome).
+    const workletBlob = new Blob(
+      [pcmCaptureWorkletSource],
+      { type: 'application/javascript' },
+    );
+    const workletUrl = URL.createObjectURL(workletBlob);
+
+    try {
+      await context.audioWorklet.addModule(workletUrl);
+    } finally {
+      URL.revokeObjectURL(workletUrl);
+    }
 
     const source = context.createMediaStreamSource(stream);
     const processor = new AudioWorkletNode(context, 'twinkle-pcm-capture');
