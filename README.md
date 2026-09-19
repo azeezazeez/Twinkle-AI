@@ -337,31 +337,6 @@ npm run build
 
 ---
 
-# 🐳 Docker
-
-The backend includes a Dockerfile.
-
-```bash
-cd backend
-docker build -t twinkle-ai-backend .
-```
-
-Run:
-
-```bash
-docker run -p 8080:8080 \
-  -e DB_URL="your_database_url" \
-  -e DB_USERNAME="your_database_user" \
-  -e DB_PASSWORD="your_database_password" \
-  -e REDIS_URL="your_redis_url" \
-  -e GROQ_API_KEY="your_groq_key" \
-  -e GEMINI_API_KEY="your_gemini_key" \
-  -e FRONTEND_URL="https://your-frontend-domain.com" \
-  twinkle-ai-backend
-```
-
----
-
 # 📁 Project Structure
 
 ```text
@@ -493,20 +468,6 @@ Unknown routes redirect to `/`.
 | POST   | `/api/chat/live/turn`             |     Yes | Save Live turn         |
 | POST   | `/api/chat/live-save`             |     Yes | Save Live conversation |
 | POST   | `/api/live/token`                 |     Yes | Create Live token      |
-
----
-
-# ⚠️ Frontend/Backend Endpoint Note
-
-The current frontend API client contains:
-
-```text
-POST /api/chat/session/{sessionId}/share
-```
-
-However, the current backend `ChatController` does **not** expose a matching `/share` endpoint.
-
-Therefore, the share-session functionality is currently referenced by the frontend but is **not implemented by the backend** in the uploaded project.
 
 ---
 
