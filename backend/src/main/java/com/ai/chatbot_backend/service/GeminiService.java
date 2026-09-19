@@ -78,6 +78,10 @@ public class GeminiService {
             List<String> attachmentDataUrls,
             String requestedLanguage) {
 
+        if (apiKey == null || apiKey.isBlank() || apiKey.equalsIgnoreCase("YOUR_GEMINI_API_KEY")) {
+            throw new AIServiceException("Gemini API key is not configured.");
+        }
+
         List<Map<String, Object>> contents = new ArrayList<>();
 
         if (conversationHistory != null) {
