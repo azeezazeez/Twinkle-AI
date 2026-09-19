@@ -9,7 +9,7 @@ import StormLogo from '../components/StormLogo';
 import ConfirmationModal from '../components/ConfirmationModal'; 
 import LiveTalkModal from '../components/LiveTalkModal'; 
 
-import { 
+import {
   ArrowDown, ArrowUp, 
   Copy, Check, Edit2,
   X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, Mic, AudioLines,
@@ -2760,38 +2760,33 @@ const cleanMessageContent = (content: unknown): string => {
                     aria-live="polite"
                     aria-label="Listening for voice input"
                   >
-                    <motion.button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      aria-label="Attach files"
-                      title="Attach files"
-                      whileHover={{ scale: 1.04 }}
-                      whileTap={{ scale: 0.92 }}
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 sm:h-11 sm:w-11"
-                    >
-                      <Plus className="h-[22px] w-[22px] stroke-[2]" />
-                    </motion.button>
-
                     <div className="relative flex h-10 min-w-0 flex-1 items-center overflow-hidden" aria-hidden="true">
-                      <AnimatePresence initial={false}>
-                        {voiceInputActive && (
-                          <div
-                            className="absolute left-0 top-1/2 flex h-10 w-[210%] -translate-y-1/2 items-center"
-                          >
-                            <motion.div
-                              className="flex h-full w-full shrink-0 items-center gap-[4px]"
-                              animate={{ x: ['0%', '-50%'] }}
-                              transition={{ duration: 8, repeat: Infinity, ease: 'linear' }}
-                            >
-                              {[...Array(128)].map((_, index) => {
-                                const heights = [7, 13, 22, 10, 31, 16, 39, 24, 47, 32, 54, 40, 29, 50, 37, 56, 31, 45, 24, 52, 34, 48, 20, 41, 29, 54, 37, 25, 45, 31, 49, 19, 39, 27, 47, 33, 43, 23, 35, 17, 27, 11, 19, 34];
-                                const height = heights[index % heights.length];
-                                return <span key={index} className="w-[4px] shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500" style={{ height: `${Math.max(8, height)}px` }} />;
-                              })}
-                            </motion.div>
-                          </div>
-                        )}
-                      </AnimatePresence>
+                      <motion.div
+                        className="flex h-full w-full min-w-0 items-center justify-between gap-[3px]"
+                        animate={{ opacity: [0.86, 1, 0.86] }}
+                        transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
+                      >
+                        {[...Array(72)].map((_, index) => {
+                          const heights = [8, 13, 20, 11, 28, 16, 36, 22, 43, 30, 48, 34, 25, 44, 31, 50, 27, 40, 21, 46, 33, 42, 18, 37, 26, 47, 32, 22, 41, 28, 45, 19, 35, 25, 43, 30];
+                          const height = heights[index % heights.length];
+
+                          return (
+                            <motion.span
+                              key={index}
+                              className="h-[8px] min-w-0 flex-1 max-w-[4px] shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500"
+                              animate={{
+                                height: [`${Math.max(8, height * 0.65)}px`, `${Math.max(8, height)}px`, `${Math.max(8, height * 0.65)}px`],
+                              }}
+                              transition={{
+                                duration: 2.2 + (index % 6) * 0.12,
+                                repeat: Infinity,
+                                delay: index * 0.025,
+                                ease: 'easeInOut',
+                              }}
+                            />
+                          );
+                        })}
+                      </motion.div>
                     </div>
 
                     <div className="flex shrink-0 items-center gap-0">
