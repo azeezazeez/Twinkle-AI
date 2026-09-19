@@ -27,19 +27,20 @@ interface Props {
   onSettings?: () => void;
 }
 
+/*
+ * Mobile-safe PDF renderer.
+ * Android Chrome often opens Blob/PDF iframe previews in its native PDF
+ * viewer instead of rendering the document inside the Twinkle preview modal.
+ * PDF.js renders the pages directly onto canvases, so the same preview UI
+ * works consistently on mobile and desktop without adding an npm dependency.
+ */
+let pdfJsPromise: Promise<any> | null = null;
 
-type PdfJsModule = {
-  getDocument: (source: { url: string }) => { promise: Promise<any> };
-  GlobalWorkerOptions: { workerSrc: string };
-};
+const loadPdfJs = (): Promise<any> => {
+  if (pdfJsPromise) return pdfJsPromise;
 
-let pdfJsLoader: Promise<PdfJsModule> | null = null;
-
-const loadPdfJs = (): Promise<PdfJsModule> => {
-  if (pdfJsLoader) return pdfJsLoader;
-
-  pdfJsLoader = new Promise((resolve, reject) => {
-    const existing = (window as any).pdfjsLib as PdfJsModule | undefined;
+  pdfJsPromise = new Promise((resolve, reject) => {
+    const existing = (window as any).pdfjsLib;
     if (existing) {
       resolve(existing);
       return;
@@ -49,66 +50,68 @@ const loadPdfJs = (): Promise<PdfJsModule> => {
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
     script.async = true;
     script.onload = () => {
-      const pdfjs = (window as any).pdfjsLib as PdfJsModule | undefined;
+      const pdfjs = (window as any).pdfjsLib;
       if (!pdfjs) {
-        reject(new Error('PDF renderer failed to load.'));
+        reject(new Error('PDF.js failed to initialize.'));
         return;
       }
+
       pdfjs.GlobalWorkerOptions.workerSrc =
         'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
       resolve(pdfjs);
     };
-    script.onerror = () => reject(new Error('PDF renderer could not be loaded.'));
+    script.onerror = () => reject(new Error('Unable to load PDF renderer.'));
     document.head.appendChild(script);
   });
 
-  return pdfJsLoader;
+  return pdfJsPromise;
 };
 
-const MobileSafePdfPreview = ({ url, fileName }: { url: string; fileName: string }) => {
+const PdfPreview = ({ url, fileName }: { url: string; fileName: string }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [rendering, setRendering] = useState(true);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    let renderTask: any = null;
+    let pdfDocument: any = null;
+    const renderTasks: any[] = [];
 
     const renderPdf = async () => {
-      setRendering(true);
+      setLoading(true);
       setError(false);
 
       try {
         const pdfjs = await loadPdfJs();
         if (cancelled || !containerRef.current) return;
 
-        const pdf = await pdfjs.getDocument({ url }).promise;
+        const loadingTask = pdfjs.getDocument({ url });
+        pdfDocument = await loadingTask.promise;
         if (cancelled || !containerRef.current) return;
 
         const container = containerRef.current;
         container.innerHTML = '';
 
-        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+        for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
           if (cancelled) return;
 
-          const page = await pdf.getPage(pageNumber);
+          const page = await pdfDocument.getPage(pageNumber);
           const baseViewport = page.getViewport({ scale: 1 });
-          const availableWidth = Math.max(container.clientWidth - 16, 280);
-          const scale = availableWidth / baseViewport.width;
+          const width = Math.max(container.clientWidth - 2, 280);
+          const scale = width / baseViewport.width;
           const viewport = page.getViewport({ scale });
+          const outputScale = Math.min(window.devicePixelRatio || 1, 2);
 
           const pageShell = document.createElement('div');
           pageShell.className =
             'mx-auto mb-4 w-full overflow-hidden rounded-xl bg-white shadow-sm';
-          pageShell.style.maxWidth = `${Math.ceil(viewport.width)}px`;
 
           const canvas = document.createElement('canvas');
-          const outputScale = Math.min(window.devicePixelRatio || 1, 2);
           canvas.width = Math.ceil(viewport.width * outputScale);
           canvas.height = Math.ceil(viewport.height * outputScale);
-          canvas.style.width = `${Math.ceil(viewport.width)}px`;
-          canvas.style.height = `${Math.ceil(viewport.height)}px`;
-          canvas.className = 'block h-auto w-full';
+          canvas.style.width = '100%';
+          canvas.style.height = 'auto';
+          canvas.className = 'block';
 
           pageShell.appendChild(canvas);
           container.appendChild(pageShell);
@@ -116,23 +119,23 @@ const MobileSafePdfPreview = ({ url, fileName }: { url: string; fileName: string
           const context = canvas.getContext('2d', { alpha: false });
           if (!context) throw new Error('Canvas rendering is unavailable.');
 
-          renderTask = page.render({
+          const renderTask = page.render({
             canvasContext: context,
             viewport,
-            transform:
-              outputScale !== 1
-                ? [outputScale, 0, 0, outputScale, 0, 0]
-                : undefined,
+            transform: outputScale !== 1
+              ? [outputScale, 0, 0, outputScale, 0, 0]
+              : undefined,
           });
 
+          renderTasks.push(renderTask);
           await renderTask.promise;
         }
 
-        if (!cancelled) setRendering(false);
+        if (!cancelled) setLoading(false);
       } catch (renderError) {
         console.error('PDF preview rendering failed:', renderError);
         if (!cancelled) {
-          setRendering(false);
+          setLoading(false);
           setError(true);
         }
       }
@@ -142,30 +145,27 @@ const MobileSafePdfPreview = ({ url, fileName }: { url: string; fileName: string
 
     return () => {
       cancelled = true;
-      try {
-        renderTask?.cancel?.();
-      } catch {
-        // Ignore cancellation errors during unmount.
-      }
+      renderTasks.forEach(task => {
+        try { task.cancel?.(); } catch { /* ignore */ }
+      });
+      try { pdfDocument?.destroy?.(); } catch { /* ignore */ }
     };
   }, [url]);
 
   if (error) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center p-6">
-        <div className="max-w-md rounded-2xl bg-white p-8 text-center shadow-sm dark:bg-zinc-900">
-          <FileText className="mx-auto mb-4 h-12 w-12 text-zinc-700 dark:text-zinc-200" />
-          <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100">
-            {fileName}
-          </h3>
-          <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-            PDF preview could not be rendered on this device.
+      <div className="flex min-h-[55vh] items-center justify-center p-6">
+        <div className="max-w-sm rounded-2xl bg-white p-7 text-center shadow-sm dark:bg-zinc-900">
+          <FileText className="mx-auto mb-4 h-11 w-11 text-zinc-700 dark:text-zinc-200" />
+          <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{fileName}</h3>
+          <p className="mt-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+            This PDF could not be rendered inside the preview.
           </p>
           <a
             href={url}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-5 inline-flex items-center rounded-xl bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white dark:bg-white dark:text-zinc-900"
+            className="mt-5 inline-flex rounded-xl bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white dark:bg-white dark:text-zinc-900"
           >
             Open PDF
           </a>
@@ -175,15 +175,13 @@ const MobileSafePdfPreview = ({ url, fileName }: { url: string; fileName: string
   }
 
   return (
-    <div className="relative min-h-full">
-      {rendering && (
-        <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-center py-6">
-          <div className="rounded-full bg-white/95 px-4 py-2 text-xs font-medium text-zinc-500 shadow-sm dark:bg-zinc-900/95 dark:text-zinc-400">
-            Loading PDF preview…
-          </div>
+    <div className="relative mx-auto w-full max-w-4xl">
+      {loading && (
+        <div className="sticky top-2 z-10 mx-auto mb-3 w-fit rounded-full bg-white/95 px-4 py-2 text-xs font-medium text-zinc-500 shadow-sm dark:bg-zinc-900/95 dark:text-zinc-400">
+          Loading PDF preview…
         </div>
       )}
-      <div ref={containerRef} className="mx-auto w-full max-w-4xl" />
+      <div ref={containerRef} className="w-full" />
     </div>
   );
 };
@@ -2666,10 +2664,10 @@ const cleanMessageContent = (content: unknown): string => {
                             <div className="w-20 h-16 rounded-xl overflow-hidden bg-zinc-200 dark:bg-zinc-700 shadow-sm border border-zinc-200/60 cursor-pointer">
                               <img src={fp.preview} alt={fp.file.name} className="w-full h-full object-cover transition-transform group-hover/preview:scale-105" />
                             </div>
-                          ) : fp.file.type === 'application/pdf' && fp.preview ? (
-                            <div className="relative w-20 h-16 rounded-xl overflow-hidden bg-white dark:bg-zinc-800 shadow-sm border border-zinc-200 dark:border-zinc-700 cursor-pointer">
-                              <iframe src={`${fp.preview}#page=1&view=FitH`} title={`Preview ${fp.file.name}`} className="pointer-events-none absolute inset-0 h-[288px] w-[360px] origin-top-left scale-[0.222] bg-white" />
-                              <div className="absolute inset-0 bg-transparent group-hover/preview:bg-zinc-1000/5 transition-colors" />
+                          ) : fp.file.type === 'application/pdf' ? (
+                            <div className="relative flex h-16 w-20 flex-col items-center justify-center gap-1 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm transition-colors group-hover/preview:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:group-hover/preview:border-zinc-500">
+                              <FileText className="h-6 w-6 text-zinc-700 dark:text-zinc-200" />
+                              <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-[8px] font-black uppercase tracking-wider text-zinc-500 dark:bg-zinc-700 dark:text-zinc-300">PDF</span>
                             </div>
                           ) : (
                             <div className="w-20 h-16 rounded-xl flex flex-col items-center justify-center gap-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 cursor-pointer hover:border-zinc-500 dark:hover:border-zinc-500/50 transition-colors">
@@ -2691,7 +2689,7 @@ const cleanMessageContent = (content: unknown): string => {
 
               <div
                 ref={modelPickerRef}
-                className="twinkle-composer-row relative z-[200] flex min-w-0 items-center gap-1.5 px-2.5 py-2 sm:gap-2 sm:px-3 sm:py-2.5 md:px-4"
+                className="twinkle-composer-row relative z-[200] flex min-w-0 flex-nowrap items-center gap-1 px-2.5 py-2 sm:gap-2 sm:px-3 sm:py-2.5 md:px-4"
               >
                 {/* Hidden file input */}
                 <input
@@ -2818,9 +2816,9 @@ const cleanMessageContent = (content: unknown): string => {
                           handleSendMessage();
                         }
                       }}
-                      placeholder="Ask Anything"
+                      placeholder="Ask anything"
                       rows={1}
-                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent px-1 py-2 text-[15px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:min-h-[46px] sm:py-2.5"
+                      className="twinkle-composer-textarea block w-full min-w-0 flex-1 resize-none overflow-y-auto bg-transparent px-1 py-2 text-[15px] font-medium leading-relaxed text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:min-h-[46px] sm:py-2.5"
                       onInput={(e) => {
                         const t = e.target as HTMLTextAreaElement;
                         t.style.height = 'auto';
@@ -2831,7 +2829,7 @@ const cleanMessageContent = (content: unknown): string => {
                 )}
 
                 {/* Think / model selector */}
-                <div className="relative shrink-0">
+                <div className="relative ml-auto shrink-0">
                   <motion.button
                     type="button"
                     onClick={() => setModelPickerOpen(prev => !prev)}
@@ -2841,9 +2839,9 @@ const cleanMessageContent = (content: unknown): string => {
                     whileHover={{ y: -1 }}
                     whileTap={{ scale: 0.97 }}
                     transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                    className="group relative inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border-0 bg-transparent px-2 text-black shadow-none outline-none transition-colors hover:bg-zinc-100/70 dark:bg-transparent dark:text-white dark:hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50 sm:px-2.5"
+                    className="group relative inline-flex h-10 max-w-[118px] shrink-0 items-center gap-1 rounded-lg border-0 bg-transparent px-1.5 text-black shadow-none outline-none transition-colors hover:bg-zinc-100/70 dark:bg-transparent dark:text-white dark:hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50 sm:px-2.5"
                   >
-                    <span className="max-w-[190px] truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:text-sm">
+                    <span className="max-w-[82px] truncate text-[11px] font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:max-w-[180px] sm:text-sm">
                       {activeModel.name}
                     </span>
                     <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
@@ -2912,14 +2910,14 @@ const cleanMessageContent = (content: unknown): string => {
                     title="Voice input"
                     whileHover={{ scale: 1.06 }}
                     whileTap={{ scale: 0.9 }}
-                    className="flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-9"
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-10"
                   >
                     <Mic className="h-[20px] w-[20px]" strokeWidth={2} />
                   </motion.button>
                 )}
 
                 {/* Live Talk / Send occupy the same action slot, like ChatGPT. */}
-                <AnimatePresence mode="wait" initial={false}>
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center sm:h-11 sm:w-11">
                   {!isTyping && !input.trim() && filePreviews.length === 0 ? (
                     <motion.button
                       key="live-talk"
@@ -2961,7 +2959,7 @@ const cleanMessageContent = (content: unknown): string => {
                       )}
                     </motion.button>
                   )}
-                </AnimatePresence>
+                </div>
               </div>
 
             </div>
@@ -3010,7 +3008,7 @@ const cleanMessageContent = (content: unknown): string => {
                 {previewFile.type.startsWith('image/') ? (
                   <div className="flex min-h-full items-center justify-center"><img src={previewUrl} alt={previewFile.name} className="max-h-full max-w-full rounded-xl object-contain shadow-lg" /></div>
                 ) : previewFile.type === 'application/pdf' ? (
-                  <MobileSafePdfPreview url={previewUrl} fileName={previewFile.name} />
+                  <PdfPreview url={previewUrl} fileName={previewFile.name} />
                 ) : previewText !== null ? (
                   <pre className="mx-auto min-h-full max-w-4xl whitespace-pre-wrap break-words rounded-xl bg-white p-5 font-mono text-xs leading-relaxed text-zinc-800 shadow-sm dark:bg-zinc-900 dark:text-zinc-200">{previewText}</pre>
                 ) : (
@@ -3047,4 +3045,3 @@ const cleanMessageContent = (content: unknown): string => {
       />
     </div>
   );
-}
