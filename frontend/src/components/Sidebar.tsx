@@ -953,7 +953,27 @@ export default function Sidebar({
               </div>
               <h2 className="text-lg font-medium tracking-tight text-zinc-900/90 dark:text-white/90">Twinkle</h2>
             </div>
-            <ThemeToggleButton />
+            <div className="flex items-center gap-2 shrink-0">
+              <motion.button
+                type="button"
+                onClick={onMobileClose}
+                aria-label="Close sidebar"
+                title="Close sidebar"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.92 }}
+                className="flex h-9 w-9 items-center justify-center rounded-full
+                  bg-zinc-100 dark:bg-zinc-800
+                  border border-zinc-200 dark:border-zinc-700
+                  text-zinc-500 dark:text-zinc-400
+                  hover:text-zinc-700 dark:hover:text-zinc-200
+                  hover:border-zinc-300 dark:hover:border-zinc-600
+                  shadow-sm transition-all duration-200"
+              >
+                <X className="w-4 h-4" strokeWidth={1.8} />
+              </motion.button>
+
+              <ThemeToggleButton />
+            </div>
           </div>
 
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
