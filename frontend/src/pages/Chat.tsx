@@ -2097,20 +2097,6 @@ const cleanMessageContent = (content: unknown): string => {
     setMessages([]);
     setEditingMessage(null);
   }, [user.id]);
-    return (
-      <div className="flex items-center justify-center h-screen font-sans text-zinc-400 bg-white dark:bg-zinc-950 transition-colors duration-300">
-        <motion.div
-          animate={{ scale: [1, 1.1, 1], opacity: [0.3, 0.6, 0.3] }}
-          transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-          className="flex flex-col items-center gap-4"
-        >
-          <StormLogo className="w-12 h-12 text-black dark:text-white transition-transform duration-500 ease-in-out hover:rotate-180" />
-          <span className="tracking-widest text-[10px] font-black uppercase">Loading...</span>
-        </motion.div>
-      </div>
-    );
-  }
-
   return (
     <div className="relative flex h-[100dvh] min-h-0 w-full max-w-full overflow-hidden bg-white dark:bg-zinc-950 font-sans transition-colors duration-300">
       <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-zinc-1000/5 rounded-full blur-[160px] pointer-events-none" />
