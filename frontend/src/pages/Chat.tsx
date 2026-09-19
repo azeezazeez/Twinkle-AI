@@ -1289,23 +1289,27 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       );
     } finally {
       setIsProcessingFiles(false);
+
+      // The browser keeps focus on the hidden file input after the file picker
+      // closes. Explicitly move focus back to the composer after React has
+      // committed the attachment state so the caret is immediately ready in
+      // "Ask Anything".
+      window.requestAnimationFrame(() => {
+        window.setTimeout(() => {
+          const composer = inputRef.current;
+          if (!composer || voiceInputActive || isTyping) return;
+
+          const activeElement = document.activeElement;
+          if (activeElement instanceof HTMLElement && activeElement !== composer) {
+            activeElement.blur();
+          }
+
+          composer.focus({ preventScroll: true });
+          composer.setSelectionRange(composer.value.length, composer.value.length);
+        }, 0);
+      });
     }
   };
-
-  // After file selection finishes, return focus to the composer so the
-  // user can type immediately instead of remaining on the attachment control.
-  useEffect(() => {
-    if (isProcessingFiles) return;
-
-    const focusComposer = () => {
-      const input = inputRef.current;
-      if (!input || voiceInputActive || isTyping) return;
-      input.focus();
-    };
-
-    const frame = window.requestAnimationFrame(focusComposer);
-    return () => window.cancelAnimationFrame(frame);
-  }, [isProcessingFiles, voiceInputActive, isTyping]);
 
   const removeFile = (id: string) => {
     const removed = filePreviews.find(fp => fp.id === id);
