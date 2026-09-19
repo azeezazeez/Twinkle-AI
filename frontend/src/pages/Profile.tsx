@@ -641,14 +641,14 @@ export default function Profile({
               Activity insights
             </h2>
 
-            <div className="mt-5 w-full overflow-x-auto rounded-2xl border border-zinc-200 dark:border-zinc-800">
-              <table className="w-full min-w-[620px] border-collapse text-sm">
-                <thead className="bg-zinc-50 text-left text-xs uppercase tracking-[0.12em] text-zinc-400 dark:bg-zinc-900/60">
+            <div className="mt-5 w-full overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800">
+              <table className="w-full border-collapse text-[13px] sm:text-sm">
+                <thead className="bg-zinc-50 text-left text-[10px] uppercase tracking-[0.08em] text-zinc-400 dark:bg-zinc-900/60 sm:text-xs sm:tracking-[0.12em]">
                   <tr>
-                    <th className="w-2/3 px-5 py-3 font-semibold">
+                    <th className="w-[68%] px-3 py-3 font-semibold sm:px-5">
                       Metric
                     </th>
-                    <th className="w-1/3 px-5 py-3 text-right font-semibold">
+                    <th className="w-[32%] px-3 py-3 text-right font-semibold sm:px-5">
                       Value
                     </th>
                   </tr>
@@ -712,11 +712,11 @@ export default function Profile({
                       key={label}
                       className="bg-white dark:bg-zinc-950"
                     >
-                      <td className="px-5 py-3 text-zinc-500">
+                      <td className="px-3 py-3 text-zinc-500 sm:px-5">
                         {label}
                       </td>
 
-                      <td className="px-5 py-3 text-right font-semibold text-zinc-900 dark:text-zinc-100">
+                      <td className="px-3 py-3 text-right font-semibold text-zinc-900 dark:text-zinc-100 sm:px-5">
                         {value}
                       </td>
                     </tr>
