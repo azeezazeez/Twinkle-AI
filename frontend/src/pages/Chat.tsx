@@ -732,19 +732,33 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const voiceStreamRef = useRef<MediaStream | null>(null);
   const voiceAudioContextRef = useRef<AudioContext | null>(null);
   const voiceSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const voiceAnalyserRef = useRef<AnalyserNode | null>(null);
+  const voiceMeterFrameRef = useRef<number | null>(null);
+  const voiceSpeechDetectedRef = useRef(false);
+  const voicePendingPcmRef = useRef<string[]>([]);
   const voiceProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const voiceSilentGainRef = useRef<GainNode | null>(null);
   const voiceStartRef = useRef(0);
   const voiceTurnCompleteResolverRef = useRef<(() => void) | null>(null);
   const [voiceDraftVersion, setVoiceDraftVersion] = useState(0);
+  const [voiceSpeechDetected, setVoiceSpeechDetected] = useState(false);
 
   const cleanupVoiceAudio = useCallback(() => {
+    if (voiceMeterFrameRef.current !== null) {
+      cancelAnimationFrame(voiceMeterFrameRef.current);
+      voiceMeterFrameRef.current = null;
+    }
     try { voiceProcessorRef.current?.disconnect(); } catch {}
     try { voiceSourceRef.current?.disconnect(); } catch {}
+    try { voiceAnalyserRef.current?.disconnect(); } catch {}
     try { voiceSilentGainRef.current?.disconnect(); } catch {}
     voiceProcessorRef.current = null;
     voiceSourceRef.current = null;
+    voiceAnalyserRef.current = null;
     voiceSilentGainRef.current = null;
+    voicePendingPcmRef.current = [];
+    voiceSpeechDetectedRef.current = false;
+    setVoiceSpeechDetected(false);
 
     voiceStreamRef.current?.getTracks().forEach(track => track.stop());
     voiceStreamRef.current = null;
@@ -831,8 +845,17 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     const attempt = ++voiceStartRef.current;
     voiceBaseInputRef.current = input.trim();
     voiceDraftRef.current = '';
+    voicePendingPcmRef.current = [];
+    voiceSpeechDetectedRef.current = false;
     setVoiceDraftVersion(version => version + 1);
+    setVoiceSpeechDetected(false);
     setVoiceInputActive(true);
+
+    // Start requesting the session token immediately, in parallel with the
+    // microphone permission request, so the actual listening pipeline starts
+    // as soon as the browser gives us the stream.
+    const liveTokenPromise = createLiveToken('Charon', 'auto', true);
+    liveTokenPromise.catch(() => undefined);
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -856,7 +879,38 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       voiceAudioContextRef.current = context;
       if (context.state === 'suspended') await context.resume();
 
-      const { token, model } = await createLiveToken('Charon', 'auto', true);
+      // Attach the local microphone meter immediately. This gives the UI a
+      // real speech/no-speech signal without waiting for transcription.
+      const source = context.createMediaStreamSource(stream);
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.65;
+      const analyserData = new Uint8Array(analyser.fftSize);
+      source.connect(analyser);
+      voiceSourceRef.current = source;
+      voiceAnalyserRef.current = analyser;
+
+      const updateVoiceMeter = () => {
+        if (attempt !== voiceStartRef.current || !voiceAnalyserRef.current) return;
+        const activeAnalyser = voiceAnalyserRef.current;
+        activeAnalyser.getByteTimeDomainData(analyserData);
+        let sumSquares = 0;
+        for (let i = 0; i < analyserData.length; i += 1) {
+          const normalized = (analyserData[i] - 128) / 128;
+          sumSquares += normalized * normalized;
+        }
+        const rms = Math.sqrt(sumSquares / analyserData.length);
+        const wasSpeaking = voiceSpeechDetectedRef.current;
+        const isSpeaking = wasSpeaking ? rms > 0.018 : rms > 0.032;
+        if (isSpeaking !== wasSpeaking) {
+          voiceSpeechDetectedRef.current = isSpeaking;
+          setVoiceSpeechDetected(isSpeaking);
+        }
+        voiceMeterFrameRef.current = requestAnimationFrame(updateVoiceMeter);
+      };
+      voiceMeterFrameRef.current = requestAnimationFrame(updateVoiceMeter);
+
+      const { token, model } = await liveTokenPromise;
       if (attempt !== voiceStartRef.current) return;
 
       const socket = new WebSocket(
@@ -885,6 +939,17 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
             },
           },
         }));
+
+        const queuedAudio = voicePendingPcmRef.current.splice(0);
+        for (const data of queuedAudio) {
+          try {
+            socket.send(JSON.stringify({
+              realtimeInput: {
+                audio: { data, mimeType: 'audio/pcm;rate=16000' },
+              },
+            }));
+          } catch {}
+        }
       };
 
       socket.onmessage = async event => {
@@ -931,21 +996,27 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         }
       };
 
-      const source = context.createMediaStreamSource(stream);
       const processor = context.createScriptProcessor(2048, 1, 1);
       const silentGain = context.createGain();
       silentGain.gain.value = 0;
 
       processor.onaudioprocess = audioEvent => {
         if (attempt !== voiceStartRef.current) return;
-        const activeSocket = voiceSocketRef.current;
-        if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) return;
         const pcm = downsamplePcm16k(audioEvent.inputBuffer.getChannelData(0), context.sampleRate);
+        const encodedPcm = int16ToBase64(pcm);
+        const activeSocket = voiceSocketRef.current;
+        if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
+          // Preserve a short amount of speech captured while the websocket is
+          // still connecting, so the first spoken words are not lost.
+          voicePendingPcmRef.current.push(encodedPcm);
+          if (voicePendingPcmRef.current.length > 80) voicePendingPcmRef.current.shift();
+          return;
+        }
         try {
           activeSocket.send(JSON.stringify({
             realtimeInput: {
               audio: {
-                data: int16ToBase64(pcm),
+                data: encodedPcm,
                 mimeType: 'audio/pcm;rate=16000',
               },
             },
@@ -2689,28 +2760,45 @@ const cleanMessageContent = (content: unknown): string => {
                     aria-label="Listening for voice input"
                   >
                     <span className="sr-only">Listening...</span>
-                    <div className="flex h-10 min-w-0 flex-1 items-center gap-[3px] overflow-hidden" aria-hidden="true">
-                      {Array.from({ length: 42 }, (_, index) => {
-                        const heights = [8, 14, 22, 12, 30, 18, 38, 26, 48, 34, 56, 42, 30, 52, 40, 58, 34, 46, 28, 54, 36, 50, 24, 44, 32, 56, 40, 28, 48, 34, 52, 22, 42, 30, 50, 36, 46, 26, 38, 18, 28, 12];
-                        const height = heights[index];
-                        return (
-                          <motion.span
-                            key={index}
-                            className="w-[2.5px] shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500"
-                            animate={{
-                              height: [Math.max(4, height * 0.35), height, Math.max(5, height * 0.5)],
-                              opacity: [0.55, 1, 0.7],
-                            }}
-                            transition={{
-                              duration: 0.65 + (index % 6) * 0.07,
-                              repeat: Infinity,
-                              repeatType: 'mirror',
-                              ease: 'easeInOut',
-                              delay: index * 0.025,
-                            }}
-                          />
-                        );
-                      })}
+                    <div
+                      className="relative flex h-10 min-w-0 flex-1 items-center overflow-hidden"
+                      aria-hidden="true"
+                    >
+                      {!voiceSpeechDetected ? (
+                        <motion.div
+                          className="absolute left-0 top-1/2 h-px w-[220%] -translate-y-1/2 bg-[repeating-linear-gradient(90deg,transparent_0,transparent_18px,rgba(161,161,170,.65)_18px,rgba(161,161,170,.65)_22px)] dark:bg-[repeating-linear-gradient(90deg,transparent_0,transparent_18px,rgba(113,113,122,.75)_18px,rgba(113,113,122,.75)_22px)]"
+                          animate={{ x: ['0%', '-55%'] }}
+                          transition={{ duration: 2.2, repeat: Infinity, ease: 'linear' }}
+                        />
+                      ) : (
+                        <motion.div
+                          className="flex h-9 w-[200%] shrink-0 items-center gap-[3px]"
+                          animate={{ x: ['0%', '-50%'] }}
+                          transition={{ duration: 1.35, repeat: Infinity, ease: 'linear' }}
+                        >
+                          {[...Array(84)].map((_, index) => {
+                            const heights = [6, 12, 22, 10, 30, 16, 38, 24, 46, 32, 52, 38, 28, 48, 36, 54, 30, 44, 24, 50, 32, 46, 20, 40, 28, 52, 36, 24, 44, 30, 48, 18, 38, 26, 46, 32, 42, 22, 34, 16, 26, 10, 18, 34];
+                            const height = heights[index % heights.length];
+                            return (
+                              <motion.span
+                                key={index}
+                                className="w-[2.5px] shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500"
+                                animate={{
+                                  height: [Math.max(4, height * 0.35), height, Math.max(5, height * 0.5)],
+                                  opacity: [0.55, 1, 0.7],
+                                }}
+                                transition={{
+                                  duration: 0.52 + (index % 5) * 0.045,
+                                  repeat: Infinity,
+                                  repeatType: 'mirror',
+                                  ease: 'easeInOut',
+                                  delay: index * 0.012,
+                                }}
+                              />
+                            );
+                          })}
+                        </motion.div>
+                      )}
                     </div>
 
                     <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -2871,39 +2959,50 @@ const cleanMessageContent = (content: unknown): string => {
                     </motion.button>
                   )}
 
-                   {/* Live Talk / Send — instant switch with no enter/exit animation */}
-                   {!isTyping && !input.trim() && filePreviews.length === 0 ? (
-                     <motion.button
-                       type="button"
-                       onClick={() => setLiveTalkOpen(true)}
-                       aria-label="Open Live Talk"
-                       title="Live Talk"
-                       whileHover={{ scale: 1.06 }}
-                       whileTap={{ scale: 0.92 }}
-                       className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#ec6aa8] text-white shadow-[0_8px_20px_rgba(236,106,168,.22)] transition hover:bg-[#e85f9f] sm:h-11 sm:w-11"
-                     >
-                       <AudioLines className="h-[19px] w-[19px]" strokeWidth={2.1} />
-                     </motion.button>
-                   ) : (
-                     <motion.button
-                       type="button"
-                       onClick={isTyping ? handleStopResponse : () => handleSendMessage()}
-                       disabled={!input.trim() && (!Array.isArray(filePreviews) || filePreviews.length === 0) && !isTyping}
-                       aria-label={isTyping ? 'Stop response' : 'Send message'}
-                       title={isTyping ? 'Stop response' : 'Send message'}
-                       whileHover={{ scale: isTyping || input.trim() || filePreviews.length ? 1.06 : 1, y: -1 }}
-                       whileTap={{ scale: 0.92 }}
-                       className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isTyping ? 'border-[#ec6aa8] bg-[#ec6aa8] text-white shadow-[#ec6aa8]/20' : 'border-zinc-300 bg-white hover:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-800 dark:hover:border-zinc-500'}`}
-                     >
-                       {isTyping ? (
-                         <span className="relative flex h-full w-full items-center justify-center">
-                           <span className="h-3.5 w-3.5 rounded-[3px] bg-white shadow-sm" />
-                         </span>
-                       ) : (
-                         <ArrowUp className="h-4 w-4" />
-                       )}
-                     </motion.button>
-                   )}
+                  {/* Live Talk / Send */}
+                  <AnimatePresence mode="wait" initial={false}>
+                    {!isTyping && !input.trim() && filePreviews.length === 0 ? (
+                      <motion.button
+                        key="live-talk"
+                        type="button"
+                        onClick={() => setLiveTalkOpen(true)}
+                        aria-label="Open Live Talk"
+                        title="Live Talk"
+                        initial={{ opacity: 0, scale: 0.88, y: 2 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.88, y: 2 }}
+                        whileHover={{ scale: 1.06 }}
+                        whileTap={{ scale: 0.92 }}
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#ec6aa8] text-white shadow-[0_8px_20px_rgba(236,106,168,.22)] transition hover:bg-[#e85f9f] sm:h-11 sm:w-11"
+                      >
+                        <AudioLines className="h-[19px] w-[19px]" strokeWidth={2.1} />
+                      </motion.button>
+                    ) : (
+                      <motion.button
+                        key="send"
+                        type="button"
+                        onClick={isTyping ? handleStopResponse : () => handleSendMessage()}
+                        disabled={!input.trim() && (!Array.isArray(filePreviews) || filePreviews.length === 0) && !isTyping}
+                        aria-label={isTyping ? 'Stop response' : 'Send message'}
+                        title={isTyping ? 'Stop response' : 'Send message'}
+                        initial={{ opacity: 0, scale: 0.88, y: 2 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.88, y: 2 }}
+                        whileHover={{ scale: isTyping || input.trim() || filePreviews.length ? 1.06 : 1, y: -1 }}
+                        whileTap={{ scale: 0.92 }}
+                        transition={{ type: 'spring', stiffness: 450, damping: 25 }}
+                        className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isTyping ? 'border-[#ec6aa8] bg-[#ec6aa8] text-white shadow-[#ec6aa8]/20' : 'border-zinc-300 bg-white hover:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-800 dark:hover:border-zinc-500'}`}
+                      >
+                        {isTyping ? (
+                          <span className="relative flex h-full w-full items-center justify-center">
+                            <span className="h-3.5 w-3.5 rounded-[3px] bg-white shadow-sm" />
+                          </span>
+                        ) : (
+                          <ArrowUp className="h-4 w-4" />
+                        )}
+                      </motion.button>
+                    )}
+                  </AnimatePresence>
                 </div>
               </div>
 
