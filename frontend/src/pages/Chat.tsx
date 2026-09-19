@@ -2794,7 +2794,7 @@ const cleanMessageContent = (content: unknown): string => {
                             <motion.div
                               className="flex h-full w-full shrink-0 items-center gap-[3px]"
                               animate={{ x: ['0%', '-50%'] }}
-                              transition={{ duration: 2.25, repeat: Infinity, ease: 'linear' }}
+                              transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
                             >
                               {[...Array(96)].map((_, index) => {
                                 const heights = [7, 13, 22, 10, 31, 16, 39, 24, 47, 32, 54, 40, 29, 50, 37, 56, 31, 45, 24, 52, 34, 48, 20, 41, 29, 54, 37, 25, 45, 31, 49, 19, 39, 27, 47, 33, 43, 23, 35, 17, 27, 11, 19, 34];
