@@ -854,10 +854,15 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       return;
     }
 
-    // Stop a stale recognition instance before starting a new one.
     cleanupVoiceRecognition();
 
     const attempt = ++voiceStartRef.current;
+    const isMobileBrowser = window.matchMedia('(max-width: 767px)').matches;
+    const configuredLanguage = getRecognitionLanguage();
+    // Android Chrome is more reliable with the standard locale first. If the
+    // selected regional locale is supported, recognition.onstart keeps it.
+    const initialLanguage = isMobileBrowser ? 'en-US' : configuredLanguage;
+
     voiceBaseInputRef.current = input.trim();
     voiceDraftRef.current = '';
     voiceRecognitionErrorRef.current = null;
@@ -868,13 +873,17 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     const recognition = new SpeechRecognitionCtor();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = getRecognitionLanguage();
+    recognition.lang = initialLanguage;
     recognition.maxAlternatives = 1;
+    if ('processLocally' in recognition) {
+      try { recognition.processLocally = false; } catch {}
+    }
 
     voiceRecognitionRef.current = recognition;
 
     recognition.onstart = () => {
       if (attempt !== voiceStartRef.current) return;
+      voiceRecognitionErrorRef.current = null;
       voiceListeningRef.current = true;
       setVoiceInputActive(true);
     };
@@ -882,9 +891,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     recognition.onresult = event => {
       if (attempt !== voiceStartRef.current) return;
 
-      // Rebuild the complete transcript from the recognition result set.
-      // This avoids duplicated/interleaved text when Chrome emits interim
-      // results followed by their final versions.
       let transcript = '';
       for (let i = 0; i < event.results.length; i += 1) {
         transcript += event.results[i][0]?.transcript || '';
@@ -902,54 +908,65 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
       if (error === 'not-allowed' || error === 'service-not-allowed') {
         cancelVoiceInput();
-        window.alert('Microphone permission was denied. Allow microphone access for Twinkle and try again.');
+        window.alert('Microphone permission was denied. In Chrome, open Site settings for twinkleai.vercel.app, allow Microphone, then try again.');
       } else if (error === 'audio-capture') {
         cancelVoiceInput();
-        window.alert('No microphone was detected. Connect a microphone and try again.');
+        window.alert('No microphone was detected. Check your phone microphone permission and try again.');
       } else if (error === 'language-not-supported') {
-        // Some Chromium-based browsers do not support regional language codes
-        // such as en-IN for Web Speech. Retry with the widely supported
-        // English locale instead of leaving the microphone unusable.
-        try {
-          recognition.lang = 'en-US';
-          voiceRecognitionErrorRef.current = null;
-          voiceListeningRef.current = true;
-          setVoiceInputActive(true);
-        } catch {
-          cancelVoiceInput();
-        }
-      } else if (error === 'network') {
-        // Chromium's Web Speech service can report a transient network error.
-        // Retry the same recognition session once without logging the error or
-        // clearing the user's draft. This keeps the microphone usable without
-        // changing any other chat behavior.
+        // Retry with a fresh recognition object. Merely changing .lang after
+        // start() is not sufficient in Chromium and was the reason mobile
+        // dictation could appear to do nothing.
         voiceRecognitionErrorRef.current = null;
         voiceListeningRef.current = true;
-        setVoiceInputActive(true);
+        try { recognition.abort(); } catch {}
+
         window.setTimeout(() => {
           if (attempt !== voiceStartRef.current) return;
           try {
             recognition.lang = 'en-US';
             recognition.start();
-          } catch {
-            // If the browser still cannot start its speech service, leave the
-            // voice composer active so the user can retry or reject it.
+          } catch (retryError) {
+            console.error('Twinkle speech-to-text language retry failed:', retryError);
+            cancelVoiceInput();
+          }
+        }, 50);
+      } else if (error === 'network') {
+        // Retry once with the standard locale; Android Chrome can report a
+        // transient network error for a regional Web Speech locale.
+        voiceRecognitionErrorRef.current = null;
+        voiceListeningRef.current = true;
+        window.setTimeout(() => {
+          if (attempt !== voiceStartRef.current) return;
+          try {
+            recognition.lang = 'en-US';
+            recognition.start();
+          } catch (retryError) {
+            console.error('Twinkle speech-to-text network retry failed:', retryError);
             voiceListeningRef.current = false;
+            setVoiceInputActive(false);
+            window.setTimeout(() => inputRef.current?.focus(), 0);
           }
         }, 250);
+      } else if (error === 'no-speech') {
+        // Keep listening. Mobile Chrome commonly emits no-speech when the
+        // user pauses briefly; it should not close the voice composer.
+        voiceRecognitionErrorRef.current = null;
+        voiceListeningRef.current = true;
       }
     };
 
     recognition.onend = () => {
       if (attempt !== voiceStartRef.current) return;
 
-      // Chrome can end recognition after a pause even when continuous=true.
-      // Automatically restart while the user remains in listening mode.
       if (!voiceRecognitionErrorRef.current && voiceListeningRef.current) {
         window.setTimeout(() => {
-          if (attempt !== voiceStartRef.current) return;
-          try { recognition.start(); } catch {}
-        }, 80);
+          if (attempt !== voiceStartRef.current || !voiceListeningRef.current) return;
+          try {
+            recognition.start();
+          } catch {
+            // A start while the browser is already restarting is harmless.
+          }
+        }, 120);
       }
     };
 
@@ -958,7 +975,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     } catch (error) {
       console.error('Speech-to-text start failed:', error);
       cancelVoiceInput();
-      window.alert('Speech-to-text could not start. Please allow microphone access and try again.');
+      window.alert('Speech-to-text could not start. Please allow microphone access for Twinkle and try again.');
     }
   }, [cancelVoiceInput, cleanupVoiceRecognition, getRecognitionLanguage, input, isProcessingFiles, isTyping, voiceInputActive]);
 
