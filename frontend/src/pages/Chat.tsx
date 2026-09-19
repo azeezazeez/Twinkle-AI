@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import React from 'react';
 import { User, Session, Message } from '../types';
 import Sidebar from '../components/Sidebar';
-import { chatApi, authApi } from '../lib/api';
+import { chatApi, authApi, createLiveToken } from '../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
 import StormLogo from '../components/StormLogo';
 import ConfirmationModal from '../components/ConfirmationModal';
@@ -65,145 +65,6 @@ const CodeBlock = ({ language, value }: { language: string; value: string }) => 
           {value}
         </SyntaxHighlighter>
       </div>
-    </div>
-  );
-};
-
-
-const PDFJS_MODULE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs';
-const PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
-
-const PdfPreview = ({
-  src,
-  fileName,
-  compact = false,
-}: {
-  src: string;
-  fileName: string;
-  compact?: boolean;
-}) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const canvasHostRef = useRef<HTMLDivElement>(null);
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
-
-  useEffect(() => {
-    let cancelled = false;
-    let pdfDocument: any = null;
-
-    const renderPdf = async () => {
-      setStatus('loading');
-      try {
-        const pdfjs: any = await import(/* @vite-ignore */ PDFJS_MODULE_URL);
-        if (cancelled) return;
-        pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
-
-        const loadingTask = pdfjs.getDocument({
-          url: src,
-          useWorkerFetch: true,
-          isEvalSupported: true,
-          disableAutoFetch: true,
-          disableStream: true,
-        });
-
-        pdfDocument = await loadingTask.promise;
-        if (cancelled || !canvasHostRef.current) {
-          await pdfDocument?.destroy?.();
-          return;
-        }
-
-        const host = canvasHostRef.current;
-        host.replaceChildren();
-        const isMobile = window.matchMedia('(max-width: 767px)').matches;
-        const pageCount = compact
-          ? 1
-          : Math.min(Number(pdfDocument.numPages) || 1, isMobile ? 12 : 30);
-
-        for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
-          if (cancelled || !canvasHostRef.current) break;
-
-          const page = await pdfDocument.getPage(pageNumber);
-          const baseViewport = page.getViewport({ scale: 1 });
-          const availableWidth = Math.max(
-            compact ? 120 : host.clientWidth - (isMobile ? 12 : 24),
-            120
-          );
-          const maxScale = compact ? 1 : isMobile ? 1.15 : 1.65;
-          const scale = Math.min(availableWidth / baseViewport.width, maxScale);
-          const viewport = page.getViewport({ scale });
-          const canvas = document.createElement('canvas');
-          const context = canvas.getContext('2d', { alpha: false });
-          if (!context) continue;
-
-          const outputScale = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2);
-          canvas.width = Math.ceil(viewport.width * outputScale);
-          canvas.height = Math.ceil(viewport.height * outputScale);
-          canvas.style.width = `${viewport.width}px`;
-          canvas.style.height = `${viewport.height}px`;
-          canvas.className = compact
-            ? 'block h-full w-full object-contain'
-            : 'mx-auto mb-4 block max-w-full rounded-lg bg-white shadow-sm';
-
-          if (!compact) {
-            const pageLabel = document.createElement('div');
-            pageLabel.textContent = `Page ${pageNumber}`;
-            pageLabel.className = 'mb-1 text-center text-[10px] font-bold uppercase tracking-wider text-zinc-400';
-            host.appendChild(pageLabel);
-          }
-
-          host.appendChild(canvas);
-          context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
-          await page.render({ canvasContext: context, viewport }).promise;
-        }
-
-        if (!cancelled) setStatus('ready');
-      } catch (error) {
-        console.error('PDF preview rendering failed:', error);
-        if (!cancelled) setStatus('error');
-      }
-    };
-
-    void renderPdf();
-    return () => {
-      cancelled = true;
-      try { void pdfDocument?.destroy?.(); } catch {}
-      if (canvasHostRef.current) canvasHostRef.current.replaceChildren();
-    };
-  }, [src, compact]);
-
-  if (status === 'error') {
-    return (
-      <div className={compact
-        ? 'flex h-full w-full flex-col items-center justify-center gap-1 bg-zinc-100 dark:bg-zinc-800'
-        : 'flex min-h-[60vh] w-full flex-col items-center justify-center gap-3 rounded-xl bg-white p-8 dark:bg-zinc-900'}
-      >
-        <FileText className="h-8 w-8 text-zinc-500" />
-        <span className="text-center text-xs font-semibold text-zinc-500">
-          {compact ? 'PDF' : `Unable to preview ${fileName}`}
-        </span>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      ref={containerRef}
-      aria-label={`PDF preview: ${fileName}`}
-      className={compact
-        ? 'relative flex h-full w-full items-center justify-center overflow-hidden bg-white dark:bg-zinc-800'
-        : 'relative mx-auto w-full max-w-4xl'}
-    >
-      <div ref={canvasHostRef} className={compact ? 'h-full w-full' : 'w-full'} />
-      {status === 'loading' && (
-        <div className={compact
-          ? 'absolute inset-0 z-10 flex items-center justify-center bg-white dark:bg-zinc-800'
-          : 'absolute inset-0 flex min-h-[60vh] items-center justify-center rounded-xl bg-white dark:bg-zinc-900'}
-        >
-          <div className="flex flex-col items-center gap-2">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700 dark:border-zinc-700 dark:border-t-zinc-200" />
-            {!compact && <span className="text-xs font-medium text-zinc-500">Rendering PDF…</span>}
-          </div>
-        </div>
-      )}
     </div>
   );
 };
@@ -727,263 +588,289 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     return () => window.clearInterval(interval);
   }, [isTyping]);
 
-  const sidebarSessions = sessions;
+  const [typedSessionTitle, setTypedSessionTitle] = useState('');
+
+  useEffect(() => {
+    if (!typingSessionTitle) {
+      setTypedSessionTitle('');
+      return;
+    }
+    setTypedSessionTitle('');
+    let index = 0;
+    const { title } = typingSessionTitle;
+    const interval = window.setInterval(() => {
+      index += 1;
+      setTypedSessionTitle(title.slice(0, index));
+      if (index >= title.length) {
+        window.clearInterval(interval);
+        setTypingSessionTitle(null);
+      }
+    }, 45);
+    return () => window.clearInterval(interval);
+  }, [typingSessionTitle]);
+
+  const sidebarSessions = sessions.map(session =>
+    typingSessionTitle?.id === session.id
+      ? { ...session, sessionName: typedSessionTitle }
+      : session
+  );
   const sessionToDelete = sessions.find(session => session.id === sessionIdToDelete);
   // Keep the chat interface clean on login; the sidebar opens only when requested.
 
-  // Browser-native speech recognition is used for composer dictation. It is
-  // considerably more reliable for short dictation on mobile/desktop browsers
-  // than keeping a second Gemini Live WebSocket open just for transcription.
-  type SpeechRecognitionResultEventLike = {
-    resultIndex: number;
-    results: {
-      length: number;
-      [index: number]: {
-        isFinal: boolean;
-        length: number;
-        [index: number]: { transcript: string };
-      };
-    };
-  };
-
-  type SpeechRecognitionInstance = {
-    continuous: boolean;
-    interimResults: boolean;
-    lang: string;
-    maxAlternatives: number;
-    processLocally?: boolean;
-    onstart: (() => void) | null;
-    onresult: ((event: SpeechRecognitionResultEventLike) => void) | null;
-    onerror: ((event: { error?: string }) => void) | null;
-    onend: (() => void) | null;
-    start: () => void;
-    stop: () => void;
-    abort: () => void;
-  };
-
-  type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance;
-
   const voiceBaseInputRef = useRef('');
   const voiceDraftRef = useRef('');
-  const voiceRecognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const voiceSocketRef = useRef<WebSocket | null>(null);
+  const voiceStreamRef = useRef<MediaStream | null>(null);
+  const voiceAudioContextRef = useRef<AudioContext | null>(null);
+  const voiceSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const voiceProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const voiceSilentGainRef = useRef<GainNode | null>(null);
   const voiceStartRef = useRef(0);
-  const voiceRecognitionErrorRef = useRef<string | null>(null);
-  const voiceListeningRef = useRef(false);
+  const voiceTurnCompleteResolverRef = useRef<(() => void) | null>(null);
   const [voiceDraftVersion, setVoiceDraftVersion] = useState(0);
 
-  const getRecognitionLanguage = useCallback(() => {
-    try {
-      const code = localStorage.getItem('twinkle_app_language') || 'auto';
-      const map: Record<string, string> = {
-        en: 'en-IN', hi: 'hi-IN', te: 'te-IN', ta: 'ta-IN', kn: 'kn-IN',
-        ml: 'ml-IN', bn: 'bn-IN', mr: 'mr-IN', gu: 'gu-IN', pa: 'pa-IN',
-        ur: 'ur-PK', ar: 'ar-SA', es: 'es-ES', fr: 'fr-FR', de: 'de-DE',
-        it: 'it-IT', pt: 'pt-PT', ru: 'ru-RU', ja: 'ja-JP', ko: 'ko-KR',
-        zh: 'zh-CN', tr: 'tr-TR', vi: 'vi-VN', id: 'id-ID', th: 'th-TH',
-        fil: 'fil-PH',
-      };
-      return map[code] || 'en-IN';
-    } catch {
-      return 'en-IN';
-    }
-  }, []);
+  const cleanupVoiceAudio = useCallback(() => {
+    try { voiceProcessorRef.current?.disconnect(); } catch {}
+    try { voiceSourceRef.current?.disconnect(); } catch {}
+    try { voiceSilentGainRef.current?.disconnect(); } catch {}
+    voiceProcessorRef.current = null;
+    voiceSourceRef.current = null;
+    voiceSilentGainRef.current = null;
 
-  const cleanupVoiceRecognition = useCallback(() => {
-    const recognition = voiceRecognitionRef.current;
-    voiceRecognitionRef.current = null;
-    if (!recognition) return;
-    recognition.onstart = null;
-    recognition.onresult = null;
-    recognition.onerror = null;
-    recognition.onend = null;
-    try { recognition.abort(); } catch {}
+    voiceStreamRef.current?.getTracks().forEach(track => track.stop());
+    voiceStreamRef.current = null;
+
+    const context = voiceAudioContextRef.current;
+    voiceAudioContextRef.current = null;
+    if (context) void context.close().catch(() => undefined);
   }, []);
 
   const cancelVoiceInput = useCallback(() => {
-    const base = voiceBaseInputRef.current.trim();
     voiceStartRef.current += 1;
-    cleanupVoiceRecognition();
+    try {
+      const socket = voiceSocketRef.current;
+      if (socket?.readyState === WebSocket.OPEN) socket.close(1000, 'cancelled');
+      else socket?.close();
+    } catch {}
+    voiceSocketRef.current = null;
+    voiceTurnCompleteResolverRef.current?.();
+    voiceTurnCompleteResolverRef.current = null;
+    cleanupVoiceAudio();
     voiceDraftRef.current = '';
     voiceBaseInputRef.current = '';
-    voiceRecognitionErrorRef.current = null;
-    voiceListeningRef.current = false;
-    setInput(base);
     setVoiceDraftVersion(version => version + 1);
     setVoiceInputActive(false);
     window.setTimeout(() => inputRef.current?.focus(), 0);
-  }, [cleanupVoiceRecognition]);
+  }, [cleanupVoiceAudio]);
 
-  const commitVoiceInput = useCallback(() => {
+  const commitVoiceInput = useCallback(async () => {
     if (!voiceInputActive) return;
+
+    // Stop capturing immediately, but give Gemini a short window to deliver
+    // the final input-transcription chunk before we commit it to the composer.
+    try {
+      const socket = voiceSocketRef.current;
+      if (socket?.readyState === WebSocket.OPEN) {
+        try {
+          socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
+        } catch {}
+
+        await new Promise<void>(resolve => {
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timer);
+            if (voiceTurnCompleteResolverRef.current === finish) {
+              voiceTurnCompleteResolverRef.current = null;
+            }
+            resolve();
+          };
+          const timer = window.setTimeout(finish, 550);
+          voiceTurnCompleteResolverRef.current = finish;
+        });
+      }
+    } catch {}
 
     const base = voiceBaseInputRef.current.trim();
     const spoken = voiceDraftRef.current.trim();
     const combined = `${base}${base && spoken ? ' ' : ''}${spoken}`.trim();
 
     voiceStartRef.current += 1;
-    cleanupVoiceRecognition();
+    try { voiceSocketRef.current?.close(1000, 'committed'); } catch {}
+    voiceSocketRef.current = null;
+    voiceTurnCompleteResolverRef.current?.();
+    voiceTurnCompleteResolverRef.current = null;
+    cleanupVoiceAudio();
+
+    setInput(combined);
     voiceDraftRef.current = '';
     voiceBaseInputRef.current = '';
-    voiceRecognitionErrorRef.current = null;
-    voiceListeningRef.current = false;
-    setInput(combined);
     setVoiceDraftVersion(version => version + 1);
     setVoiceInputActive(false);
     window.setTimeout(() => inputRef.current?.focus(), 0);
-  }, [cleanupVoiceRecognition, voiceInputActive]);
+  }, [cleanupVoiceAudio, voiceInputActive]);
 
-  const startVoiceInput = useCallback(() => {
+  const startVoiceInput = useCallback(async () => {
     if (voiceInputActive || isTyping || isProcessingFiles) return;
 
-    const SpeechRecognitionCtor = (
-      window as Window & {
-        SpeechRecognition?: SpeechRecognitionConstructor;
-        webkitSpeechRecognition?: SpeechRecognitionConstructor;
-      }
-    ).SpeechRecognition || (
-      window as Window & {
-        SpeechRecognition?: SpeechRecognitionConstructor;
-        webkitSpeechRecognition?: SpeechRecognitionConstructor;
-      }
-    ).webkitSpeechRecognition;
-
-    if (!SpeechRecognitionCtor) {
-      window.alert(
-        'Speech-to-text is not supported by this browser. Please use the latest Chrome or Edge and allow microphone access.'
-      );
+    if (!navigator.mediaDevices?.getUserMedia) {
+      window.alert('Microphone access is not supported in this browser. Please use a current Chrome, Edge, or Safari browser.');
       return;
     }
 
-    cleanupVoiceRecognition();
-
     const attempt = ++voiceStartRef.current;
-    const isMobileBrowser = window.matchMedia('(max-width: 767px)').matches;
-    const configuredLanguage = getRecognitionLanguage();
-    // Android Chrome is more reliable with the standard locale first. If the
-    // selected regional locale is supported, recognition.onstart keeps it.
-    const initialLanguage = isMobileBrowser ? 'en-US' : configuredLanguage;
-
     voiceBaseInputRef.current = input.trim();
     voiceDraftRef.current = '';
-    voiceRecognitionErrorRef.current = null;
-    voiceListeningRef.current = true;
     setVoiceDraftVersion(version => version + 1);
     setVoiceInputActive(true);
 
-    const recognition = new SpeechRecognitionCtor();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = initialLanguage;
-    recognition.maxAlternatives = 1;
-    if ('processLocally' in recognition) {
-      try { recognition.processLocally = false; } catch {}
-    }
-
-    voiceRecognitionRef.current = recognition;
-
-    recognition.onstart = () => {
-      if (attempt !== voiceStartRef.current) return;
-      voiceRecognitionErrorRef.current = null;
-      voiceListeningRef.current = true;
-      setVoiceInputActive(true);
-    };
-
-    recognition.onresult = event => {
-      if (attempt !== voiceStartRef.current) return;
-
-      let transcript = '';
-      for (let i = 0; i < event.results.length; i += 1) {
-        transcript += event.results[i][0]?.transcript || '';
-      }
-
-      voiceDraftRef.current = transcript.replace(/\s+/g, ' ').trim();
-      setVoiceDraftVersion(version => version + 1);
-    };
-
-    recognition.onerror = event => {
-      if (attempt !== voiceStartRef.current) return;
-      const error = String(event?.error || 'unknown');
-      voiceRecognitionErrorRef.current = error;
-      console.error('Twinkle speech-to-text error:', error);
-
-      if (error === 'not-allowed' || error === 'service-not-allowed') {
-        cancelVoiceInput();
-        window.alert('Microphone permission was denied. In Chrome, open Site settings for twinkleai.vercel.app, allow Microphone, then try again.');
-      } else if (error === 'audio-capture') {
-        cancelVoiceInput();
-        window.alert('No microphone was detected. Check your phone microphone permission and try again.');
-      } else if (error === 'language-not-supported') {
-        // Retry with a fresh recognition object. Merely changing .lang after
-        // start() is not sufficient in Chromium and was the reason mobile
-        // dictation could appear to do nothing.
-        voiceRecognitionErrorRef.current = null;
-        voiceListeningRef.current = true;
-        try { recognition.abort(); } catch {}
-
-        window.setTimeout(() => {
-          if (attempt !== voiceStartRef.current) return;
-          try {
-            recognition.lang = 'en-US';
-            recognition.start();
-          } catch (retryError) {
-            console.error('Twinkle speech-to-text language retry failed:', retryError);
-            cancelVoiceInput();
-          }
-        }, 50);
-      } else if (error === 'network') {
-        // Retry once with the standard locale; Android Chrome can report a
-        // transient network error for a regional Web Speech locale.
-        voiceRecognitionErrorRef.current = null;
-        voiceListeningRef.current = true;
-        window.setTimeout(() => {
-          if (attempt !== voiceStartRef.current) return;
-          try {
-            recognition.lang = 'en-US';
-            recognition.start();
-          } catch (retryError) {
-            console.error('Twinkle speech-to-text network retry failed:', retryError);
-            voiceListeningRef.current = false;
-            setVoiceInputActive(false);
-            window.setTimeout(() => inputRef.current?.focus(), 0);
-          }
-        }, 250);
-      } else if (error === 'no-speech') {
-        // Keep listening. Mobile Chrome commonly emits no-speech when the
-        // user pauses briefly; it should not close the voice composer.
-        voiceRecognitionErrorRef.current = null;
-        voiceListeningRef.current = true;
-      }
-    };
-
-    recognition.onend = () => {
-      if (attempt !== voiceStartRef.current) return;
-
-      if (!voiceRecognitionErrorRef.current && voiceListeningRef.current) {
-        window.setTimeout(() => {
-          if (attempt !== voiceStartRef.current || !voiceListeningRef.current) return;
-          try {
-            recognition.start();
-          } catch {
-            // A start while the browser is already restarting is harmless.
-          }
-        }, 120);
-      }
-    };
-
     try {
-      recognition.start();
-    } catch (error) {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      if (attempt !== voiceStartRef.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+      voiceStreamRef.current = stream;
+
+      const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextCtor) throw new Error('Web Audio is not supported in this browser.');
+      const context = new AudioContextCtor();
+      voiceAudioContextRef.current = context;
+      if (context.state === 'suspended') await context.resume();
+
+      const { token, model } = await createLiveToken('Charon', 'auto', true);
+      if (attempt !== voiceStartRef.current) return;
+
+      const socket = new WebSocket(
+        `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}`
+      );
+      voiceSocketRef.current = socket;
+
+      socket.onopen = () => {
+        if (attempt !== voiceStartRef.current) return;
+        socket.send(JSON.stringify({
+          setup: {
+            model: `models/${model}`,
+            generationConfig: { responseModalities: ['AUDIO'] },
+            systemInstruction: {
+              parts: [{
+                text: `Twinkle AI speech-to-text mode. Transcribe the user's speech accurately. Preserve the user's wording and language. The selected language is ${getSpeechLanguage()}. Do not translate the user's speech. Do not answer the user.`,
+              }],
+            },
+            inputAudioTranscription: {},
+            realtimeInputConfig: {
+              automaticActivityDetection: {
+                disabled: false,
+                prefixPaddingMs: 250,
+                silenceDurationMs: 900,
+              },
+            },
+          },
+        }));
+      };
+
+      socket.onmessage = async event => {
+        if (attempt !== voiceStartRef.current) return;
+        try {
+          let message: any;
+          if (typeof event.data === 'string') message = JSON.parse(event.data);
+          else if (event.data instanceof Blob) message = JSON.parse(await event.data.text());
+          else if (event.data instanceof ArrayBuffer) message = JSON.parse(new TextDecoder().decode(new Uint8Array(event.data)));
+          else return;
+
+          if (message?.error) throw new Error(message.error.message || 'Speech transcription service returned an error.');
+
+          const text = String(message?.serverContent?.inputTranscription?.text || '');
+          if (text) {
+            voiceDraftRef.current += text;
+            setVoiceDraftVersion(version => version + 1);
+          }
+
+          if (message?.serverContent?.turnComplete) {
+            voiceTurnCompleteResolverRef.current?.();
+          }
+        } catch (error) {
+          console.error('Twinkle speech transcription error:', error);
+        }
+      };
+
+      socket.onerror = () => {
+        if (attempt !== voiceStartRef.current) return;
+        console.error('Twinkle speech transcription WebSocket error.');
+        window.setTimeout(() => {
+          if (attempt === voiceStartRef.current && !voiceDraftRef.current.trim()) {
+            cancelVoiceInput();
+            window.alert('Speech-to-text could not connect. Please check your internet connection and allow microphone access for localhost.');
+          }
+        }, 0);
+      };
+
+      socket.onclose = event => {
+        if (attempt !== voiceStartRef.current) return;
+        voiceSocketRef.current = null;
+        if (event.code !== 1000 && !voiceDraftRef.current.trim()) {
+          cancelVoiceInput();
+        }
+      };
+
+      const source = context.createMediaStreamSource(stream);
+      const processor = context.createScriptProcessor(2048, 1, 1);
+      const silentGain = context.createGain();
+      silentGain.gain.value = 0;
+
+      processor.onaudioprocess = audioEvent => {
+        if (attempt !== voiceStartRef.current) return;
+        const activeSocket = voiceSocketRef.current;
+        if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) return;
+        const pcm = downsamplePcm16k(audioEvent.inputBuffer.getChannelData(0), context.sampleRate);
+        try {
+          activeSocket.send(JSON.stringify({
+            realtimeInput: {
+              audio: {
+                data: int16ToBase64(pcm),
+                mimeType: 'audio/pcm;rate=16000',
+              },
+            },
+          }));
+        } catch {}
+      };
+
+      source.connect(processor);
+      processor.connect(silentGain);
+      silentGain.connect(context.destination);
+      voiceSourceRef.current = source;
+      voiceProcessorRef.current = processor;
+      voiceSilentGainRef.current = silentGain;
+    } catch (error: any) {
+      if (attempt !== voiceStartRef.current) return;
       console.error('Speech-to-text start failed:', error);
       cancelVoiceInput();
-      window.alert('Speech-to-text could not start. Please allow microphone access for Twinkle and try again.');
+      const message = String(error?.message || 'Unable to start speech-to-text.');
+      if (/permission|denied|notallowed/i.test(message)) {
+        window.alert('Microphone permission was denied. Allow microphone access for localhost and try again.');
+      } else {
+        window.alert(`Speech-to-text could not start. ${message}`);
+      }
     }
-  }, [cancelVoiceInput, cleanupVoiceRecognition, getRecognitionLanguage, input, isProcessingFiles, isTyping, voiceInputActive]);
+  }, [cancelVoiceInput, input, isProcessingFiles, isTyping, voiceInputActive]);
 
   useEffect(() => () => {
     voiceStartRef.current += 1;
-    voiceListeningRef.current = false;
-    cleanupVoiceRecognition();
-  }, [cleanupVoiceRecognition]);  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    try { voiceSocketRef.current?.close(); } catch {}
+    voiceSocketRef.current = null;
+    cleanupVoiceAudio();
+  }, [cleanupVoiceAudio]);
+
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
     try {
       const stored = localStorage.getItem(MODEL_STORAGE_KEY);
       return stored && MODEL_OPTIONS.some(option => option.id === stored)
@@ -1038,11 +925,34 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   }, []);
 
   const chooseModel = useCallback((modelId: string) => {
-    if (modelId !== selectedModel) playModelSwitchSound();
-    setSelectedModel(modelId);
+    if (!MODEL_OPTIONS.some(option => option.id === modelId)) return;
+
+    setSelectedModel(previousModel => {
+      if (modelId !== previousModel) playModelSwitchSound();
+
+      try {
+        localStorage.setItem(MODEL_STORAGE_KEY, modelId);
+      } catch {}
+
+      return modelId;
+    });
+
     setModelPickerOpen(false);
-    try { localStorage.setItem(MODEL_STORAGE_KEY, modelId); } catch {}
-  }, [selectedModel]);
+  }, []);
+
+  // Keep the selected model synchronized with localStorage so the same
+  // model remains selected after a refresh or a Chat component remount.
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(MODEL_STORAGE_KEY);
+
+      if (stored && MODEL_OPTIONS.some(option => option.id === stored)) {
+        setSelectedModel(previousModel =>
+          previousModel === stored ? previousModel : stored
+        );
+      }
+    } catch {}
+  }, []);
 
   const activeModel = MODEL_OPTIONS.find(m => m.id === selectedModel) || MODEL_OPTIONS[0];
 
@@ -1053,12 +963,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const abortControllerRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Stores the specific session ID that should skip one message load
-  // (the newly created session after first send), so switching to any
-  // OTHER existing session always loads its messages correctly.
+  
   const skipMessageLoadRef = useRef<number | null>(null);
 
-  // Auto-resize textarea
+  
   useEffect(() => {
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
@@ -1066,7 +974,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     }
   }, [input]);
 
-  // Clean up object URLs
+  
   const filePreviewsRef = useRef(filePreviews);
   useEffect(() => { filePreviewsRef.current = filePreviews; }, [filePreviews]);
   useEffect(() => {
@@ -1077,24 +985,12 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     };
   }, []);
 
-  // Load sessions & messages
+
+  
   const loadSessions = useCallback(async () => {
     try {
       const response = await chatApi.getSessions() as any;
-      const loadedSessions: Session[] = response.sessions || [];
-      setSessions(loadedSessions);
-
-      // Restore the active chat after a browser refresh, but only if it
-      // still exists for the current user.
-      const persistedId = readPersistedSessionId();
-      if (
-        persistedId !== null &&
-        loadedSessions.some(session => session.id === persistedId)
-      ) {
-        setCurrentSessionId(persistedId);
-      } else if (persistedId !== null) {
-        persistSessionId(null);
-      }
+      setSessions(response.sessions || []);
     } catch (err: any) {
       console.error('Failed to load sessions:', err);
       if (err.status === 401) onLogout();
@@ -1103,8 +999,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     }
   }, [onLogout]);
 
-  // Live Talk persists turns in the background. Update the same sidebar state
-  // immediately instead of forcing another GET /chat/sessions request.
+  
   useEffect(() => {
     const handleLiveSessionUpdate = (event: Event) => {
       const detail = (event as CustomEvent<{ id: number; sessionName?: string }>).detail;
@@ -1446,24 +1341,11 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     } finally {
       setIsProcessingFiles(false);
 
-      // The browser keeps focus on the hidden file input after the file picker
-      // closes. Explicitly move focus back to the composer after React has
-      // committed the attachment state so the caret is immediately ready in
-      // "Ask Anything".
-      window.requestAnimationFrame(() => {
-        window.setTimeout(() => {
-          const composer = inputRef.current;
-          if (!composer || voiceInputActive || isTyping) return;
-
-          const activeElement = document.activeElement;
-          if (activeElement instanceof HTMLElement && activeElement !== composer) {
-            activeElement.blur();
-          }
-
-          composer.focus({ preventScroll: true });
-          composer.setSelectionRange(composer.value.length, composer.value.length);
-        }, 0);
-      });
+      // After any file is selected, return the caret to the chat composer
+      // so the user can immediately type a message.
+      window.setTimeout(() => {
+        inputRef.current?.focus();
+      }, 0);
     }
   };
 
@@ -1559,11 +1441,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       clearTimeout(wakingTimer);
       setServerWaking(false);
 
-      const rawActiveSessionId = response.sessionId ?? currentSessionId;
-      const activeSessionId =
-        rawActiveSessionId !== null && rawActiveSessionId !== undefined
-          ? Number(rawActiveSessionId)
-          : null;
+      const activeSessionId = response.sessionId || currentSessionId;
 
       if (isNewSession && activeSessionId) {
         // Store the new session's ID (not just `true`) so the
@@ -1575,7 +1453,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
         const now = new Date().toISOString();
         setSessions(prev => {
-          if (prev.some(session => Number(session.id) === Number(activeSessionId))) return prev;
+          if (prev.some(session => session.id === activeSessionId)) return prev;
           return [
             {
               id: activeSessionId,
@@ -1616,50 +1494,28 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       // Generate and persist a professional AI-generated chat title.
       if ((isNewSession || regenerateTitle) && activeSessionId) {
         try {
-          const titleInput =
-            finalMessage ||
-            (filesToSend && filesToSend.length > 0
-              ? filesToSend.map(file => file.name).join(', ')
-              : 'File analysis');
-
-          const titleResponse: any = await chatApi.generateTitle(titleInput);
+          const titleResponse: any = await chatApi.generateTitle(
+            finalMessage || 'File analysis'
+          );
 
           const newTitle =
             typeof titleResponse?.title === 'string' && titleResponse.title.trim()
               ? titleResponse.title.trim()
               : 'New Chat';
 
-          // Update the Sidebar immediately. Do this before the network rename
-          // request so the new title never has to wait for a refresh.
-          setSessions(prev => {
-            const normalizedId = Number(activeSessionId);
-            const existing = prev.find(session => Number(session.id) === normalizedId);
+          await chatApi.renameSession(activeSessionId, newTitle);
+          setTypingSessionTitle({ id: activeSessionId, title: newTitle });
 
-            if (existing) {
-              return prev.map(session =>
-                Number(session.id) === normalizedId
-                  ? { ...session, sessionName: newTitle, updatedAt: new Date().toISOString() }
-                  : session
-              );
-            }
+          // Keep the Sidebar's sessions prop synchronized immediately.
+          setSessions(prev =>
+            prev.map(session =>
+              session.id === activeSessionId
+                ? { ...session, sessionName: newTitle }
+                : session
+            )
+          );
 
-            const now = new Date().toISOString();
-            return [
-              {
-                id: normalizedId,
-                userId: user.id,
-                sessionName: newTitle,
-                createdAt: now,
-                updatedAt: now,
-              },
-              ...prev,
-            ];
-          });
-          setTypingSessionTitle({ id: Number(activeSessionId), title: newTitle });
-
-          await chatApi.renameSession(Number(activeSessionId), newTitle);
-
-          // The optimistic Sidebar update above is already authoritative for
+          // The optimistic sidebar update above is already authoritative for
           // this UI. Avoid an extra network round-trip after every message.
         } catch (renameErr) {
           console.error('AI-generated Twinkle AI chat title save failed:', renameErr);
@@ -1978,31 +1834,6 @@ You can ask me questions, give me a file or image to analyze, ask for help with 
   return content;
 };
 
-const normalizeHtmlLinks = (value: string): string => {
-  // Some model responses return links as literal HTML anchors. Convert those
-  // anchors to Markdown before HTML sanitization so ReactMarkdown keeps them
-  // clickable instead of leaving only the visible label.
-  const parts = value.split(/(```[\s\S]*?```)/g);
-
-  return parts
-    .map((part, index) => {
-      if (index % 2 === 1) return part;
-
-      return part
-        .replace(
-          /<a\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
-          (_match, href: string, label: string) =>
-            `[${String(label).replace(/[\r\n]+/g, ' ').trim() || href}](${href})`
-        )
-        .replace(
-          /&lt;a\b[^&]*\bhref\s*=\s*(?:&quot;|&#39;|["'])(.*?)(?:&quot;|&#39;|["'])[^&]*&gt;([\s\S]*?)&lt;\/a&gt;/gi,
-          (_match, href: string, label: string) =>
-            `[${String(label).replace(/[\r\n]+/g, ' ').trim() || href}](${href})`
-        );
-    })
-    .join('');
-};
-
 const stripHtmlTagsOutsideCode = (value: string): string => {
   // AI responses can occasionally contain literal HTML such as <br>, <p>,
   // or <div>. Convert those tags to plain text/line breaks before Markdown
@@ -2028,7 +1859,7 @@ const stripHtmlTagsOutsideCode = (value: string): string => {
 const cleanMessageContent = (content: unknown): string => {
     if (typeof content !== 'string') return '';
 
-    let cleaned = stripHtmlTagsOutsideCode(normalizeHtmlLinks(normalizeTwinkleIdentity(content)));
+    let cleaned = stripHtmlTagsOutsideCode(normalizeTwinkleIdentity(content));
     cleaned = cleaned
       // NEVER strip Markdown links here. Keeping the original [label](url)
       // structure lets ReactMarkdown preserve clickability while the
@@ -2066,10 +1897,10 @@ const cleanMessageContent = (content: unknown): string => {
     cleaned = cleaned
       .replace(/\n?\s*#{1,6}\s*Additional Links\s*(?:\(Repeated in Source\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
       .replace(/\n?\s*#{1,6}\s*Document Structure\s*(?:\(as extracted\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
-      // Remove only the extracted "Additional Section". Keep the
-      // "Links & Contact" section because its hyperlinks are real response
-      // content and must remain visible/clickable.
+      // Remove only the extracted "Additional Section" and "Links & Contact"
+      // sections. Keep hyperlinks that belong to the actual document content.
       .replace(/\n?\s*#{1,6}\s*Additional Section\s*(?:\(as in original document\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s*Links\s*&\s*Contact\b|$)/gi, '\n')
+      .replace(/\n?\s*#{1,6}\s*Links\s*&\s*Contact\s*\n[\s\S]*$/gi, '\n')
       .trim();
 
     // Remove the dedicated Architecture section/bullet requested by the UI
@@ -2727,9 +2558,9 @@ const cleanMessageContent = (content: unknown): string => {
                               <img src={fp.preview} alt={fp.file.name} className="w-full h-full object-cover transition-transform group-hover/preview:scale-105" />
                             </div>
                           ) : fp.file.type === 'application/pdf' && fp.preview ? (
-                            <div className="relative h-16 w-20 cursor-pointer overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-800">
-                              <PdfPreview src={fp.preview} fileName={fp.file.name} compact />
-                              <div className="absolute inset-0 bg-transparent transition-colors group-hover/preview:bg-zinc-900/5" />
+                            <div className="relative w-20 h-16 rounded-xl overflow-hidden bg-white dark:bg-zinc-800 shadow-sm border border-zinc-200 dark:border-zinc-700 cursor-pointer">
+                              <iframe src={`${fp.preview}#page=1&view=FitH`} title={`Preview ${fp.file.name}`} className="pointer-events-none absolute inset-0 h-[288px] w-[360px] origin-top-left scale-[0.222] bg-white" />
+                              <div className="absolute inset-0 bg-transparent group-hover/preview:bg-zinc-1000/5 transition-colors" />
                             </div>
                           ) : (
                             <div className="w-20 h-16 rounded-xl flex flex-col items-center justify-center gap-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 cursor-pointer hover:border-zinc-500 dark:hover:border-zinc-500/50 transition-colors">
@@ -2773,33 +2604,43 @@ const cleanMessageContent = (content: unknown): string => {
                     aria-live="polite"
                     aria-label="Listening for voice input"
                   >
-                    <span className="sr-only">Listening...</span>
-                    <div className="flex min-w-0 flex-1 items-center gap-[3px] overflow-hidden" aria-hidden="true">
-                      {Array.from({ length: 44 }, (_, index) => (
-                        <span
-                          key={index}
-                          className="h-1 w-1 shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600"
+                    <div className="flex min-w-0 flex-1 items-center gap-3">
+                      <div className="relative flex h-9 w-9 shrink-0 items-center justify-center">
+                        <motion.span
+                          aria-hidden="true"
+                          className="absolute inset-0 rounded-full bg-[#ec6aa8]/20"
+                          animate={{ scale: [1, 1.35, 1], opacity: [0.55, 0, 0.55] }}
+                          transition={{ duration: 1.5, repeat: Infinity, ease: 'easeOut' }}
                         />
-                      ))}
-                      <div className="ml-1 flex h-10 min-w-0 flex-1 items-center justify-center gap-[3px] overflow-hidden">
-                        {Array.from({ length: 30 }, (_, index) => {
-                          const heights = [10, 16, 25, 14, 34, 20, 40, 27, 48, 32, 56, 38, 50, 30, 44, 58, 36, 52, 28, 46, 34, 54, 24, 42, 30, 50, 22, 38, 18, 12];
-                          return (
-                            <motion.span
-                              key={index}
-                              className="w-[3px] shrink-0 rounded-full bg-zinc-500 dark:bg-zinc-400"
-                              animate={{ height: [Math.max(6, heights[index] * 0.55), heights[index], Math.max(6, heights[index] * 0.7)] }}
-                              transition={{ duration: 0.8 + (index % 5) * 0.08, repeat: Infinity, repeatType: 'mirror', ease: 'easeInOut', delay: index * 0.025 }}
-                            />
-                          );
-                        })}
+                        <motion.span
+                          aria-hidden="true"
+                          className="relative flex h-8 w-8 items-center justify-center rounded-full bg-[#ec6aa8] text-white shadow-sm"
+                          animate={{ scale: [1, 1.04, 1] }}
+                          transition={{ duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
+                        >
+                          <Mic className="h-[17px] w-[17px]" strokeWidth={2.1} />
+                        </motion.span>
                       </div>
-                      {Array.from({ length: 6 }, (_, index) => (
-                        <span
-                          key={`tail-${index}`}
-                          className="h-1 w-1 shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600"
-                        />
-                      ))}
+
+                      <span className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
+                        Listening
+                      </span>
+
+                      <span className="flex items-center gap-1" aria-hidden="true">
+                        {[0, 1, 2].map(index => (
+                          <motion.span
+                            key={index}
+                            className="h-1.5 w-1.5 rounded-full bg-zinc-400 dark:bg-zinc-500"
+                            animate={{ opacity: [0.3, 1, 0.3], y: [0, -2, 0] }}
+                            transition={{
+                              duration: 0.9,
+                              repeat: Infinity,
+                              ease: 'easeInOut',
+                              delay: index * 0.15,
+                            }}
+                          />
+                        ))}
+                      </span>
                     </div>
 
                     <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -2887,7 +2728,7 @@ const cleanMessageContent = (content: unknown): string => {
                       className="group relative inline-flex h-10 shrink-0 items-center gap-1 rounded-lg border-0 bg-transparent px-1.5 text-black shadow-none outline-none transition-colors hover:bg-zinc-100/70 dark:bg-transparent dark:text-white dark:hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50 sm:gap-1.5 sm:px-2"
                     >
                       <span className="max-w-[135px] truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:max-w-[190px] sm:text-sm">
-                        {activeModel.name}
+                        {MODEL_OPTIONS.find(model => model.id === selectedModel)?.name || MODEL_OPTIONS[0].name}
                       </span>
                       <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
                     </motion.button>
@@ -2918,7 +2759,11 @@ const cleanMessageContent = (content: unknown): string => {
                                   type="button"
                                   role="option"
                                   aria-selected={selected}
-                                  onClick={() => chooseModel(option.id)}
+                                  onPointerDown={(event) => {
+                                    event.stopPropagation();
+                                    chooseModel(option.id);
+                                  }}
+                                  onClick={(event) => event.preventDefault()}
                                   whileHover={{ x: 2 }}
                                   whileTap={{ scale: 0.985 }}
                                   transition={{ type: 'spring', stiffness: 450, damping: 28 }}
@@ -2962,23 +2807,27 @@ const cleanMessageContent = (content: unknown): string => {
 
                   {/* Live Talk / Send */}
                   {!isTyping && !input.trim() && filePreviews.length === 0 ? (
-                    <button
+                    <motion.button
                       type="button"
                       onClick={() => setLiveTalkOpen(true)}
                       aria-label="Open Live Talk"
                       title="Live Talk"
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#ec6aa8] text-white shadow-[0_8px_20px_rgba(236,106,168,.22)] hover:bg-[#e85f9f] sm:h-11 sm:w-11"
+                      whileHover={{ scale: 1.06 }}
+                      whileTap={{ scale: 0.92 }}
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#ec6aa8] text-white shadow-[0_8px_20px_rgba(236,106,168,.22)] transition hover:bg-[#e85f9f] sm:h-11 sm:w-11"
                     >
                       <AudioLines className="h-[19px] w-[19px]" strokeWidth={2.1} />
-                    </button>
+                    </motion.button>
                   ) : (
-                    <button
+                    <motion.button
                       type="button"
                       onClick={isTyping ? handleStopResponse : () => handleSendMessage()}
                       disabled={!input.trim() && (!Array.isArray(filePreviews) || filePreviews.length === 0) && !isTyping}
                       aria-label={isTyping ? 'Stop response' : 'Send message'}
                       title={isTyping ? 'Stop response' : 'Send message'}
-                      className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm sm:h-11 sm:w-11 ${isTyping ? 'border-[#ec6aa8] bg-[#ec6aa8] text-white shadow-[#ec6aa8]/20' : 'border-zinc-300 bg-white hover:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-800 dark:hover:border-zinc-500'}`}
+                      whileHover={{ scale: isTyping || input.trim() || filePreviews.length ? 1.06 : 1, y: -1 }}
+                      whileTap={{ scale: 0.92 }}
+                      className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isTyping ? 'border-[#ec6aa8] bg-[#ec6aa8] text-white shadow-[#ec6aa8]/20' : 'border-zinc-300 bg-white hover:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-800 dark:hover:border-zinc-500'}`}
                     >
                       {isTyping ? (
                         <span className="relative flex h-full w-full items-center justify-center">
@@ -2987,7 +2836,7 @@ const cleanMessageContent = (content: unknown): string => {
                       ) : (
                         <ArrowUp className="h-4 w-4" />
                       )}
-                    </button>
+                    </motion.button>
                   )}
                 </div>
               </div>
@@ -3038,7 +2887,7 @@ const cleanMessageContent = (content: unknown): string => {
                 {previewFile.type.startsWith('image/') ? (
                   <div className="flex min-h-full items-center justify-center"><img src={previewUrl} alt={previewFile.name} className="max-h-full max-w-full rounded-xl object-contain shadow-lg" /></div>
                 ) : previewFile.type === 'application/pdf' ? (
-                  <PdfPreview src={previewUrl} fileName={previewFile.name} />
+                  <iframe src={`${previewUrl}#toolbar=1&navpanes=0&view=FitH`} title={`PDF preview: ${previewFile.name}`} className="h-full min-h-[70vh] w-full rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800" />
                 ) : previewText !== null ? (
                   <pre className="mx-auto min-h-full max-w-4xl whitespace-pre-wrap break-words rounded-xl bg-white p-5 font-mono text-xs leading-relaxed text-zinc-800 shadow-sm dark:bg-zinc-900 dark:text-zinc-200">{previewText}</pre>
                 ) : (
