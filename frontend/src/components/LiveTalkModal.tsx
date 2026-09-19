@@ -447,7 +447,8 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     audioContextRef.current = context;
     if (context.state === 'suspended') await context.resume();
 
-    await context.audioWorklet.addModule('/pcm-capture-worklet.js');
+    const workletUrl = new URL('../audio/pcm-capture-worklet.js', import.meta.url);
+    await context.audioWorklet.addModule(workletUrl);
 
     const source = context.createMediaStreamSource(stream);
     const processor = new AudioWorkletNode(context, 'twinkle-pcm-capture');
