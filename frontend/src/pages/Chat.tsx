@@ -578,12 +578,6 @@ const playModelSwitchSound = () => {
   }
 };
 
-const RESPONSE_STATUS_MESSAGES = [
-  'Preparing your response…',
-  'Reviewing your request…',
-  'Working through the details…',
-  'Putting everything together…',
-];
 
 const EMPTY_CHAT_PROMPTS = [
   "What's on your mind today?",
@@ -671,7 +665,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const [loading, setLoading] = useState(true);
   const [justFinished, setJustFinished] = useState(false);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
-  const [responseStatus, setResponseStatus] = useState('Preparing your response…');
   const [copiedId, setCopiedId] = useState<number | string | null>(null);
   const [editingMessage, setEditingMessage] = useState<{ id: string | number; content: string } | null>(null);
   const [editInput, setEditInput] = useState('');
@@ -684,19 +677,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const [liveTalkOpen, setLiveTalkOpen] = useState(false);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
   const [voiceInputActive, setVoiceInputActive] = useState(false);
-  useEffect(() => {
-    if (!isTyping) {
-      setResponseStatus('Preparing your response…');
-      return;
-    }
-    let index = 0;
-    setResponseStatus(RESPONSE_STATUS_MESSAGES[0]);
-    const interval = window.setInterval(() => {
-      index = (index + 1) % RESPONSE_STATUS_MESSAGES.length;
-      setResponseStatus(RESPONSE_STATUS_MESSAGES[index]);
-    }, 2200);
-    return () => window.clearInterval(interval);
-  }, [isTyping]);
 
   const [typedSessionTitle, setTypedSessionTitle] = useState('');
 
@@ -2651,43 +2631,23 @@ const cleanMessageContent = (content: unknown): string => {
             <AnimatePresence>
               {showScrollBottom && messages.length > 0 && (
                 isTyping ? (
-                  <motion.div
-                    initial={{ opacity: 0, y: 8, scale: 0.96 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 8, scale: 0.96 }}
-                    transition={{ type: 'spring', stiffness: 380, damping: 28 }}
-                    className="absolute -top-14 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2.5 rounded-full border border-white/75 bg-white/65 px-3.5 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 backdrop-blur-2xl dark:border-white/10 dark:bg-zinc-900/55 dark:ring-white/10"
-                    aria-live="polite"
-                    aria-label={responseStatus}
-                  >
-                    <span className="flex shrink-0 items-center gap-1" aria-hidden="true">
-                      <motion.span
-                        animate={{ y: [0, -1.5, 0], opacity: [0.35, 1, 0.35] }}
-                        transition={{ repeat: Infinity, duration: 1.15, ease: 'easeInOut' }}
-                        className="h-1.5 w-1.5 rounded-full bg-zinc-700 dark:bg-zinc-200"
-                      />
-                      <motion.span
-                        animate={{ y: [0, -1.5, 0], opacity: [0.35, 1, 0.35] }}
-                        transition={{ repeat: Infinity, duration: 1.15, ease: 'easeInOut', delay: 0.16 }}
-                        className="h-1.5 w-1.5 rounded-full bg-zinc-700 dark:bg-zinc-200"
-                      />
-                      <motion.span
-                        animate={{ y: [0, -1.5, 0], opacity: [0.35, 1, 0.35] }}
-                        transition={{ repeat: Infinity, duration: 1.15, ease: 'easeInOut', delay: 0.32 }}
-                        className="h-1.5 w-1.5 rounded-full bg-zinc-700 dark:bg-zinc-200"
-                      />
-                    </span>
-
-                    <motion.span
-                      key={responseStatus}
-                      initial={{ opacity: 0, y: 3 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.22, ease: 'easeOut' }}
-                      className="whitespace-nowrap text-[11px] font-medium tracking-tight text-zinc-700 dark:text-zinc-200"
-                    >
-                      {responseStatus}
-                    </motion.span>
-                  </motion.div>
+                  <div
+                  className="flex items-center justify-center px-4 py-2"
+                  aria-live="polite"
+                  aria-label="Generating response"
+                >
+                  <span className="flex items-center gap-1.5" aria-hidden="true">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-500 dark:bg-zinc-400" />
+                    <span
+                      className="h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-500 dark:bg-zinc-400"
+                      style={{ animationDelay: '180ms' }}
+                    />
+                    <span
+                      className="h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-500 dark:bg-zinc-400"
+                      style={{ animationDelay: '360ms' }}
+                    />
+                  </span>
+                </div>
                 ) : (
                   <motion.button
                     initial={{ opacity: 0, y: 10 }}
