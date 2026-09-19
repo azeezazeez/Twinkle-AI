@@ -8,7 +8,7 @@ import {
   Settings2, UserCircle2, ChevronRight, PanelLeft,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import UserAvatar from './UserAvatar'; 
+import UserAvatar from './UserAvatar';  
 import { chatApi } from '../lib/api';
 import StormLogo from './StormLogo';
 
