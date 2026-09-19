@@ -922,12 +922,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const abortControllerRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Stores the specific session ID that should skip one message load
-  // (the newly created session after first send), so switching to any
-  // OTHER existing session always loads its messages correctly.
+  
   const skipMessageLoadRef = useRef<number | null>(null);
 
-  // Auto-resize textarea
+  
   useEffect(() => {
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
@@ -935,7 +933,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     }
   }, [input]);
 
-  // Clean up object URLs
+  
   const filePreviewsRef = useRef(filePreviews);
   useEffect(() => { filePreviewsRef.current = filePreviews; }, [filePreviews]);
   useEffect(() => {
@@ -946,7 +944,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     };
   }, []);
 
-  // Load sessions & messages
+
+  
   const loadSessions = useCallback(async () => {
     try {
       const response = await chatApi.getSessions() as any;
@@ -959,8 +958,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     }
   }, [onLogout]);
 
-  // Live Talk persists turns in the background. Update the same sidebar state
-  // immediately instead of forcing another GET /chat/sessions request.
+  
   useEffect(() => {
     const handleLiveSessionUpdate = (event: Event) => {
       const detail = (event as CustomEvent<{ id: number; sessionName?: string }>).detail;
