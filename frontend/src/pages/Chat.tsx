@@ -907,11 +907,34 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   }, []);
 
   const chooseModel = useCallback((modelId: string) => {
-    if (modelId !== selectedModel) playModelSwitchSound();
-    setSelectedModel(modelId);
+    if (!MODEL_OPTIONS.some(option => option.id === modelId)) return;
+
+    setSelectedModel(previousModel => {
+      if (modelId !== previousModel) playModelSwitchSound();
+
+      try {
+        localStorage.setItem(MODEL_STORAGE_KEY, modelId);
+      } catch {}
+
+      return modelId;
+    });
+
     setModelPickerOpen(false);
-    try { localStorage.setItem(MODEL_STORAGE_KEY, modelId); } catch {}
-  }, [selectedModel]);
+  }, []);
+
+  // Keep the selected model synchronized with localStorage so the same
+  // model remains selected after a refresh or a Chat component remount.
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(MODEL_STORAGE_KEY);
+
+      if (stored && MODEL_OPTIONS.some(option => option.id === stored)) {
+        setSelectedModel(previousModel =>
+          previousModel === stored ? previousModel : stored
+        );
+      }
+    } catch {}
+  }, []);
 
   const activeModel = MODEL_OPTIONS.find(m => m.id === selectedModel) || MODEL_OPTIONS[0];
 
@@ -1299,6 +1322,12 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       );
     } finally {
       setIsProcessingFiles(false);
+
+      // After any file is selected, return the caret to the chat composer
+      // so the user can immediately type a message.
+      window.setTimeout(() => {
+        inputRef.current?.focus();
+      }, 0);
     }
   };
 
