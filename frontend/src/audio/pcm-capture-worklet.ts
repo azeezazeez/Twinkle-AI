@@ -8,7 +8,7 @@ class TwinklePcmCaptureProcessor extends AudioWorkletProcessor {
   process(inputs, outputs) {
     const input = inputs[0]?.[0];
     const output = outputs[0]?.[0];
-
+ 
     if (output && input) {
       for (let i = 0; i < output.length; i += 1) {
         output[i] = input[i] || 0;
