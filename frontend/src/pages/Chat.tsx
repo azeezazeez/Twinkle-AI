@@ -2155,11 +2155,7 @@ const cleanMessageContent = (content: unknown): string => {
       <div className="flex items-center justify-center h-screen font-sans text-zinc-400 bg-white dark:bg-zinc-950 transition-colors duration-300">
         <motion.div
           animate={{ scale: [1, 1.1, 1], opacity: [0.3, 0.6, 0.3] }}
-          transition={{
-                duration: 0.8,
-                ease: 'linear',
-                repeat: Infinity,
-             }}
+          transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
           className="flex flex-col items-center gap-4"
         >
           <StormLogo className="w-12 h-12 text-black dark:text-white transition-transform duration-500 ease-in-out hover:rotate-180" />
@@ -2804,9 +2800,9 @@ const cleanMessageContent = (content: unknown): string => {
                             <motion.div
                               className="flex h-full w-full shrink-0 items-center gap-[3px]"
                               animate={{ x: ['0%', '-50%'] }}
-                              transition={{ duration: 0.5, repeat: Infinity, ease: 'linear' }}
+                              transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
                             >
-                              {[...Array(96)].map((_, index) => {
+                              {[...Array(128)].map((_, index) => {
                                 const heights = [7, 13, 22, 10, 31, 16, 39, 24, 47, 32, 54, 40, 29, 50, 37, 56, 31, 45, 24, 52, 34, 48, 20, 41, 29, 54, 37, 25, 45, 31, 49, 19, 39, 27, 47, 33, 43, 23, 35, 17, 27, 11, 19, 34];
                                 const height = heights[index % heights.length];
                                 return <span key={index} className="w-[3px] shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500" style={{ height: `${height}px` }} />;
