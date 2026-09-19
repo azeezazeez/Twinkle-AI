@@ -1292,6 +1292,21 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     }
   };
 
+  // After file selection finishes, return focus to the composer so the
+  // user can type immediately instead of remaining on the attachment control.
+  useEffect(() => {
+    if (isProcessingFiles) return;
+
+    const focusComposer = () => {
+      const input = inputRef.current;
+      if (!input || voiceInputActive || isTyping) return;
+      input.focus();
+    };
+
+    const frame = window.requestAnimationFrame(focusComposer);
+    return () => window.cancelAnimationFrame(frame);
+  }, [isProcessingFiles, voiceInputActive, isTyping]);
+
   const removeFile = (id: string) => {
     const removed = filePreviews.find(fp => fp.id === id);
     if (removed?.preview) URL.revokeObjectURL(removed.preview);
