@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import React from 'react';
+import { flushSync } from 'react-dom';
 import { User, Session, Message } from '../types';
 import Sidebar from '../components/Sidebar';
 import { chatApi, authApi, createLiveToken } from '../lib/api';
@@ -847,9 +848,14 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     voiceDraftRef.current = '';
     voicePendingPcmRef.current = [];
     voiceSpeechDetectedRef.current = false;
-    setVoiceDraftVersion(version => version + 1);
-    setVoiceSpeechDetected(false);
-    setVoiceInputActive(true);
+
+    // Paint the listening composer immediately on the same click before
+    // microphone permission/token/network work begins.
+    flushSync(() => {
+      setVoiceDraftVersion(version => version + 1);
+      setVoiceSpeechDetected(false);
+      setVoiceInputActive(true);
+    });
 
     // Start requesting the session token immediately, in parallel with the
     // microphone permission request, so the actual listening pipeline starts
@@ -2794,7 +2800,7 @@ const cleanMessageContent = (content: unknown): string => {
                             <motion.div
                               className="flex h-full w-full shrink-0 items-center gap-[3px]"
                               animate={{ x: ['0%', '-50%'] }}
-                              transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                              transition={{ duration: 0.5, repeat: Infinity, ease: 'linear' }}
                             >
                               {[...Array(96)].map((_, index) => {
                                 const heights = [7, 13, 22, 10, 31, 16, 39, 24, 47, 32, 54, 40, 29, 50, 37, 56, 31, 45, 24, 52, 34, 48, 20, 41, 29, 54, 37, 25, 45, 31, 49, 19, 39, 27, 47, 33, 43, 23, 35, 17, 27, 11, 19, 34];
