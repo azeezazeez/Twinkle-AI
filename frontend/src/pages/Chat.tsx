@@ -2755,63 +2755,69 @@ const cleanMessageContent = (content: unknown): string => {
                 {/* Main prompt area — always above the action row */}
                 {voiceInputActive ? (
                   <div
-                    className="relative flex min-h-[58px] w-full min-w-0 items-center gap-3 px-4 pt-3 pb-1 sm:min-h-[64px] sm:px-4 sm:pt-3"
+                    className="relative flex min-h-[58px] w-full min-w-0 items-center gap-2 px-2 py-2 sm:min-h-[64px] sm:gap-2 sm:px-3"
                     aria-live="polite"
                     aria-label="Listening for voice input"
                   >
-                    <span className="sr-only">Listening...</span>
-                    <div
-                      className="relative flex h-10 min-w-0 flex-1 items-center overflow-hidden"
-                      aria-hidden="true"
+                    <motion.button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      aria-label="Attach files"
+                      title="Attach files"
+                      whileHover={{ scale: 1.04 }}
+                      whileTap={{ scale: 0.92 }}
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 sm:h-11 sm:w-11"
                     >
-                      {!voiceSpeechDetected ? (
-                        <motion.div
-                          className="absolute left-0 top-1/2 h-px w-[220%] -translate-y-1/2 bg-[repeating-linear-gradient(90deg,transparent_0,transparent_18px,rgba(161,161,170,.65)_18px,rgba(161,161,170,.65)_22px)] dark:bg-[repeating-linear-gradient(90deg,transparent_0,transparent_18px,rgba(113,113,122,.75)_18px,rgba(113,113,122,.75)_22px)]"
-                          animate={{ x: ['0%', '-55%'] }}
-                          transition={{ duration: 2.2, repeat: Infinity, ease: 'linear' }}
-                        />
-                      ) : (
-                        <motion.div
-                          className="flex h-9 w-[200%] shrink-0 items-center gap-[3px]"
-                          animate={{ x: ['0%', '-50%'] }}
-                          transition={{ duration: 1.35, repeat: Infinity, ease: 'linear' }}
-                        >
-                          {[...Array(84)].map((_, index) => {
-                            const heights = [6, 12, 22, 10, 30, 16, 38, 24, 46, 32, 52, 38, 28, 48, 36, 54, 30, 44, 24, 50, 32, 46, 20, 40, 28, 52, 36, 24, 44, 30, 48, 18, 38, 26, 46, 32, 42, 22, 34, 16, 26, 10, 18, 34];
-                            const height = heights[index % heights.length];
-                            return (
-                              <motion.span
-                                key={index}
-                                className="w-[2.5px] shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500"
-                                animate={{
-                                  height: [Math.max(4, height * 0.35), height, Math.max(5, height * 0.5)],
-                                  opacity: [0.55, 1, 0.7],
-                                }}
-                                transition={{
-                                  duration: 0.52 + (index % 5) * 0.045,
-                                  repeat: Infinity,
-                                  repeatType: 'mirror',
-                                  ease: 'easeInOut',
-                                  delay: index * 0.012,
-                                }}
-                              />
-                            );
-                          })}
-                        </motion.div>
-                      )}
+                      <Plus className="h-[22px] w-[22px] stroke-[2]" />
+                    </motion.button>
+
+                    <div className="relative flex h-10 min-w-0 flex-1 items-center overflow-hidden" aria-hidden="true">
+                      <motion.div
+                        className="absolute left-0 top-1/2 h-[3px] w-[220%] -translate-y-1/2 opacity-80"
+                        style={{
+                          backgroundImage: 'radial-gradient(circle, rgba(161,161,170,.72) 1.3px, transparent 1.5px)',
+                          backgroundSize: '7px 3px',
+                        }}
+                        animate={{ x: ['0%', '-54%'] }}
+                        transition={{ duration: 2.1, repeat: Infinity, ease: 'linear' }}
+                      />
+
+                      <AnimatePresence initial={false}>
+                        {voiceSpeechDetected && (
+                          <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ duration: 0.08 }}
+                            className="absolute left-0 top-1/2 flex h-10 w-[210%] -translate-y-1/2 items-center"
+                          >
+                            <motion.div
+                              className="flex h-full w-full shrink-0 items-center gap-[3px]"
+                              animate={{ x: ['0%', '-50%'] }}
+                              transition={{ duration: 1.15, repeat: Infinity, ease: 'linear' }}
+                            >
+                              {[...Array(96)].map((_, index) => {
+                                const heights = [7, 13, 22, 10, 31, 16, 39, 24, 47, 32, 54, 40, 29, 50, 37, 56, 31, 45, 24, 52, 34, 48, 20, 41, 29, 54, 37, 25, 45, 31, 49, 19, 39, 27, 47, 33, 43, 23, 35, 17, 27, 11, 19, 34];
+                                const height = heights[index % heights.length];
+                                return <span key={index} className="w-[3px] shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500" style={{ height: `${height}px` }} />;
+                              })}
+                            </motion.div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
 
-                    <div className="ml-auto flex shrink-0 items-center gap-1">
+                    <div className="flex shrink-0 items-center gap-0">
                       <motion.button
                         type="button"
                         onClick={cancelVoiceInput}
                         aria-label="Reject voice text"
-                        title="Reject"
+                        title="Cancel"
                         whileHover={{ scale: 1.06 }}
                         whileTap={{ scale: 0.9 }}
                         className="flex h-10 w-10 items-center justify-center rounded-full text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white sm:h-11 sm:w-11"
                       >
-                        <X className="h-[20px] w-[20px]" strokeWidth={2.1} />
+                        <X className="h-[20px] w-[20px]" strokeWidth={2.05} />
                       </motion.button>
                       <motion.button
                         type="button"
