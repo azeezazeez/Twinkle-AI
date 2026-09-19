@@ -2671,7 +2671,7 @@ const cleanMessageContent = (content: unknown): string => {
                       className="group relative inline-flex h-10 shrink-0 items-center gap-1 rounded-lg border-0 bg-transparent px-1.5 text-black shadow-none outline-none transition-colors hover:bg-zinc-100/70 dark:bg-transparent dark:text-white dark:hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50 sm:gap-1.5 sm:px-2"
                     >
                       <span className="max-w-[135px] truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:max-w-[190px] sm:text-sm">
-                        {activeModel.name}
+                        {MODEL_OPTIONS.find(model => model.id === selectedModel)?.name || MODEL_OPTIONS[0].name}
                       </span>
                       <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
                     </motion.button>
