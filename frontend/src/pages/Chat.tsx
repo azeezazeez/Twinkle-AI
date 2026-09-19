@@ -10,7 +10,7 @@ import ConfirmationModal from '../components/ConfirmationModal';
 import LiveTalkModal from '../components/LiveTalkModal'; 
 
 import {
-  ArrowDown, ArrowUp,  
+  ArrowDown, ArrowUp, 
   Copy, Check, Edit2,
   X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, Mic, AudioLines,
 } from 'lucide-react';
@@ -2773,23 +2773,9 @@ const cleanMessageContent = (content: unknown): string => {
                     </motion.button>
 
                     <div className="relative flex h-10 min-w-0 flex-1 items-center overflow-hidden" aria-hidden="true">
-                      <motion.div
-                        className="absolute left-0 top-1/2 h-[3px] w-[220%] -translate-y-1/2 opacity-80"
-                        style={{
-                          backgroundImage: 'radial-gradient(circle, rgba(161,161,170,.72) 1.3px, transparent 1.5px)',
-                          backgroundSize: '7px 3px',
-                        }}
-                        animate={{ x: ['0%', '-54%'] }}
-                        transition={{ duration: 3.8, repeat: Infinity, ease: 'linear' }}
-                      />
-
                       <AnimatePresence initial={false}>
-                        {voiceSpeechDetected && (
-                          <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            transition={{ duration: 0.08 }}
+                        {voiceInputActive && (
+                          <div
                             className="absolute left-0 top-1/2 flex h-10 w-[210%] -translate-y-1/2 items-center"
                           >
                             <motion.div
@@ -2803,7 +2789,7 @@ const cleanMessageContent = (content: unknown): string => {
                                 return <span key={index} className="w-[4px] shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500" style={{ height: `${Math.max(8, height)}px` }} />;
                               })}
                             </motion.div>
-                          </motion.div>
+                          </div>
                         )}
                       </AnimatePresence>
                     </div>
@@ -2967,37 +2953,30 @@ const cleanMessageContent = (content: unknown): string => {
                   )}
 
                   {/* Live Talk / Send */}
-                  <AnimatePresence mode="wait" initial={false}>
+                  
                     {!isTyping && !input.trim() && filePreviews.length === 0 ? (
-                      <motion.button
+                      <button
                         key="live-talk"
                         type="button"
                         onClick={() => setLiveTalkOpen(true)}
                         aria-label="Open Live Talk"
                         title="Live Talk"
-                        initial={{ opacity: 0, scale: 0.88, y: 2 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.88, y: 2 }}
                         whileHover={{ scale: 1.06 }}
                         whileTap={{ scale: 0.92 }}
                         className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#ec6aa8] text-white shadow-[0_8px_20px_rgba(236,106,168,.22)] transition hover:bg-[#e85f9f] sm:h-11 sm:w-11"
                       >
                         <AudioLines className="h-[19px] w-[19px]" strokeWidth={2.1} />
-                      </motion.button>
+                      </button>
                     ) : (
-                      <motion.button
+                      <button
                         key="send"
                         type="button"
                         onClick={isTyping ? handleStopResponse : () => handleSendMessage()}
                         disabled={!input.trim() && (!Array.isArray(filePreviews) || filePreviews.length === 0) && !isTyping}
                         aria-label={isTyping ? 'Stop response' : 'Send message'}
                         title={isTyping ? 'Stop response' : 'Send message'}
-                        initial={{ opacity: 0, scale: 0.88, y: 2 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.88, y: 2 }}
                         whileHover={{ scale: isTyping || input.trim() || filePreviews.length ? 1.06 : 1, y: -1 }}
                         whileTap={{ scale: 0.92 }}
-                        transition={{ type: 'spring', stiffness: 450, damping: 25 }}
                         className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isTyping ? 'border-[#ec6aa8] bg-[#ec6aa8] text-white shadow-[#ec6aa8]/20' : 'border-zinc-300 bg-white hover:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-800 dark:hover:border-zinc-500'}`}
                       >
                         {isTyping ? (
@@ -3007,9 +2986,9 @@ const cleanMessageContent = (content: unknown): string => {
                         ) : (
                           <ArrowUp className="h-4 w-4" />
                         )}
-                      </motion.button>
+                      </button>
                     )}
-                  </AnimatePresence>
+                  
                 </div>
               </div>
 
