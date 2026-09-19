@@ -4,7 +4,7 @@ import com.ai.chatbot_backend.exception.AIServiceException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
-import org.springframework.stereotype.Service; 
+import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
@@ -23,6 +23,7 @@ public class GroqService {
     private static final int MAX_RATE_LIMIT_RETRIES = 2;
     private static final long DEFAULT_BACKOFF_MS = 1000L;
     private static final long MAX_BACKOFF_MS = 30000L;
+    private static final int MAX_OUTPUT_TOKENS = 4096;
 
     @Value("${groq.api.key}")
     private String apiKey;
@@ -78,12 +79,9 @@ public class GroqService {
             String requestedModel,
             String requestedLanguage) {
 
-        if (apiKey == null || apiKey.isBlank() || apiKey.equalsIgnoreCase("YOUR_GROQ_API_KEY")) {
-            throw new AIServiceException("Groq API key is not configured.");
-        }
-
         String resolvedModel = resolveModel(requestedModel);
-        List<Map<String, Object>> messages = buildHistory(conversationHistory, requestedLanguage);
+        List<Map<String, Object>> messages =
+                buildHistory(conversationHistory, requestedLanguage);
 
         messages.add(Map.of(
                 "role", "user",
@@ -101,7 +99,9 @@ public class GroqService {
         }
 
         if (!getAvailableModels().contains(requested)) {
-            throw new IllegalArgumentException("Unsupported Groq model: " + requested);
+            throw new IllegalArgumentException(
+                    "Unsupported Groq model: " + requested
+            );
         }
 
         return requested;
@@ -113,7 +113,8 @@ public class GroqService {
 
         List<Map<String, Object>> messages = new ArrayList<>();
 
-        String languageInstruction = buildLanguageInstruction(requestedLanguage);
+        String languageInstruction =
+                buildLanguageInstruction(requestedLanguage);
 
         messages.add(Map.of(
                 "role", "system",
@@ -143,11 +144,12 @@ public class GroqService {
                     continue;
                 }
 
-                String normalizedRole = "assistant".equalsIgnoreCase(role)
-                        ? "assistant"
-                        : "user".equalsIgnoreCase(role)
-                        ? "user"
-                        : null;
+                String normalizedRole =
+                        "assistant".equalsIgnoreCase(role)
+                                ? "assistant"
+                                : "user".equalsIgnoreCase(role)
+                                ? "user"
+                                : null;
 
                 if (normalizedRole == null) {
                     continue;
@@ -164,7 +166,10 @@ public class GroqService {
     }
 
     private String buildLanguageInstruction(String requestedLanguage) {
-        String code = requestedLanguage == null ? "" : requestedLanguage.trim().toLowerCase(java.util.Locale.ROOT);
+        String code = requestedLanguage == null
+                ? ""
+                : requestedLanguage.trim().toLowerCase(java.util.Locale.ROOT);
+
         if (code.isEmpty() || "auto".equals(code)) {
             return "Detect the language of the user's latest message and respond in that same language. "
                     + "If the user changes language, immediately follow the new language. "
@@ -172,18 +177,42 @@ public class GroqService {
         }
 
         String name = switch (code) {
-            case "en" -> "English"; case "hi" -> "Hindi"; case "te" -> "Telugu"; case "ta" -> "Tamil";
-            case "kn" -> "Kannada"; case "ml" -> "Malayalam"; case "bn" -> "Bengali"; case "mr" -> "Marathi";
-            case "gu" -> "Gujarati"; case "pa" -> "Punjabi"; case "ur" -> "Urdu"; case "ar" -> "Arabic";
-            case "es" -> "Spanish"; case "fr" -> "French"; case "de" -> "German"; case "it" -> "Italian";
-            case "pt" -> "Portuguese"; case "ru" -> "Russian"; case "ja" -> "Japanese"; case "ko" -> "Korean";
-            case "zh" -> "Chinese"; case "tr" -> "Turkish"; case "vi" -> "Vietnamese"; case "id" -> "Indonesian";
-            case "th" -> "Thai"; case "fil" -> "Filipino"; default -> null;
+            case "en" -> "English";
+            case "hi" -> "Hindi";
+            case "te" -> "Telugu";
+            case "ta" -> "Tamil";
+            case "kn" -> "Kannada";
+            case "ml" -> "Malayalam";
+            case "bn" -> "Bengali";
+            case "mr" -> "Marathi";
+            case "gu" -> "Gujarati";
+            case "pa" -> "Punjabi";
+            case "ur" -> "Urdu";
+            case "ar" -> "Arabic";
+            case "es" -> "Spanish";
+            case "fr" -> "French";
+            case "de" -> "German";
+            case "it" -> "Italian";
+            case "pt" -> "Portuguese";
+            case "ru" -> "Russian";
+            case "ja" -> "Japanese";
+            case "ko" -> "Korean";
+            case "zh" -> "Chinese";
+            case "tr" -> "Turkish";
+            case "vi" -> "Vietnamese";
+            case "id" -> "Indonesian";
+            case "th" -> "Thai";
+            case "fil" -> "Filipino";
+            default -> null;
         };
+
         if (name == null) {
             return "Detect the language of the user's latest message and respond in that same language. ";
         }
-        return "The user selected " + name + ". Respond entirely in " + name + " unless the user explicitly asks for another language. "
+
+        return "The user selected " + name
+                + ". Respond entirely in " + name
+                + " unless the user explicitly asks for another language. "
                 + "Never switch to English merely because technical terms or the interface are in English. ";
     }
 
@@ -199,7 +228,7 @@ public class GroqService {
                 requestBody.put("model", model);
                 requestBody.put("messages", messages);
                 requestBody.put("temperature", 0.7);
-                requestBody.put("max_tokens", 6000);
+                requestBody.put("max_tokens", MAX_OUTPUT_TOKENS);
 
                 HttpHeaders headers = new HttpHeaders();
                 headers.setContentType(MediaType.APPLICATION_JSON);
@@ -208,39 +237,41 @@ public class GroqService {
                 HttpEntity<Map<String, Object>> entity =
                         new HttpEntity<>(requestBody, headers);
 
-                String endpoint = apiUrl == null ? "" : apiUrl.trim().replaceAll("/+$", "")
-                        + "/chat/completions";
-
-                if (endpoint.isBlank() || !endpoint.startsWith("http")) {
-                    throw new AIServiceException("Groq API URL is not configured correctly.");
-                }
-
                 ResponseEntity<Map> response = restTemplate.postForEntity(
-                        endpoint,
+                        apiUrl + "/chat/completions",
                         entity,
                         Map.class
                 );
 
                 Map<String, Object> body = response.getBody();
 
-                if (body != null && body.get("choices") instanceof List<?> choices
+                if (body != null
+                        && body.get("choices") instanceof List<?> choices
                         && !choices.isEmpty()
                         && choices.get(0) instanceof Map<?, ?> choice
                         && choice.get("message") instanceof Map<?, ?> message) {
 
                     Object content = message.get("content");
+
                     if (content != null && !content.toString().isBlank()) {
                         return content.toString();
                     }
                 }
 
-                throw new AIServiceException("Groq returned an invalid or empty response.");
+                throw new AIServiceException(
+                        "Groq returned an invalid or empty response."
+                );
 
             } catch (HttpClientErrorException e) {
-                if (e.getStatusCode().value() == 429
+
+                int status = e.getStatusCode().value();
+
+                if (status == 429
                         && rateLimitAttempt < MAX_RATE_LIMIT_RETRIES) {
 
-                    long delay = resolveRetryDelay(e, rateLimitAttempt);
+                    long delay =
+                            resolveRetryDelay(e, rateLimitAttempt);
+
                     log.warn(
                             "Groq rate limited. Retrying in {} ms. model={}, attempt={}/{}",
                             delay,
@@ -255,34 +286,41 @@ public class GroqService {
                 }
 
                 String body = e.getResponseBodyAsString();
+
                 log.error(
                         "Groq client error. model={}, status={}, response={}",
                         model,
-                        e.getStatusCode().value(),
+                        status,
                         body
                 );
 
-                String message = e.getStatusCode().value() == 429
+                String message = status == 429
                         ? "The AI service is temporarily rate-limited. Please wait a few seconds and try again."
-                        : "Groq API error " + e.getStatusCode().value() + ": " + body;
+                        : "Groq API error " + status + ": " + body;
 
                 throw new AIServiceException(message, e);
 
             } catch (HttpServerErrorException e) {
+
+                int status = e.getStatusCode().value();
                 String body = e.getResponseBodyAsString();
+
                 log.error(
                         "Groq server error. model={}, status={}, response={}",
                         model,
-                        e.getStatusCode().value(),
+                        status,
                         body
                 );
 
-                throw new AIServiceException(
-                        "Groq API error " + e.getStatusCode().value() + ": " + body,
-                        e
-                );
+                String message =
+                        status == 502 || status == 503 || status == 504
+                                ? "The Groq AI service is temporarily unavailable. Please try again shortly."
+                                : "Groq API error " + status + ": " + body;
+
+                throw new AIServiceException(message, e);
 
             } catch (ResourceAccessException e) {
+
                 log.error(
                         "Unable to reach Groq. model={}, error={}",
                         model,
@@ -299,6 +337,7 @@ public class GroqService {
                 throw e;
 
             } catch (Exception e) {
+
                 log.error(
                         "Unexpected Groq error. model={}, error={}",
                         model,
@@ -314,10 +353,15 @@ public class GroqService {
         }
     }
 
-    private long resolveRetryDelay(HttpClientErrorException exception, int attempt) {
-        String retryAfter = exception.getResponseHeaders() == null
-                ? null
-                : exception.getResponseHeaders().getFirst("Retry-After");
+    private long resolveRetryDelay(
+            HttpClientErrorException exception,
+            int attempt) {
+
+        String retryAfter =
+                exception.getResponseHeaders() == null
+                        ? null
+                        : exception.getResponseHeaders()
+                                .getFirst("Retry-After");
 
         if (retryAfter != null && !retryAfter.isBlank()) {
             try {
@@ -330,7 +374,10 @@ public class GroqService {
             }
         }
 
-        long delay = DEFAULT_BACKOFF_MS * (1L << Math.min(attempt, 4));
+        long delay =
+                DEFAULT_BACKOFF_MS
+                        * (1L << Math.min(attempt, 4));
+
         return Math.min(delay, MAX_BACKOFF_MS);
     }
 
@@ -339,7 +386,11 @@ public class GroqService {
             Thread.sleep(Math.max(0L, delay));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new AIServiceException("Groq retry was interrupted.", e);
+
+            throw new AIServiceException(
+                    "Groq retry was interrupted.",
+                    e
+            );
         }
     }
 }
