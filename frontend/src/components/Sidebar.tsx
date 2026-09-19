@@ -8,7 +8,7 @@ import {
   Settings2, UserCircle2, ChevronRight, PanelLeft,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import UserAvatar from './UserAvatar';  
+import UserAvatar from './UserAvatar'; 
 import { chatApi } from '../lib/api';
 import StormLogo from './StormLogo';
 
@@ -964,15 +964,35 @@ export default function Sidebar({
                   title="Close sidebar"
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.92 }}
-                  className="flex h-9 w-9 items-center justify-center rounded-[25px]
-                    bg-zinc-100 dark:bg-zinc-800
-                    border border-zinc-200 dark:border-zinc-700
+                  className="flex h-9 w-9 items-center justify-center rounded-none
+                    bg-transparent border-0 shadow-none
                     text-zinc-500 dark:text-zinc-400
                     hover:text-zinc-700 dark:hover:text-zinc-200
-                    hover:border-zinc-300 dark:hover:border-zinc-600
-                    shadow-sm transition-all duration-200"
+                    transition-colors duration-200"
                 >
-                  <PanelLeft className="w-5 h-5" strokeWidth={1.8} />
+                  <svg
+                    width="23"
+                    height="20"
+                    viewBox="0 0 24 20"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <rect
+                      x="2"
+                      y="2"
+                      width="20"
+                      height="16"
+                      rx="4"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                    />
+                    <path
+                      d="M8.5 2.5V17.5"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                  </svg>
                 </motion.button>
                 <div className="pointer-events-none absolute right-0 top-full mt-2 z-[300] whitespace-nowrap rounded-lg bg-zinc-900 px-2.5 py-1.5 text-xs font-bold text-white opacity-0 shadow-lg transition-opacity duration-150 group-hover/close:opacity-100">
                   Close Sidebar
@@ -1085,15 +1105,35 @@ export default function Sidebar({
                     title="Close sidebar"
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.92 }}
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[25px]
-                      bg-zinc-100 dark:bg-zinc-800
-                      border border-zinc-200 dark:border-zinc-700
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-none
+                      bg-transparent border-0 shadow-none
                       text-zinc-500 dark:text-zinc-400
                       hover:text-zinc-700 dark:hover:text-zinc-200
-                      hover:border-zinc-300 dark:hover:border-zinc-600
-                      shadow-sm transition-all duration-200"
+                      transition-colors duration-200"
                   >
-                    <PanelLeft className="w-5 h-5" strokeWidth={1.8} />
+                    <svg
+                      width="23"
+                      height="20"
+                      viewBox="0 0 24 20"
+                      fill="none"
+                      aria-hidden="true"
+                    >
+                      <rect
+                        x="2"
+                        y="2"
+                        width="20"
+                        height="16"
+                        rx="4"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                      />
+                      <path
+                        d="M8.5 2.5V17.5"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                      />
+                    </svg>
                   </motion.button>
                   <div className="pointer-events-none absolute right-0 top-full mt-2 z-[300] whitespace-nowrap rounded-lg bg-zinc-900 px-2.5 py-1.5 text-xs font-bold text-white opacity-0 shadow-lg transition-opacity duration-150 group-hover/close:opacity-100">
                     Close Sidebar
