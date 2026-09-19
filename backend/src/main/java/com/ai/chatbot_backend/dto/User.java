@@ -83,6 +83,7 @@ public class User implements Serializable {
     @Column(name = "avatar_url")
     private String avatarUrl;
 
+    @Builder.Default
     @Column(name = "auth_provider")
     private String authProvider = "LOCAL";
 }
