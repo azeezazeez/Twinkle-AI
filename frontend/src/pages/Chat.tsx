@@ -5,7 +5,7 @@ import { User, Session, Message } from '../types';
 import Sidebar from '../components/Sidebar';
 import { chatApi, authApi, createLiveToken } from '../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
-import StormLogo from '../components/StormLogo';
+import StormLogo from '../components/StormLogo'; 
 import ConfirmationModal from '../components/ConfirmationModal';  
 import LiveTalkModal from '../components/LiveTalkModal'; 
 
