@@ -9,7 +9,7 @@ import StormLogo from '../components/StormLogo';
 import ConfirmationModal from '../components/ConfirmationModal'; 
 import LiveTalkModal from '../components/LiveTalkModal'; 
 
-import {
+import { 
   ArrowDown, ArrowUp, 
   Copy, Check, Edit2,
   X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, Mic, AudioLines,
