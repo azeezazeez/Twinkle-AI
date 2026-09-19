@@ -972,7 +972,17 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const loadSessions = useCallback(async () => {
     try {
       const response = await chatApi.getSessions() as any;
-      setSessions(response.sessions || []);
+      const loadedSessions: Session[] = response.sessions || [];
+      setSessions(loadedSessions);
+
+      // Restore the last active conversation after a browser refresh.
+      // Only restore it when the session still exists for the current user.
+      const persistedId = readPersistedSessionId();
+      if (persistedId !== null && loadedSessions.some(session => session.id === persistedId)) {
+        setCurrentSessionId(persistedId);
+      } else if (persistedId !== null) {
+        persistSessionId(null);
+      }
     } catch (err: any) {
       console.error('Failed to load sessions:', err);
       if (err.status === 401) onLogout();
@@ -1476,9 +1486,13 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       // Generate and persist a professional AI-generated chat title.
       if ((isNewSession || regenerateTitle) && activeSessionId) {
         try {
-          const titleResponse: any = await chatApi.generateTitle(
-            finalMessage || 'File analysis'
-          );
+          const titleInput =
+            finalMessage ||
+            (hasFiles
+              ? filesToSend.map(file => file.name).join(', ')
+              : 'File analysis');
+
+          const titleResponse: any = await chatApi.generateTitle(titleInput);
 
           const newTitle =
             typeof titleResponse?.title === 'string' && titleResponse.title.trim()
