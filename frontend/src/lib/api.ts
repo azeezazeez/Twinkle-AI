@@ -8,6 +8,11 @@ const GEMINI_LIVE_WS_ENDPOINT =
 const CHAT_RETRIES = 1;
 const RETRY_DELAY_MS = 450;
 
+const MAX_SINGLE_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_TOTAL_UPLOAD_BYTES = 25 * 1024 * 1024;
+const MAX_IMAGES_PER_MESSAGE = 3;
+const MAX_TOTAL_IMAGE_BYTES = 15 * 1024 * 1024;
+
 const WAKE_ATTEMPTS = 1;
 const WAKE_DELAY_MS = 1_000;
 
@@ -580,7 +585,7 @@ export async function fetchWithAuth(
         'The submitted information could not be processed.',
 
       429:
-        'The AI provider temporarily rate-limited this request. Please wait a moment and try again.',
+        'The AI service is currently busy. Please wait a few seconds and try again.',
 
       500:
         'Something went wrong on the server. Please try again shortly.',
@@ -1032,38 +1037,37 @@ export const chatApi = {
     model: string,
     files: File[]
   ): Promise<unknown> => {
-    const validFiles = files.filter(
-      (file): file is File =>
-        file instanceof File &&
-        file.size > 0
-    );
+
+    const validFiles = Array.isArray(files)
+      ? files.filter((file): file is File => file instanceof File && file.size > 0)
+      : [];
 
     if (validFiles.length === 0) {
-      const error = new Error(
-        'Please select at least one valid file.'
-      ) as ApiError;
-      error.status = 400;
-      throw error;
+      throw new Error('Please select at least one non-empty file.');
     }
 
-    const MAX_FILE_SIZE = 10 * 1024 * 1024;
-    const MAX_TOTAL_SIZE = 25 * 1024 * 1024;
-
-    let totalSize = 0;
+    let totalBytes = 0;
+    let totalImageBytes = 0;
+    let imageCount = 0;
 
     for (const file of validFiles) {
-      if (file.size > MAX_FILE_SIZE) {
+      if (file.size > MAX_SINGLE_FILE_BYTES) {
         const error = new Error(
-          `"${file.name}" is too large. Maximum individual file size is 10 MB.`
+          `Maximum individual file size is 10 MB: ${file.name}`
         ) as ApiError;
         error.status = 413;
         throw error;
       }
 
-      totalSize += file.size;
+      totalBytes += file.size;
+
+      if (file.type.startsWith('image/')) {
+        imageCount += 1;
+        totalImageBytes += file.size;
+      }
     }
 
-    if (totalSize > MAX_TOTAL_SIZE) {
+    if (totalBytes > MAX_TOTAL_UPLOAD_BYTES) {
       const error = new Error(
         'The total uploaded file size cannot exceed 25 MB per message.'
       ) as ApiError;
@@ -1071,13 +1075,32 @@ export const chatApi = {
       throw error;
     }
 
-    const formData = new FormData();
+    if (imageCount > MAX_IMAGES_PER_MESSAGE) {
+      const error = new Error(
+        `You can attach a maximum of ${MAX_IMAGES_PER_MESSAGE} images per message.`
+      ) as ApiError;
+      error.status = 400;
+      throw error;
+    }
+
+    if (totalImageBytes > MAX_TOTAL_IMAGE_BYTES) {
+      const error = new Error(
+        'The total image size cannot exceed 15 MB per message.'
+      ) as ApiError;
+      error.status = 413;
+      throw error;
+    }
+
+    const formData =
+      new FormData();
+
+    /* =====================================================
+       TEXT FIELDS
+       ===================================================== */
 
     formData.append(
       'message',
-      typeof message === 'string'
-        ? message.trim()
-        : ''
+      message ?? ''
     );
 
     if (
@@ -1090,15 +1113,44 @@ export const chatApi = {
       );
     }
 
-    if (model && model.trim()) {
-      formData.append(
-        'model',
-        model.trim()
-      );
-    }
+    formData.append(
+      'model',
+      model
+    );
 
-    for (const originalFile of validFiles) {
-      const file = normalizeFile(originalFile);
+    /* =====================================================
+       FILES
+       ===================================================== */
+
+    for (
+      const originalFile
+      of validFiles
+    ) {
+
+      if (
+        !(
+          originalFile
+          instanceof File
+        )
+      ) {
+        continue;
+      }
+
+      if (
+        originalFile.size <= 0
+      ) {
+        continue;
+      }
+
+      /*
+       * Normalize generic or missing
+       * browser MIME types.
+       */
+
+      const file =
+        normalizeFile(
+          originalFile
+        );
 
       formData.append(
         'files',
@@ -1107,19 +1159,26 @@ export const chatApi = {
       );
     }
 
+    /* =====================================================
+       NEVER SET CONTENT-TYPE MANUALLY
+       ===================================================== */
+
     /*
-     * Do not set Content-Type manually.
-     * The browser creates the multipart boundary.
+     * Browser will generate:
      *
-     * Do not retry multipart AI requests in the browser. A 429 should
-     * reach the UI once instead of resubmitting the complete file payload.
+     * multipart/form-data;
+     * boundary=---------------------------
      */
+
     return fetchWithAuth(
       `${API_BASE}/chat/send`,
       {
         method: 'POST',
+
         signal,
-        body: formData,
+
+        body:
+          formData,
       },
       0
     );
