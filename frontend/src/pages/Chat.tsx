@@ -69,6 +69,173 @@ const CodeBlock = ({ language, value }: { language: string; value: string }) => 
   );
 };
 
+
+const PDFJS_MODULE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs';
+const PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
+
+const PdfPreview = ({
+  src,
+  fileName,
+  compact = false,
+}: {
+  src: string;
+  fileName: string;
+  compact?: boolean;
+}) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+
+  useEffect(() => {
+    let cancelled = false;
+    let pdfDocument: any = null;
+
+    const renderPdf = async () => {
+      setStatus('loading');
+
+      try {
+        // Load PDF.js only in the browser. Using a client-side renderer avoids
+        // Android Chrome handing the Blob URL to its native PDF viewer.
+        const pdfjs: any = await import(/* @vite-ignore */ PDFJS_MODULE_URL);
+        if (cancelled) return;
+
+        pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+
+        const loadingTask = pdfjs.getDocument({
+          url: src,
+          useWorkerFetch: true,
+          isEvalSupported: true,
+        });
+
+        pdfDocument = await loadingTask.promise;
+        if (cancelled || !containerRef.current) {
+          await pdfDocument?.destroy?.();
+          return;
+        }
+
+        const container = containerRef.current;
+        container.replaceChildren();
+
+        const pageCount = compact
+          ? 1
+          : Math.min(Number(pdfDocument.numPages) || 1, 30);
+
+        for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+          if (cancelled) break;
+
+          const page = await pdfDocument.getPage(pageNumber);
+          const baseViewport = page.getViewport({ scale: 1 });
+
+          const availableWidth = Math.max(
+            compact ? 120 : container.clientWidth - 24,
+            120
+          );
+
+          const scale = compact
+            ? Math.min(availableWidth / baseViewport.width, 1)
+            : Math.min(availableWidth / baseViewport.width, 1.65);
+
+          const viewport = page.getViewport({ scale });
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d', { alpha: false });
+
+          if (!context) continue;
+
+          const outputScale = Math.min(window.devicePixelRatio || 1, 2);
+          canvas.width = Math.ceil(viewport.width * outputScale);
+          canvas.height = Math.ceil(viewport.height * outputScale);
+          canvas.style.width = `${viewport.width}px`;
+          canvas.style.height = `${viewport.height}px`;
+          canvas.className = compact
+            ? 'block h-full w-full object-contain'
+            : 'mx-auto mb-4 block max-w-full rounded-lg bg-white shadow-sm';
+
+          if (!compact) {
+            const pageLabel = document.createElement('div');
+            pageLabel.textContent = `Page ${pageNumber}`;
+            pageLabel.className =
+              'mb-1 text-center text-[10px] font-bold uppercase tracking-wider text-zinc-400';
+            container.appendChild(pageLabel);
+          }
+
+          container.appendChild(canvas);
+
+          context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+          await page.render({
+            canvasContext: context,
+            viewport,
+          }).promise;
+
+          if (compact) break;
+        }
+
+        if (!cancelled) setStatus('ready');
+      } catch (error) {
+        console.error('PDF preview rendering failed:', error);
+        if (!cancelled) setStatus('error');
+      }
+    };
+
+    void renderPdf();
+
+    return () => {
+      cancelled = true;
+      try {
+        void pdfDocument?.destroy?.();
+      } catch {
+        // Ignore PDF.js cleanup errors during unmount.
+      }
+    };
+  }, [src, compact]);
+
+  if (status === 'error') {
+    return (
+      <div
+        className={
+          compact
+            ? 'flex h-full w-full flex-col items-center justify-center gap-1 bg-zinc-100 dark:bg-zinc-800'
+            : 'flex min-h-[60vh] w-full flex-col items-center justify-center gap-3 rounded-xl bg-white p-8 dark:bg-zinc-900'
+        }
+      >
+        <FileText className="h-8 w-8 text-zinc-500" />
+        <span className="text-center text-xs font-semibold text-zinc-500">
+          {compact ? 'PDF' : `Unable to preview ${fileName}`}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      aria-label={`PDF preview: ${fileName}`}
+      className={
+        compact
+          ? 'relative flex h-full w-full items-center justify-center overflow-hidden bg-white dark:bg-zinc-800'
+          : 'mx-auto w-full max-w-4xl'
+      }
+    >
+      {status === 'loading' && (
+        <div
+          className={
+            compact
+              ? 'absolute inset-0 z-10 flex items-center justify-center bg-white dark:bg-zinc-800'
+              : 'flex min-h-[60vh] items-center justify-center rounded-xl bg-white dark:bg-zinc-900'
+          }
+        >
+          <div className="flex flex-col items-center gap-2">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700 dark:border-zinc-700 dark:border-t-zinc-200" />
+            {!compact && (
+              <span className="text-xs font-medium text-zinc-500">
+                Rendering PDF…
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const SESSION_KEY = 'scout_current_session_id';
 const persistSessionId = (id: number | null) => {
   if (id === null) localStorage.removeItem(SESSION_KEY);
@@ -1403,7 +1570,11 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       clearTimeout(wakingTimer);
       setServerWaking(false);
 
-      const activeSessionId = response.sessionId || currentSessionId;
+      const rawActiveSessionId = response.sessionId ?? currentSessionId;
+      const activeSessionId =
+        rawActiveSessionId !== null && rawActiveSessionId !== undefined
+          ? Number(rawActiveSessionId)
+          : null;
 
       if (isNewSession && activeSessionId) {
         // Store the new session's ID (not just `true`) so the
@@ -1415,7 +1586,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
         const now = new Date().toISOString();
         setSessions(prev => {
-          if (prev.some(session => session.id === activeSessionId)) return prev;
+          if (prev.some(session => Number(session.id) === Number(activeSessionId))) return prev;
           return [
             {
               id: activeSessionId,
@@ -1469,19 +1640,37 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
               ? titleResponse.title.trim()
               : 'New Chat';
 
-          await chatApi.renameSession(activeSessionId, newTitle);
-          setTypingSessionTitle({ id: activeSessionId, title: newTitle });
+          // Update the Sidebar immediately. Do this before the network rename
+          // request so the new title never has to wait for a refresh.
+          setSessions(prev => {
+            const normalizedId = Number(activeSessionId);
+            const existing = prev.find(session => Number(session.id) === normalizedId);
 
-          // Keep the Sidebar's sessions prop synchronized immediately.
-          setSessions(prev =>
-            prev.map(session =>
-              session.id === activeSessionId
-                ? { ...session, sessionName: newTitle }
-                : session
-            )
-          );
+            if (existing) {
+              return prev.map(session =>
+                Number(session.id) === normalizedId
+                  ? { ...session, sessionName: newTitle, updatedAt: new Date().toISOString() }
+                  : session
+              );
+            }
 
-          // The optimistic sidebar update above is already authoritative for
+            const now = new Date().toISOString();
+            return [
+              {
+                id: normalizedId,
+                userId: user.id,
+                sessionName: newTitle,
+                createdAt: now,
+                updatedAt: now,
+              },
+              ...prev,
+            ];
+          });
+          setTypingSessionTitle({ id: Number(activeSessionId), title: newTitle });
+
+          await chatApi.renameSession(Number(activeSessionId), newTitle);
+
+          // The optimistic Sidebar update above is already authoritative for
           // this UI. Avoid an extra network round-trip after every message.
         } catch (renameErr) {
           console.error('AI-generated Twinkle AI chat title save failed:', renameErr);
@@ -1800,6 +1989,31 @@ You can ask me questions, give me a file or image to analyze, ask for help with 
   return content;
 };
 
+const normalizeHtmlLinks = (value: string): string => {
+  // Some model responses return links as literal HTML anchors. Convert those
+  // anchors to Markdown before HTML sanitization so ReactMarkdown keeps them
+  // clickable instead of leaving only the visible label.
+  const parts = value.split(/(```[\s\S]*?```)/g);
+
+  return parts
+    .map((part, index) => {
+      if (index % 2 === 1) return part;
+
+      return part
+        .replace(
+          /<a\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
+          (_match, href: string, label: string) =>
+            `[${String(label).replace(/[\r\n]+/g, ' ').trim() || href}](${href})`
+        )
+        .replace(
+          /&lt;a\b[^&]*\bhref\s*=\s*(?:&quot;|&#39;|["'])(.*?)(?:&quot;|&#39;|["'])[^&]*&gt;([\s\S]*?)&lt;\/a&gt;/gi,
+          (_match, href: string, label: string) =>
+            `[${String(label).replace(/[\r\n]+/g, ' ').trim() || href}](${href})`
+        );
+    })
+    .join('');
+};
+
 const stripHtmlTagsOutsideCode = (value: string): string => {
   // AI responses can occasionally contain literal HTML such as <br>, <p>,
   // or <div>. Convert those tags to plain text/line breaks before Markdown
@@ -1825,7 +2039,7 @@ const stripHtmlTagsOutsideCode = (value: string): string => {
 const cleanMessageContent = (content: unknown): string => {
     if (typeof content !== 'string') return '';
 
-    let cleaned = stripHtmlTagsOutsideCode(normalizeTwinkleIdentity(content));
+    let cleaned = stripHtmlTagsOutsideCode(normalizeHtmlLinks(normalizeTwinkleIdentity(content)));
     cleaned = cleaned
       // NEVER strip Markdown links here. Keeping the original [label](url)
       // structure lets ReactMarkdown preserve clickability while the
@@ -1863,10 +2077,10 @@ const cleanMessageContent = (content: unknown): string => {
     cleaned = cleaned
       .replace(/\n?\s*#{1,6}\s*Additional Links\s*(?:\(Repeated in Source\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
       .replace(/\n?\s*#{1,6}\s*Document Structure\s*(?:\(as extracted\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
-      // Remove only the extracted "Additional Section" and "Links & Contact"
-      // sections. Keep hyperlinks that belong to the actual document content.
+      // Remove only the extracted "Additional Section". Keep the
+      // "Links & Contact" section because its hyperlinks are real response
+      // content and must remain visible/clickable.
       .replace(/\n?\s*#{1,6}\s*Additional Section\s*(?:\(as in original document\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s*Links\s*&\s*Contact\b|$)/gi, '\n')
-      .replace(/\n?\s*#{1,6}\s*Links\s*&\s*Contact\s*\n[\s\S]*$/gi, '\n')
       .trim();
 
     // Remove the dedicated Architecture section/bullet requested by the UI
@@ -2524,9 +2738,9 @@ const cleanMessageContent = (content: unknown): string => {
                               <img src={fp.preview} alt={fp.file.name} className="w-full h-full object-cover transition-transform group-hover/preview:scale-105" />
                             </div>
                           ) : fp.file.type === 'application/pdf' && fp.preview ? (
-                            <div className="relative w-20 h-16 rounded-xl overflow-hidden bg-white dark:bg-zinc-800 shadow-sm border border-zinc-200 dark:border-zinc-700 cursor-pointer">
-                              <iframe src={`${fp.preview}#page=1&view=FitH`} title={`Preview ${fp.file.name}`} className="pointer-events-none absolute inset-0 h-[288px] w-[360px] origin-top-left scale-[0.222] bg-white" />
-                              <div className="absolute inset-0 bg-transparent group-hover/preview:bg-zinc-1000/5 transition-colors" />
+                            <div className="relative h-16 w-20 cursor-pointer overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-800">
+                              <PdfPreview src={fp.preview} fileName={fp.file.name} compact />
+                              <div className="absolute inset-0 bg-transparent transition-colors group-hover/preview:bg-zinc-900/5" />
                             </div>
                           ) : (
                             <div className="w-20 h-16 rounded-xl flex flex-col items-center justify-center gap-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 cursor-pointer hover:border-zinc-500 dark:hover:border-zinc-500/50 transition-colors">
@@ -2835,7 +3049,7 @@ const cleanMessageContent = (content: unknown): string => {
                 {previewFile.type.startsWith('image/') ? (
                   <div className="flex min-h-full items-center justify-center"><img src={previewUrl} alt={previewFile.name} className="max-h-full max-w-full rounded-xl object-contain shadow-lg" /></div>
                 ) : previewFile.type === 'application/pdf' ? (
-                  <iframe src={`${previewUrl}#toolbar=1&navpanes=0&view=FitH`} title={`PDF preview: ${previewFile.name}`} className="h-full min-h-[70vh] w-full rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800" />
+                  <PdfPreview src={previewUrl} fileName={previewFile.name} />
                 ) : previewText !== null ? (
                   <pre className="mx-auto min-h-full max-w-4xl whitespace-pre-wrap break-words rounded-xl bg-white p-5 font-mono text-xs leading-relaxed text-zinc-800 shadow-sm dark:bg-zinc-900 dark:text-zinc-200">{previewText}</pre>
                 ) : (
