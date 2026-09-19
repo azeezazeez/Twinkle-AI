@@ -2155,7 +2155,11 @@ const cleanMessageContent = (content: unknown): string => {
       <div className="flex items-center justify-center h-screen font-sans text-zinc-400 bg-white dark:bg-zinc-950 transition-colors duration-300">
         <motion.div
           animate={{ scale: [1, 1.1, 1], opacity: [0.3, 0.6, 0.3] }}
-          transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+          transition={{
+                duration: 0.8,
+                ease: 'linear',
+                repeat: Infinity,
+             }}
           className="flex flex-col items-center gap-4"
         >
           <StormLogo className="w-12 h-12 text-black dark:text-white transition-transform duration-500 ease-in-out hover:rotate-180" />
