@@ -609,11 +609,9 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     return () => window.clearInterval(interval);
   }, [typingSessionTitle]);
 
-  const sidebarSessions = sessions.map(session =>
-    typingSessionTitle?.id === session.id
-      ? { ...session, sessionName: typedSessionTitle }
-      : session
-  );
+  // Show the persisted session title immediately. The previous typing
+  // animation briefly replaced the real title with its first character.
+  const sidebarSessions = sessions;
   const sessionToDelete = sessions.find(session => session.id === sessionIdToDelete);
   // Keep the chat interface clean on login; the sidebar opens only when requested.
 
@@ -2578,7 +2576,7 @@ const cleanMessageContent = (content: unknown): string => {
 
               <div
                 ref={modelPickerRef}
-                className="twinkle-composer-row relative z-[200] flex min-w-0 flex-col"
+                className="twinkle-composer-row relative z-[200] flex min-w-0 flex-col md:flex-row md:items-center md:gap-1"
               >
                 {/* Hidden file input */}
                 <input
@@ -2655,7 +2653,7 @@ const cleanMessageContent = (content: unknown): string => {
                     </div>
                   </div>
                 ) : (
-                  <div className="relative w-full min-w-0 px-4 pt-3 pb-1 sm:px-4 sm:pt-3">
+                  <div className="relative w-full min-w-0 px-4 pt-3 pb-1 sm:px-4 sm:pt-3 md:order-2 md:flex-1 md:px-2 md:pt-0 md:pb-0">
                     <textarea
                       ref={inputRef}
                       value={input}
@@ -2679,7 +2677,7 @@ const cleanMessageContent = (content: unknown): string => {
                 )}
 
                 {/* Bottom action row: plus → model → mic → send/live talk */}
-                <div className="flex w-full min-w-0 items-center gap-1 px-2.5 pb-2.5 pt-1.5 sm:gap-2 sm:px-3 sm:pb-3 sm:pt-1.5 md:px-4">
+                <div className="flex w-full min-w-0 items-center gap-1 px-2.5 pb-2.5 pt-1.5 sm:gap-2 sm:px-3 sm:pb-3 sm:pt-1.5 md:contents">
                   {/* + attachment button */}
                   <motion.button
                     type="button"
@@ -2689,7 +2687,7 @@ const cleanMessageContent = (content: unknown): string => {
                     title="Attach files"
                     whileHover={{ scale: 1.04 }}
                     whileTap={{ scale: 0.94 }}
-                    className="group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                    className="group relative order-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
                   >
                     {isProcessingFiles ? (
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
@@ -2701,7 +2699,7 @@ const cleanMessageContent = (content: unknown): string => {
                   <div className="min-w-0 flex-1" />
 
                   {/* Model selector */}
-                  <div className="relative shrink-0">
+                  <div className="relative order-3 shrink-0">
                     <motion.button
                       type="button"
                       onClick={() => setModelPickerOpen(prev => !prev)}
@@ -2785,7 +2783,7 @@ const cleanMessageContent = (content: unknown): string => {
                       title="Voice input"
                       whileHover={{ scale: 1.06 }}
                       whileTap={{ scale: 0.9 }}
-                      className="flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-9"
+                      className="order-4 flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-9"
                     >
                       <Mic className="h-[20px] w-[20px]" strokeWidth={2} />
                     </motion.button>
@@ -2813,7 +2811,7 @@ const cleanMessageContent = (content: unknown): string => {
                       title={isTyping ? 'Stop response' : 'Send message'}
                       whileHover={{ scale: isTyping || input.trim() || filePreviews.length ? 1.06 : 1, y: -1 }}
                       whileTap={{ scale: 0.92 }}
-                      className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isTyping ? 'border-[#ec6aa8] bg-[#ec6aa8] text-white shadow-[#ec6aa8]/20' : 'border-zinc-300 bg-white hover:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-800 dark:hover:border-zinc-500'}`}
+                      className={`relative order-5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isTyping ? 'border-[#ec6aa8] bg-[#ec6aa8] text-white shadow-[#ec6aa8]/20' : 'border-zinc-300 bg-white hover:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-800 dark:hover:border-zinc-500'}`}
                     >
                       {isTyping ? (
                         <span className="relative flex h-full w-full items-center justify-center">
