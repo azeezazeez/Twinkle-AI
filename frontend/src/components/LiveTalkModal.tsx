@@ -11,6 +11,12 @@ type Props = {
   onSessionComplete?: (sessionId: number) => void;
 };
 
+type WakeLockSentinelLike = {
+  release: () => Promise<void>;
+  released: boolean;
+  addEventListener?: (type: string, listener: EventListener) => void;
+};
+
 type VoiceOption = {
   name: string;
   description: string;
@@ -110,32 +116,6 @@ const base64ToBytes = (base64: string): Uint8Array => {
   return bytes;
 };
 
-const downsampleTo16k = (buffer: Float32Array, inputRate: number): Int16Array => {
-  if (inputRate === 16000) {
-    const pcm = new Int16Array(buffer.length);
-    for (let i = 0; i < buffer.length; i += 1) {
-      const sample = Math.max(-1, Math.min(1, buffer[i]));
-      pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
-    }
-    return pcm;
-  }
-
-  const ratio = inputRate / 16000;
-  const outputLength = Math.max(1, Math.round(buffer.length / ratio));
-  const pcm = new Int16Array(outputLength);
-
-  for (let i = 0; i < outputLength; i += 1) {
-    const position = i * ratio;
-    const left = Math.floor(position);
-    const right = Math.min(left + 1, buffer.length - 1);
-    const fraction = position - left;
-    const sample = buffer[left] * (1 - fraction) + buffer[right] * fraction;
-    const clamped = Math.max(-1, Math.min(1, sample));
-    pcm[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
-  }
-
-  return pcm;
-};
 
 const decodeLiveMessage = async (data: unknown): Promise<any> => {
   if (typeof data === 'string') return JSON.parse(data);
@@ -188,43 +168,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
   const userTurnRef = useRef('');
   const assistantTurnRef = useRef('');
   const endingRef = useRef(false);
-  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
-
-  const releaseWakeLock = useCallback(async () => {
-    const wakeLock = wakeLockRef.current;
-    wakeLockRef.current = null;
-    if (!wakeLock) return;
-    try { await wakeLock.release(); } catch {}
-  }, []);
-
-  const requestWakeLock = useCallback(async () => {
-    if (!('wakeLock' in navigator) || !navigator.wakeLock) return;
-    if (document.visibilityState !== 'visible') return;
-    try {
-      if (wakeLockRef.current?.released === false) return;
-      wakeLockRef.current = await navigator.wakeLock.request('screen');
-    } catch {
-      // Screen Wake Lock is optional and can be denied by the browser/device.
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!open) {
-      void releaseWakeLock();
-      return;
-    }
-
-    void requestWakeLock();
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && open) {
-        void requestWakeLock();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [open, requestWakeLock, releaseWakeLock]);
+  const wakeLockRef = useRef<WakeLockSentinelLike | null>(null);
 
   const [connected, setConnected] = useState(false);
   const [listening, setListening] = useState(false);
@@ -358,6 +302,58 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     setSpeaking(false);
   }, []);
 
+  const releaseWakeLock = useCallback(async () => {
+    const lock = wakeLockRef.current;
+    wakeLockRef.current = null;
+    if (!lock) return;
+
+    try {
+      if (!lock.released) await lock.release();
+    } catch {
+      // Wake Lock is best-effort and may be revoked by the browser/OS.
+    }
+  }, []);
+
+  const requestWakeLock = useCallback(async () => {
+    if (!open || typeof document === 'undefined') return;
+
+    const wakeLockApi = (navigator as Navigator & {
+      wakeLock?: {
+        request: (type: 'screen') => Promise<WakeLockSentinelLike>;
+      };
+    }).wakeLock;
+
+    if (!wakeLockApi) return;
+
+    try {
+      if (wakeLockRef.current && !wakeLockRef.current.released) return;
+      wakeLockRef.current = await wakeLockApi.request('screen');
+    } catch {
+      // Screen Wake Lock is optional and can be unavailable on some browsers.
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      void releaseWakeLock();
+      return;
+    }
+
+    void requestWakeLock();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void requestWakeLock();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      void releaseWakeLock();
+    };
+  }, [open, requestWakeLock, releaseWakeLock]);
+
   const cleanupAudioInput = useCallback(() => {
     processorRef.current?.disconnect();
     sourceRef.current?.disconnect();
@@ -390,7 +386,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     setConnected(false);
     setStatus('Live Talk ended');
     void releaseWakeLock();
-  }, [cleanupAudioInput, closeSocket, releaseWakeLock, stopAudioPlayback]);
+  }, [cleanupAudioInput, closeSocket, stopAudioPlayback, releaseWakeLock]);
 
   const playPcm24k = useCallback(async (base64: string) => {
     if (endingRef.current) return;
@@ -451,8 +447,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     audioContextRef.current = context;
     if (context.state === 'suspended') await context.resume();
 
-    const workletUrl = new URL('../audio/pcm-capture-worklet.ts', import.meta.url);
-    await context.audioWorklet.addModule(workletUrl);
+    await context.audioWorklet.addModule('/pcm-capture-worklet.js');
 
     const source = context.createMediaStreamSource(stream);
     const processor = new AudioWorkletNode(context, 'twinkle-pcm-capture');
@@ -463,8 +458,8 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
       const activeSocket = socketRef.current;
       if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) return;
 
-      const pcmBytes = new Uint8Array(event.data as ArrayBuffer);
       try {
+        const pcmBytes = new Uint8Array(event.data as ArrayBuffer);
         activeSocket.send(JSON.stringify({
           realtimeInput: {
             audio: {
@@ -486,9 +481,10 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     sourceRef.current = source;
     processorRef.current = processor;
     silentGainRef.current = silentGain;
+    void requestWakeLock();
     setListening(true);
     setStatus('Listening');
-  }, []);
+  }, [requestWakeLock]);
 
   startInputRef.current = startInput;
 
