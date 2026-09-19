@@ -1,657 +1,385 @@
-# ✨ Twinkle AI
+<div align="center">
 
-> A full-stack, multimodal AI assistant with persistent chat history, authentication, OTP verification, Google OAuth, file/image understanding, multiple AI models, Live Talk, profile analytics, Redis-backed sessions, and a responsive React UI.
+# ✧ TWINKLE AI – Full Stack AI Chatbot Application
 
----
+### 🤖 Intelligent Conversations • 🔐 Secure Authentication • 🎙️ Real-Time Live Talk
 
-## 🚀 Overview
+**Twinkle AI** is a full-stack AI chatbot application built using **React + TypeScript (Frontend)** and **Spring Boot + Java (Backend)**. It provides a modern conversational AI experience with persistent chat history, email OTP authentication, Google OAuth, multimodal file and image understanding, multiple AI models, Gemini Live Talk, user profiles, activity analytics, Redis-backed sessions, and a responsive animated interface.
 
-**Twinkle AI** is a modern ChatGPT-style AI application built with a React + TypeScript frontend and a Spring Boot backend.
+<br>
 
-The application is designed around four core capabilities:
+🌐 **Live Demo:** https://twinkleai.vercel.app
 
-* 💬 Normal AI conversations
-* 📎 Multimodal conversations with file/image uploads
-* 🎙️ Real-time Gemini Live Talk
-* 🔐 Persistent authenticated user accounts and chat history
-
-The backend keeps AI provider credentials server-side. Browser clients communicate with the backend API and authenticated HTTP sessions rather than exposing provider API keys.
+</div>
 
 ---
 
-## ✨ Features
+# 💡 Key Highlights
 
-### 🔐 Authentication & Account Management
-
-* Username/password login
-* New-account signup
-* Email OTP verification
-* OTP resend
-* OTP expiration
-* Forgot-password flow
-* Password reset using OTP
-* Session-based authentication
-* Secure HTTP-only session cookie configuration
-* 24-hour session timeout
-* Logout
-* Current-session status
-* Current-user profile retrieval
-* Username/profile update
-* Profile statistics
-* Google OAuth sign-in
-* OAuth state signing and validation
-* OAuth state expiration protection
-
-### 💬 AI Chat
-
-* ChatGPT-style conversational interface
-* Persistent conversations
-* Create new chat sessions
-* Rename conversations
-* Delete individual conversations
-* Delete all conversations
-* Search conversations
-* Generate conversation titles
-* Retrieve complete session history
-* Available-model discovery
-* Language-aware responses
-* Server-side chat persistence
-* AI-generated responses through Groq
-* Support for configurable Groq models
-* Vision-capable model configuration
-
-### 📎 Multimodal / File Chat
-
-The `/api/chat/send` endpoint supports both JSON and multipart requests.
-
-* Send normal text messages
-* Attach files to messages
-* Process images/media through Gemini
-* Extract text/content from supported files
-* Combine user text with uploaded content
-* Backend upload/request size limits
-* Apache Tika-based file parsing
-
-Default limits:
-
-* Maximum individual file size: **10 MB**
-* Maximum multipart request size: **25 MB**
-
-### 🎙️ Live Talk
-
-* Browser microphone capture
-* Real-time Gemini Live WebSocket communication
-* Ephemeral backend-issued Live token
-* Short-lived token lifetime
-* Usage-limited Live sessions
-* Multiple Gemini voices
-* Voice selection
-* Voice-specific visual themes
-* Audio playback
-* Live transcript handling
-* Automatic Live conversation persistence
-* Save individual Live turns
-* Save complete Live conversations
-* Configurable application language
-* Multilingual Live language instructions
-
-Available voices include:
-
-`Zephyr`, `Puck`, `Charon`, `Kore`, `Fenrir`, `Leda`, `Orus`, `Aoede`, `Callirrhoe`, `Autonoe`, `Enceladus`, `Iapetus`, `Umbriel`, `Algieba`, `Despina`, `Erinome`, `Algenib`, `Rasalgethi`, `Laomedeia`, `Achernar`, `Alnilam`, `Schedar`, `Gacrux`, `Pulcherrima`, `Achird`, `Zubenelgenubi`, `Vindemiatrix`, `Sadachbia`, `Sadaltager`, `Sulafat`.
-
-### 👤 Profile & Usage Analytics
-
-* Editable username
-* Account information
-* Total chats
-* Message counts
-* User/assistant message counts
-* Lifetime token usage
-* Peak token usage
-* Current activity streak
-* Longest activity streak
-* Active-day count
-* Daily activity data
-* Daily / weekly / cumulative activity views
-* Activity heatmap
-* Automatic statistics refresh
-
-### ⚙️ Settings
-
-* Light/dark appearance
-* Application language
-* Live Talk voice
-* Voice preference persistence
-* Selected AI model preference
-* Account-related controls
-
-### 🎨 Frontend UX
-
-* Responsive React interface
-* Mobile-friendly layout
-* Sidebar navigation
-* Motion animations
-* Lucide icons
-* Markdown rendering
-* GitHub-flavored Markdown
-* Syntax highlighting
-* User avatars
-* Confirmation dialogs
-* Live Talk modal
-* Login/signup/OTP screens
-* Profile and settings pages
-* Light and dark themes
+| 🚀 | Highlight |
+| --- | --- |
+| 🔌 | Built **29 REST API endpoints** covering authentication, OAuth, AI chat, chat history, profile statistics, Live Talk, and system health |
+| 🔐 | Implemented **secure HTTP session-based authentication** with Redis-backed Spring Session and HTTP-only cookies |
+| 📧 | Implemented **email OTP verification** for user registration with configurable OTP length and expiration |
+| 🔑 | Added **forgot-password and password reset flow** with secure OTP validation |
+| 🌐 | Added **Google OAuth 2.0 login** with signed state validation and Google ID token verification |
+| 🏗️ | Designed backend using **layered architecture (Controller → Service → Repository)** |
+| 💬 | Implemented persistent **AI conversations, chat sessions, message history, title generation, renaming, deletion, and search** |
+| 📎 | Added **multimodal file/image processing** using Apache Tika and Gemini |
+| 🧠 | Integrated **Groq** for normal AI conversations and configurable AI model selection |
+| 🎙️ | Implemented **Gemini Live Talk** with short-lived tokens, real-time voice interaction, transcript persistence, and multiple voices |
+| 👤 | Added user **profile management and usage analytics** including chat count, message count, token usage, activity streaks, and active days |
+| 🗄️ | Integrated **PostgreSQL with Spring Data JPA / Hibernate** for persistent application data |
+| ⚡ | Integrated **Redis** for distributed HTTP session storage and application event handling |
+| 📩 | Integrated **Brevo Email API** for transactional OTP and email communication |
+| 🛡️ | Added request validation, centralized exception handling, CORS configuration, secure session cookies, and OAuth state protection |
+| 🐳 | Added **Docker support** for backend containerization and deployment |
+| 📚 | Added **Springdoc OpenAPI / Swagger UI** for API documentation |
 
 ---
 
 # 🏗️ Architecture
 
 ```text
-┌───────────────────────────────┐
-│        React Frontend         │
-│     React + TypeScript        │
-│       Vite + Tailwind         │
-└───────────────┬───────────────┘
-                │ HTTPS / REST
-                │ Session Cookie
-                ▼
-┌───────────────────────────────┐
-│       Spring Boot API         │
-│       Java 17 / REST          │
-├───────────────────────────────┤
-│ Auth │ Chat │ OAuth │ Live    │
-└──────┬─────────┬─────────┬────┘
-       │         │         │
-       ▼         ▼         ▼
- PostgreSQL    Redis     AI APIs
-  / Neon       Sessions  ├─ Groq
-                         └─ Gemini
+                          ┌──────────────────┐
+                          │      USER        │
+                          └────────┬─────────┘
+                                   │
+                                   ▼
+                       ┌────────────────────────┐
+                       │ React + TypeScript     │
+                       │ Vite Frontend          │
+                       └───────────┬────────────┘
+                                   │
+                              REST API
+                                   │
+                                   ▼
+                       ┌──────────────────────────┐
+                       │      Spring Boot         │
+                       │       Controller         │
+                       └────────────┬─────────────┘
+                                    │
+                                    ▼
+                       ┌──────────────────────────┐
+                       │       Service Layer      │
+                       │ AI / Auth / OTP / OAuth  │
+                       │ Chat / Email / Live Talk │
+                       └────────────┬─────────────┘
+                                    │
+                                    ▼
+                       ┌──────────────────────────┐
+                       │      Repository Layer    │
+                       │      Spring Data JPA     │
+                       └────────────┬─────────────┘
+                                    │
+                                    ▼
+                           ┌────────────────┐
+                           │   PostgreSQL   │
+                           └────────────────┘
+
+                    Redis HTTP Session Storage
                               │
-                              └─ Live Talk
+                              ▼
+                       ┌───────────────┐
+                       │     Redis     │
+                       │    Sessions   │
+                       └───────────────┘
+
+                    External AI Communication
+                              │
+                ┌─────────────┴─────────────┐
+                ▼                           ▼
+       ┌─────────────────┐        ┌──────────────────┐
+       │      Groq       │        │      Gemini      │
+       │   Normal Chat   │        │ Files / Images / │
+       │                 │        │    Live Talk     │
+       └─────────────────┘        └──────────────────┘
+
+                    External Email Communication
+                              │
+                              ▼
+                       ┌───────────────┐
+                       │  Brevo Email  │
+                       │      API      │
+                       └───────────────┘
 ```
 
-### Backend package
+### 🔐 Authentication Flow
 
 ```text
-com.ai.chatbot_backend
+┌────────┐
+│  User  │
+└───┬────┘
+    │
+    ▼
+┌─────────────────────┐
+│ Register with Email │
+│ Username + Password │
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│ 6-Digit Email OTP   │
+│      Verification   │
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│   User Account      │
+│      Created        │
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│ HTTP Session Created│
+│   Redis-Backed      │
+└──────────┬──────────┘
+           │
+           ▼
+┌──────────────────────┐
+│ Secured API Requests │
+│ HTTP-Only Session    │
+└──────────────────────┘
 ```
 
----
-
-# 🧰 Tech Stack
-
-## Frontend
-
-| Technology               | Purpose                   |
-| ------------------------ | ------------------------- |
-| React 19                 | UI                        |
-| TypeScript               | Type safety               |
-| Vite                     | Development/build tooling |
-| Tailwind CSS 4           | Styling                   |
-| Motion                   | Animations                |
-| React Router             | Client-side routing       |
-| React Markdown           | Markdown rendering        |
-| Remark GFM               | GitHub-flavored Markdown  |
-| React Syntax Highlighter | Code highlighting         |
-| Lucide React             | Icons                     |
-| Google GenAI SDK         | Gemini functionality      |
-| Express                  | Server utility layer      |
-| Cookie Parser            | Cookie handling           |
-
-## Backend
-
-| Technology           | Purpose                      |
-| -------------------- | ---------------------------- |
-| Java 17              | Runtime/language             |
-| Spring Boot 3.2.4    | Backend framework            |
-| Spring Web           | REST API                     |
-| Spring Validation    | Request validation           |
-| Spring Data JPA      | Persistence                  |
-| Hibernate            | ORM                          |
-| PostgreSQL           | Database                     |
-| Spring Session       | Distributed sessions         |
-| Redis                | Session/event infrastructure |
-| Nimbus JOSE JWT      | JWT/JOSE                     |
-| Apache Tika          | File parsing                 |
-| OkHttp               | External HTTP requests       |
-| Jackson              | JSON processing              |
-| Spring Mail          | Email support                |
-| Brevo API            | Transactional email          |
-| Springdoc OpenAPI    | API documentation            |
-| Spring Boot Actuator | Health endpoints             |
-| Lombok               | Boilerplate reduction        |
-| Maven                | Build system                 |
-
----
-
-# 🔒 Security
-
-The application includes:
-
-* Server-side AI API keys
-* Authenticated HTTP sessions
-* Redis-backed sessions
-* HTTP-only cookies
-* Secure cookies
-* SameSite cookie configuration
-* HMAC-SHA256 OAuth state signatures
-* OAuth state expiration
-* Constant-time signature comparison
-* Request validation
-* Email validation
-* OTP validation
-* Password reset validation
-* File/request limits
-* Centralized exception handling
-
----
-
-# 🛠️ Local Development
-
-## Prerequisites
-
-* Java 17+
-* Maven/Maven Wrapper
-* Node.js
-* npm
-* PostgreSQL
-* Redis
-* Groq API key
-* Gemini API key
-
-Optional:
-
-* Brevo API key
-* Google OAuth credentials
-
----
-
-## Start Backend
-
-### Windows
-
-```bash
-cd backend
-mvnw.cmd spring-boot:run
-```
-
-### Linux/macOS
-
-```bash
-cd backend
-./mvnw spring-boot:run
-```
-
-Backend:
+### 📧 Password Recovery Flow
 
 ```text
-http://localhost:8080
-```
-
-Health:
-
-```text
-http://localhost:8080/health
-```
-
----
-
-## Start Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Frontend:
-
-```text
-http://localhost:5173
-```
-
----
-
-# 🏭 Production Build
-
-## Backend
-
-```bash
-cd backend
-mvnw.cmd clean package
-```
-
-Run:
-
-```bash
-java -jar target/chatbot-backend-1.0.0.jar
-```
-
-## Frontend
-
-```bash
-cd frontend
-npm install
-npm run build
+┌────────┐
+│  User  │
+└───┬────┘
+    │
+    ▼
+┌───────────────────┐
+│ Forgot Password   │
+└────────┬──────────┘
+         │
+         ▼
+┌───────────────────┐
+│ Generate 6-Digit  │
+│       OTP         │
+└────────┬──────────┘
+         │
+         ▼
+┌───────────────────┐
+│ Send OTP via      │
+│   Brevo Email API │
+└────────┬──────────┘
+         │
+         ▼
+┌───────────────────┐
+│ Verify OTP        │
+│ 10 Min Expiry     │
+└────────┬──────────┘
+         │
+         ▼
+┌───────────────────┐
+│ Reset Password    │
+│ Secure Validation │
+└───────────────────┘
 ```
 
 ---
 
-# 📁 Project Structure
+# 🚀 Features
 
-```text
-Twinkle AI/
-│
-├── backend/
-│   ├── pom.xml
-│   ├── Dockerfile
-│   ├── mvnw
-│   ├── mvnw.cmd
-│   └── src/
-│       ├── main/
-│       │   ├── java/com/ai/chatbot_backend/
-│       │   │   ├── config/
-│       │   │   ├── controller/
-│       │   │   ├── dto/
-│       │   │   ├── exception/
-│       │   │   ├── model/
-│       │   │   ├── redis/
-│       │   │   ├── repository/
-│       │   │   └── service/
-│       │   └── resources/
-│       │       └── application.properties
-│       └── test/
-│
-├── frontend/
-│   ├── package.json
-│   ├── vite.config.ts
-│   ├── tsconfig.json
-│   ├── server.ts
-│   └── src/
-│       ├── components/
-│       ├── lib/
-│       ├── pages/
-│       ├── App.tsx
-│       ├── index.css
-│       ├── main.tsx
-│       └── types.ts
-│
-└── README.md
-```
+## 👤 User Features
+
+* 📝 User Registration & Login
+* 📧 Email OTP verification during registration
+* ⏱️ OTP expiration handling
+* 🔄 OTP resend functionality
+* 🔑 Forgot Password functionality
+* 📧 Password reset through Brevo Email API
+* 🔐 Secure HTTP session authentication
+* 🍪 HTTP-only and secure session cookies
+* 🔑 Google OAuth login
+* 👤 View authenticated user profile
+* ✏️ Update user profile
+* 📊 View profile usage statistics
+* 💬 Start new AI conversations
+* 💬 Continue persistent conversations
+* 🧠 Select available AI models
+* 📎 Upload files and images
+* 🤖 Multimodal AI understanding
+* 📝 Generate conversation titles
+* ✏️ Rename conversations
+* 🔍 Search conversations
+* 🗑️ Delete individual conversations
+* 🧹 Delete all conversations
+* 📜 View complete chat history
+* 🎙️ Start Gemini Live Talk
+* 🎧 Select Live Talk voices
+* 🗣️ Real-time voice conversation
+* 🌍 Multilingual Live Talk support
+* 💾 Save Live Talk turns
+* 💾 Save complete Live Talk conversations
+* 📈 View token usage
+* 🔥 View activity streaks
+* 📅 View active-day statistics
+* 🌙 Light and dark interface support
 
 ---
 
-# 🧩 Backend Components
+## 🔐 Admin Features
 
-## Controllers
-
-```text
-AuthController
-OAuthController
-ChatController
-LiveTokenController
-HealthController
-```
-
-## Services
-
-```text
-AuthService
-UserService
-OTPService
-EmailService
-ChatService
-ChatHistoryService
-GroqService
-GeminiService
-OAuthService
-RedisEventService
-```
-
-## Repositories
-
-```text
-UserRepository
-OTPRepository
-ChatSessionRepository
-ChatMessageRepository
-```
+* 🔐 Authenticated user/session management
+* 🛡️ Server-side protection of authenticated APIs
+* 🔑 Google OAuth authentication
+* 🔒 OAuth state signing and validation
+* 👤 Authenticated profile management
+* 📊 User activity and usage statistics
+* 🗄️ Persistent chat and account data management
+* ⚡ Redis-backed session infrastructure
 
 ---
 
-# 🧭 Frontend Routes
+## ⚙️ System Features
 
-| Route              | Purpose               |
-| ------------------ | --------------------- |
-| `/`                | Main AI chat          |
-| `/login`           | Login                 |
-| `/verify-otp`      | OTP verification      |
-| `/forgot-password` | Password recovery     |
-| `/profile`         | Profile and analytics |
-| `/settings`        | Settings              |
-
-Unknown routes redirect to `/`.
-
----
-
-# 📊 Complete API Summary
-
-| Method | Endpoint                          |    Auth | Purpose                |
-| ------ | --------------------------------- | ------: | ---------------------- |
-| GET    | `/health`                         |      No | Backend health         |
-| POST   | `/api/auth/signup`                |      No | Register               |
-| POST   | `/api/auth/request-otp`           |      No | Request OTP            |
-| POST   | `/api/auth/verify-otp`            |      No | Verify OTP             |
-| POST   | `/api/auth/resend-otp`            |      No | Resend OTP             |
-| POST   | `/api/auth/login`                 |      No | Login                  |
-| GET    | `/api/auth/status`                | Session | Auth status            |
-| POST   | `/api/auth/logout`                | Session | Logout                 |
-| GET    | `/api/auth/me`                    |     Yes | Current user           |
-| PATCH  | `/api/auth/profile`               |     Yes | Update profile         |
-| GET    | `/api/auth/profile/stats`         |     Yes | Usage statistics       |
-| POST   | `/api/auth/forgot-password`       |      No | Password recovery      |
-| POST   | `/api/auth/reset-password`        |      No | Reset password         |
-| GET    | `/api/auth/oauth/google`          |      No | Start Google OAuth     |
-| GET    | `/api/auth/oauth/google/callback` |   OAuth | OAuth callback         |
-| GET    | `/api/chat/status`                |      No | Chat status            |
-| POST   | `/api/chat/send`                  |     Yes | Text chat              |
-| POST   | `/api/chat/send`                  |     Yes | File/multimodal chat   |
-| GET    | `/api/chat/models`                |     Yes | Available models       |
-| GET    | `/api/chat/sessions`              |     Yes | List sessions          |
-| GET    | `/api/chat/history/{sessionId}`   |     Yes | Session history        |
-| POST   | `/api/chat/new-session`           |     Yes | Create session         |
-| PATCH  | `/api/chat/rename`                |     Yes | Rename session         |
-| POST   | `/api/chat/generate-title`        |     Yes | Generate title         |
-| DELETE | `/api/chat/session/{sessionId}`   |     Yes | Delete session         |
-| DELETE | `/api/chat/sessions`              |     Yes | Delete all sessions    |
-| GET    | `/api/chat/search?q={query}`      |     Yes | Search sessions        |
-| POST   | `/api/chat/live/turn`             |     Yes | Save Live turn         |
-| POST   | `/api/chat/live-save`             |     Yes | Save Live conversation |
-| POST   | `/api/live/token`                 |     Yes | Create Live token      |
+* 🔌 RESTful API Architecture
+* 🔐 HTTP Session-Based Authentication
+* 🍪 HTTP-Only Secure Session Cookies
+* ⚡ Redis-Backed Spring Session
+* 📧 Brevo Email API Integration
+* 📩 Transactional Email Support
+* 🔢 Secure 6-Digit OTP Generation
+* ⏱️ OTP Expiration Handling
+* 🔄 OTP Resend Support
+* 🔑 Secure Password Reset Flow
+* 🌐 Google OAuth Integration
+* 🛡️ Signed OAuth State Validation
+* 🔐 Google ID Token Signature Verification
+* 🧹 Input Validation and Request Validation
+* 🚨 Structured API Error Responses
+* ⚠️ Centralized Exception Handling
+* 🌐 Configured CORS for Production and Local Development
+* 🗄️ Spring Data JPA / Hibernate
+* 🐘 PostgreSQL Database
+* ⚡ Redis Session Storage
+* 📡 Redis Event Handling
+* 🤖 Groq AI Integration
+* 🧠 Gemini AI Integration
+* 🎙️ Gemini Live Talk Integration
+* 📎 Multipart File Upload Support
+* 🗂️ Apache Tika File Parsing
+* 🖼️ Image / Media Understanding
+* 📊 Chat and Token Usage Statistics
+* 📈 Activity Streak Analytics
+* 🔍 Chat Session Search
+* 📝 AI Conversation Title Generation
+* 📚 Swagger / OpenAPI Documentation
+* 🩺 Spring Boot Actuator Support
+* 🐳 Dockerized Backend
+* ⚡ Vite-based Frontend Build
+* 🎨 Tailwind CSS Integration
+* ✨ Motion-based UI Animations
+* 🧩 React Context-based Application State Management
+* 📱 Responsive React Frontend
+* 🌍 Multilingual Application / Live Talk Language Support
 
 ---
 
-# 🧪 Error Handling
+# 🛠 Tech Stack
 
-The frontend handles common backend responses:
+### 💻 Frontend
 
-| Status | Meaning                         |
-| -----: | ------------------------------- |
-|    400 | Invalid request                 |
-|    401 | Unauthenticated/session expired |
-|    403 | Forbidden                       |
-|    404 | Resource not found              |
-|    408 | Timeout                         |
-|    409 | Conflict/duplicate username     |
-|    413 | Request/file too large          |
-|    415 | Unsupported media type          |
-|    422 | Validation/processing failure   |
-|    429 | AI service busy/rate limited    |
-|    500 | Internal server error           |
-|    502 | Upstream AI/service failure     |
-|    503 | Service unavailable             |
-|    504 | Gateway timeout                 |
+![React](https://img.shields.io/badge/React-19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-6.2-646CFF?style=for-the-badge&logo=vite&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-4.1-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)
+![React Router](https://img.shields.io/badge/React%20Router-7-CA4245?style=for-the-badge&logo=reactrouter&logoColor=white)
+![Motion](https://img.shields.io/badge/Motion-12-000000?style=for-the-badge&logo=framer&logoColor=white)
 
----
+### 🔧 Backend
 
-# 📖 API Documentation
+![Java](https://img.shields.io/badge/Java%2017-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2.4-6DB33F?style=for-the-badge&logo=springboot&logoColor=white)
+![Spring Data JPA](https://img.shields.io/badge/Spring%20Data%20JPA-6DB33F?style=for-the-badge&logo=spring&logoColor=white)
+![Spring Session](https://img.shields.io/badge/Spring%20Session-Redis-6DB33F?style=for-the-badge&logo=spring&logoColor=white)
+![JWT/JOSE](https://img.shields.io/badge/Nimbus%20JOSE%20JWT-10.4-000000?style=for-the-badge&logo=jsonwebtokens&logoColor=white)
+![Maven](https://img.shields.io/badge/Maven-C71A36?style=for-the-badge&logo=apachemaven&logoColor=white)
 
-Springdoc OpenAPI is included.
+### 🗄 Database
 
-When running locally:
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white)
+![Hibernate](https://img.shields.io/badge/Hibernate-59666C?style=for-the-badge&logo=hibernate&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)
 
-```text
-http://localhost:8080/swagger-ui/index.html
-```
+### 🤖 AI & Communication
 
-OpenAPI JSON:
+![Groq](https://img.shields.io/badge/Groq-000000?style=for-the-badge)
+![Google Gemini](https://img.shields.io/badge/Google%20Gemini-4285F4?style=for-the-badge&logo=google&logoColor=white)
+![Brevo](https://img.shields.io/badge/Brevo-0B996E?style=for-the-badge&logo=brevo&logoColor=white)
+![Spring Mail](https://img.shields.io/badge/Spring%20Mail-6DB33F?style=for-the-badge&logo=spring&logoColor=white)
 
-```text
-http://localhost:8080/v3/api-docs
-```
+### 🧰 Tools
 
----
-
-# 🔄 Typical User Flow
-
-```text
-Open Twinkle AI
-       │
-       ▼
-   Login / Signup
-       │
-       ├── Signup ──► Email OTP ──► Verify ──► Session
-       │
-       └── Google ──► OAuth ──► Session
-                         │
-                         ▼
-                    Chat Interface
-                         │
-             ┌───────────┼───────────┐
-             ▼           ▼           ▼
-          Text Chat   File Chat   Live Talk
-             │           │           │
-             ▼           ▼           ▼
-           Groq       Gemini      Gemini Live
-             │           │           │
-             └───────────┼───────────┘
-                         ▼
-                 PostgreSQL History
-                         │
-                         ▼
-                Profile / Analytics
-```
+![Git](https://img.shields.io/badge/Git-F05032?style=for-the-badge&logo=git&logoColor=white)
+![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)
+![Postman](https://img.shields.io/badge/Postman-FF6C37?style=for-the-badge&logo=postman&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+![Lombok](https://img.shields.io/badge/Lombok-BD2C00?style=for-the-badge&logo=java&logoColor=white)
+![Apache Tika](https://img.shields.io/badge/Apache%20Tika-D22128?style=for-the-badge&logo=apache&logoColor=white)
 
 ---
 
-# 🔑 Production Checklist
+# 🌐 API Endpoints
 
-* [ ] Configure PostgreSQL/Neon
-* [ ] Configure Redis
-* [ ] Configure Groq
-* [ ] Configure Gemini
-* [ ] Configure Brevo
-* [ ] Configure Google OAuth
-* [ ] Set a strong `OAUTH_STATE_SECRET`
-* [ ] Configure `FRONTEND_URL`
-* [ ] Configure `VITE_API_BASE_URL`
-* [ ] Enable HTTPS
-* [ ] Keep secure HTTP-only cookies
-* [ ] Configure production CORS
-* [ ] Never commit `.env` files
-* [ ] Verify `/health`
-* [ ] Verify authentication/session persistence
-* [ ] Verify OTP delivery
-* [ ] Verify normal chat
-* [ ] Verify file uploads
-* [ ] Verify Live Talk
-* [ ] Verify chat persistence
-* [ ] Verify profile statistics
-
----
-
-# 🧪 Useful Commands
-
-### Frontend
-
-```bash
-npm install
-npm run dev
-npm run build
-npm run preview
-npm run lint
-```
-
-### Backend — Windows
-
-```bash
-mvnw.cmd spring-boot:run
-mvnw.cmd clean package
-```
-
-### Backend — Linux/macOS
-
-```bash
-./mvnw spring-boot:run
-./mvnw clean package
-```
+| Method | Endpoint | Description |
+| :---: | ------------------------------------------- | ------------------------------------------ |
+| `POST` | `/api/auth/login` | Authenticate user and create session |
+| `POST` | `/api/auth/signup` | Register user and start OTP verification |
+| `POST` | `/api/auth/request-otp` | Request registration OTP |
+| `POST` | `/api/auth/verify-otp` | Verify registration OTP |
+| `POST` | `/api/auth/resend-otp` | Resend registration OTP |
+| `GET` | `/api/auth/status` | Check authentication/session status |
+| `POST` | `/api/auth/logout` | Logout and invalidate current session |
+| `GET` | `/api/auth/me` | Get authenticated user |
+| `PATCH` | `/api/auth/profile` | Update authenticated user profile |
+| `GET` | `/api/auth/profile/stats` | Get user usage and activity statistics |
+| `POST` | `/api/auth/forgot-password` | Generate password-reset OTP |
+| `POST` | `/api/auth/reset-password` | Verify OTP and reset password |
+| `GET` | `/api/auth/oauth/google` | Start Google OAuth authentication |
+| `GET` | `/api/auth/oauth/google/callback` | Handle Google OAuth callback |
+| `GET` | `/api/chat/status` | Get chat service status |
+| `POST` | `/api/chat/send` | Send a normal JSON AI chat message |
+| `POST` | `/api/chat/send` | Send an AI message with multipart files |
+| `GET` | `/api/chat/models` | Get available AI models |
+| `GET` | `/api/chat/sessions` | Get authenticated user's chat sessions |
+| `GET` | `/api/chat/history/{sessionId}` | Get chat history for a session |
+| `POST` | `/api/chat/new-session` | Create a new chat session |
+| `PATCH` | `/api/chat/rename` | Rename an existing chat session |
+| `POST` | `/api/chat/generate-title` | Generate a title for a conversation |
+| `DELETE` | `/api/chat/session/{sessionId}` | Delete a chat session |
+| `DELETE` | `/api/chat/sessions` | Delete all authenticated user's sessions |
+| `GET` | `/api/chat/search?q={query}` | Search authenticated user's chat sessions |
+| `POST` | `/api/chat/live/turn` | Save a Live Talk turn |
+| `POST` | `/api/chat/live-save` | Save a complete Live Talk conversation |
+| `POST` | `/api/live/token` | Create a short-lived Gemini Live token |
+| `GET` | `/health` | Backend health check |
 
 ---
 
-# 📌 Default Configuration
+# 👨‍💻 Author
 
-| Setting              | Default                  |
-| -------------------- | ------------------------ |
-| Backend port         | `8080`                   |
-| Frontend dev port    | `5173`                   |
-| Session timeout      | `24h`                    |
-| Redis                | `redis://localhost:6379` |
-| Max file size        | `10MB`                   |
-| Max request size     | `25MB`                   |
-| OTP expiration       | `10 minutes`             |
-| OTP length           | `6 digits`               |
-| Groq primary model   | `openai/gpt-oss-120b`    |
-| Groq secondary model | `openai/gpt-oss-20b`     |
-| Gemini model         | `gemini-3.8-flash`       |
-| Gemini Live model    | `gemini-3.8-live`        |
-| Live token lifetime  | `30 minutes`             |
-| Live token uses      | `10`                     |
+<div align="center">
+
+### **Azeez**
+
+📌 Open to opportunities in **Java Full Stack Development & AI Application Development**
+
+</div>
 
 ---
 
-# 🤝 Development Notes
+# ⭐ Support
 
-When extending the project:
+<div align="center">
 
-1. Keep provider API keys on the backend.
-2. Keep authenticated data scoped to the current user/session.
-3. Add REST endpoints to the appropriate controller.
-4. Put persistence logic in services/repositories.
-5. Add validation to new DTO fields.
-6. Update the frontend API client when endpoints change.
-7. Keep CORS and credential handling synchronized.
-8. Update this README whenever a major feature, endpoint, or environment variable changes.
+If you like this project, give it a ⭐ on GitHub!
 
----
+### ✧ TWINKLE AI
 
-# 📄 License
+**Built with React • TypeScript • Vite • Tailwind CSS • Spring Boot • Spring Data JPA • PostgreSQL • Redis • Groq • Google Gemini • Brevo • Docker**
 
-This project includes Apache-2.0 licensed source headers where applicable.
-
-Add the final repository-level license terms if the complete application is intended to be distributed under a specific license.
-
----
-
-# 🌟 Twinkle AI
-
-```text
-React + TypeScript
-        +
-Spring Boot + Java 17
-        +
-PostgreSQL + Redis
-        +
-Groq + Gemini
-        =
-✨ Twinkle AI
-```
+</div>
