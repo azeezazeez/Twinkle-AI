@@ -2731,7 +2731,11 @@ const cleanMessageContent = (content: unknown): string => {
                                   type="button"
                                   role="option"
                                   aria-selected={selected}
-                                  onClick={() => chooseModel(option.id)}
+                                  onPointerDown={(event) => {
+                                    event.stopPropagation();
+                                    chooseModel(option.id);
+                                  }}
+                                  onClick={(event) => event.preventDefault()}
                                   whileHover={{ x: 2 }}
                                   whileTap={{ scale: 0.985 }}
                                   transition={{ type: 'spring', stiffness: 450, damping: 28 }}
@@ -2774,49 +2778,38 @@ const cleanMessageContent = (content: unknown): string => {
                   )}
 
                   {/* Live Talk / Send */}
-                  <AnimatePresence mode="wait" initial={false}>
-                    {!isTyping && !input.trim() && filePreviews.length === 0 ? (
-                      <motion.button
-                        key="live-talk"
-                        type="button"
-                        onClick={() => setLiveTalkOpen(true)}
-                        aria-label="Open Live Talk"
-                        title="Live Talk"
-                        initial={{ opacity: 0, scale: 0.88, y: 2 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.88, y: 2 }}
-                        whileHover={{ scale: 1.06 }}
-                        whileTap={{ scale: 0.92 }}
-                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#ec6aa8] text-white shadow-[0_8px_20px_rgba(236,106,168,.22)] transition hover:bg-[#e85f9f] sm:h-11 sm:w-11"
-                      >
-                        <AudioLines className="h-[19px] w-[19px]" strokeWidth={2.1} />
-                      </motion.button>
-                    ) : (
-                      <motion.button
-                        key="send"
-                        type="button"
-                        onClick={isTyping ? handleStopResponse : () => handleSendMessage()}
-                        disabled={!input.trim() && (!Array.isArray(filePreviews) || filePreviews.length === 0) && !isTyping}
-                        aria-label={isTyping ? 'Stop response' : 'Send message'}
-                        title={isTyping ? 'Stop response' : 'Send message'}
-                        initial={{ opacity: 0, scale: 0.88, y: 2 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.88, y: 2 }}
-                        whileHover={{ scale: isTyping || input.trim() || filePreviews.length ? 1.06 : 1, y: -1 }}
-                        whileTap={{ scale: 0.92 }}
-                        transition={{ type: 'spring', stiffness: 450, damping: 25 }}
-                        className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isTyping ? 'border-[#ec6aa8] bg-[#ec6aa8] text-white shadow-[#ec6aa8]/20' : 'border-zinc-300 bg-white hover:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-800 dark:hover:border-zinc-500'}`}
-                      >
-                        {isTyping ? (
-                          <span className="relative flex h-full w-full items-center justify-center">
-                            <span className="h-3.5 w-3.5 rounded-[3px] bg-white shadow-sm" />
-                          </span>
-                        ) : (
-                          <ArrowUp className="h-4 w-4" />
-                        )}
-                      </motion.button>
-                    )}
-                  </AnimatePresence>
+                  {!isTyping && !input.trim() && filePreviews.length === 0 ? (
+                    <motion.button
+                      type="button"
+                      onClick={() => setLiveTalkOpen(true)}
+                      aria-label="Open Live Talk"
+                      title="Live Talk"
+                      whileHover={{ scale: 1.06 }}
+                      whileTap={{ scale: 0.92 }}
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#ec6aa8] text-white shadow-[0_8px_20px_rgba(236,106,168,.22)] transition hover:bg-[#e85f9f] sm:h-11 sm:w-11"
+                    >
+                      <AudioLines className="h-[19px] w-[19px]" strokeWidth={2.1} />
+                    </motion.button>
+                  ) : (
+                    <motion.button
+                      type="button"
+                      onClick={isTyping ? handleStopResponse : () => handleSendMessage()}
+                      disabled={!input.trim() && (!Array.isArray(filePreviews) || filePreviews.length === 0) && !isTyping}
+                      aria-label={isTyping ? 'Stop response' : 'Send message'}
+                      title={isTyping ? 'Stop response' : 'Send message'}
+                      whileHover={{ scale: isTyping || input.trim() || filePreviews.length ? 1.06 : 1, y: -1 }}
+                      whileTap={{ scale: 0.92 }}
+                      className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isTyping ? 'border-[#ec6aa8] bg-[#ec6aa8] text-white shadow-[#ec6aa8]/20' : 'border-zinc-300 bg-white hover:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-800 dark:hover:border-zinc-500'}`}
+                    >
+                      {isTyping ? (
+                        <span className="relative flex h-full w-full items-center justify-center">
+                          <span className="h-3.5 w-3.5 rounded-[3px] bg-white shadow-sm" />
+                        </span>
+                      ) : (
+                        <ArrowUp className="h-4 w-4" />
+                      )}
+                    </motion.button>
+                  )}
                 </div>
               </div>
 
