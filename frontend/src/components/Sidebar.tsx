@@ -61,7 +61,7 @@ function IconTooltip({ label, children }: { label: string; children: ReactNode }
   return (
     <div className="relative group/tip flex items-center justify-center w-full">
       {children}
-      <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-zinc-900 text-white text-xs font-semibold rounded-lg whitespace-nowrap pointer-events-none z-[300] shadow-lg opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150">
+      <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-zinc-900 text-white text-xs font-bold rounded-lg whitespace-nowrap pointer-events-none z-[300] shadow-lg opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150">
         {label}
         <div className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-zinc-900" />
       </div>
@@ -956,29 +956,25 @@ export default function Sidebar({
             <div className="flex items-center gap-2 shrink-0">
               <ThemeToggleButton />
 
-              <div className="relative group/close-sidebar">
-              <motion.button
-                type="button"
-                onClick={onMobileClose}
-                aria-label="Close sidebar"
-                title="Close sidebar"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.92 }}
-                className="flex h-9 w-9 items-center justify-center rounded-[25px]
-                  bg-zinc-100 dark:bg-zinc-800
-                  border border-zinc-200 dark:border-zinc-700
-                  text-zinc-500 dark:text-zinc-400
-                  hover:text-zinc-700 dark:hover:text-zinc-200
-                  hover:border-zinc-300 dark:hover:border-zinc-600
-                  shadow-sm transition-all duration-200"
-              >
-                
-                              <PanelLeft className="w-5 h-5" strokeWidth={1.8} />
-              </motion.button>
-                <div className="absolute right-0 top-full mt-2 px-3 py-1.5
-                  bg-zinc-900 text-white text-xs font-bold rounded-lg whitespace-nowrap
-                  pointer-events-none z-[300] shadow-lg opacity-0
-                  group-hover/close-sidebar:opacity-100 transition-opacity duration-150">
+              <div className="relative group/close">
+                <motion.button
+                  type="button"
+                  onClick={onMobileClose}
+                  aria-label="Close sidebar"
+                  title="Close sidebar"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.92 }}
+                  className="flex h-9 w-9 items-center justify-center rounded-[25px]
+                    bg-zinc-100 dark:bg-zinc-800
+                    border border-zinc-200 dark:border-zinc-700
+                    text-zinc-500 dark:text-zinc-400
+                    hover:text-zinc-700 dark:hover:text-zinc-200
+                    hover:border-zinc-300 dark:hover:border-zinc-600
+                    shadow-sm transition-all duration-200"
+                >
+                  <PanelLeft className="w-5 h-5" strokeWidth={1.8} />
+                </motion.button>
+                <div className="pointer-events-none absolute right-0 top-full mt-2 z-[300] whitespace-nowrap rounded-lg bg-zinc-900 px-2.5 py-1.5 text-xs font-bold text-white opacity-0 shadow-lg transition-opacity duration-150 group-hover/close:opacity-100">
                   Close Sidebar
                 </div>
               </div>
@@ -1035,7 +1031,7 @@ export default function Sidebar({
               </button>
             </IconTooltip>
 
-            <IconTooltip label={`Chats (${sessions.length})`}>
+            <IconTooltip label="Recents">
               <button
                 onClick={expandDesktop}
                 aria-label="Chats"
@@ -1081,28 +1077,25 @@ export default function Sidebar({
                   <h2 className="text-xl font-medium tracking-tight text-zinc-900/90 dark:text-white/90">Twinkle</h2>
                 </div>
 
-                <div className="relative group/close-sidebar">
-                <motion.button
-                  type="button"
-                  onClick={collapseDesktop}
-                  aria-label="Close sidebar"
-                  title="Close sidebar"
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.92 }}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[25px]
-                    bg-zinc-100 dark:bg-zinc-800
-                    border border-zinc-200 dark:border-zinc-700
-                    text-zinc-500 dark:text-zinc-400
-                    hover:text-zinc-700 dark:hover:text-zinc-200
-                    hover:border-zinc-300 dark:hover:border-zinc-600
-                    shadow-sm transition-all duration-200"
-                >
-                  <PanelLeft className="w-5 h-5" strokeWidth={1.8} />
-                </motion.button>
-                  <div className="absolute right-0 top-full mt-2 px-3 py-1.5
-                    bg-zinc-900 text-white text-xs font-bold rounded-lg whitespace-nowrap
-                    pointer-events-none z-[300] shadow-lg opacity-0
-                    group-hover/close-sidebar:opacity-100 transition-opacity duration-150">
+                <div className="relative group/close">
+                  <motion.button
+                    type="button"
+                    onClick={collapseDesktop}
+                    aria-label="Close sidebar"
+                    title="Close sidebar"
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.92 }}
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[25px]
+                      bg-zinc-100 dark:bg-zinc-800
+                      border border-zinc-200 dark:border-zinc-700
+                      text-zinc-500 dark:text-zinc-400
+                      hover:text-zinc-700 dark:hover:text-zinc-200
+                      hover:border-zinc-300 dark:hover:border-zinc-600
+                      shadow-sm transition-all duration-200"
+                  >
+                    <PanelLeft className="w-5 h-5" strokeWidth={1.8} />
+                  </motion.button>
+                  <div className="pointer-events-none absolute right-0 top-full mt-2 z-[300] whitespace-nowrap rounded-lg bg-zinc-900 px-2.5 py-1.5 text-xs font-bold text-white opacity-0 shadow-lg transition-opacity duration-150 group-hover/close:opacity-100">
                     Close Sidebar
                   </div>
                 </div>
