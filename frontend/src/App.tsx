@@ -1,25 +1,3 @@
-/**
- * Twinkle AI — Application Router
- *
- * Authentication:
- *
- * Email:
- * /login
- *   ↓
- * /verify-otp
- *   ↓
- * /
- *
- * Google:
- * /api/auth/oauth/google
- *   ↓
- * Google
- *   ↓
- * /api/auth/oauth/google/callback
- *   ↓
- * /
- */
-
 import {
   BrowserRouter,
   Routes,
