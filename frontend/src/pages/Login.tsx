@@ -1,14 +1,4 @@
-/**
- * Twinkle AI — Unified Email Authentication
- *
- * Flow:
- * Email → Continue → OTP → Chat
- *
- * Google:
- * Continue with Google → Google OAuth → Chat
- */
-
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { X } from 'lucide-react';
@@ -98,6 +88,18 @@ export default function Login({
 
   const [googleLoading, setGoogleLoading] =
     useState(false);
+
+  useEffect(() => {
+    const resetGoogleLoading = () => {
+      setGoogleLoading(false);
+    };
+
+    window.addEventListener('pageshow', resetGoogleLoading);
+
+    return () => {
+      window.removeEventListener('pageshow', resetGoogleLoading);
+    };
+  }, []);
 
   /*
    * ==========================================================
