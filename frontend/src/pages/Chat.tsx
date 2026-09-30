@@ -595,6 +595,22 @@ const getNextEmptyChatPrompt = (current: string): string => {
   return available[Math.floor(Math.random() * available.length)];
 };
 
+const EMPTY_CHAT_GREETINGS = [
+  'Good to see you,',
+  'Welcome back,',
+  'Nice to see you,',
+  'Great to have you here,',
+  'Hello,',
+];
+
+const getRandomChatGreeting = (): string => {
+  return EMPTY_CHAT_GREETINGS[
+    Math.floor(Math.random() * EMPTY_CHAT_GREETINGS.length)
+  ];
+};
+
+
+
 
 
 const downsamplePcm16k = (input: Float32Array, sampleRate: number): Int16Array => {
@@ -1079,6 +1095,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const [emptyChatPrompt, setEmptyChatPrompt] = useState(() =>
     EMPTY_CHAT_PROMPTS[Math.floor(Math.random() * EMPTY_CHAT_PROMPTS.length)]
   );
+  const [chatGreeting, setChatGreeting] = useState(() => getRandomChatGreeting());
   const modelPickerRef = useRef<HTMLDivElement>(null);
 
   // File upload
@@ -1912,6 +1929,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   };
 
   const createNewSession = () => {
+    setChatGreeting(getRandomChatGreeting());
     setEmptyChatPrompt(current => getNextEmptyChatPrompt(current));
     setCurrentSessionId(null);
     persistSessionId(null);
@@ -2258,9 +2276,14 @@ const cleanMessageContent = (content: unknown): string => {
                 >
                   <StormLogo className="twinkle-chat-logo w-12 h-12 md:w-14 md:h-14 text-zinc-800 dark:text-zinc-100" />
                 </motion.div>
-                <h2 className="text-2xl md:text-3xl lg:text-4xl font-medium tracking-tight text-zinc-900 dark:text-zinc-100">
-                  Good to see you, {(user.username || user.name || '').trim().split(/\s|_/)[0]}
-                </h2>
+                <div className="flex flex-col items-center text-center">
+                  <h2 className="text-2xl md:text-3xl lg:text-4xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                    {chatGreeting} {(user.username || user.name || '').trim().split(/\s|_/)[0]}
+                  </h2>
+                  <p className="mt-2 text-base md:text-lg font-medium text-zinc-500 dark:text-zinc-400">
+                    {emptyChatPrompt}
+                  </p>
+                </div>
               </div>
             ) : (
               <div className="space-y-5 md:space-y-7 pb-6 pt-2 font-medium">
