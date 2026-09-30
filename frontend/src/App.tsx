@@ -25,6 +25,7 @@ import ForgotPassword from './pages/ForgotPassword';
 import Chat from './pages/Chat';
 import Profile from './pages/Profile';
 import Settings from './pages/Settings';
+import LiveTalkColor from './pages/LiveTalkColor';
 
 import StormLogo from './components/StormLogo';
 
@@ -323,6 +324,25 @@ function AuthenticatedApp({
             <Settings
               user={user}
             />
+          ) : (
+            <Navigate
+              to="/login"
+              replace
+            />
+          )
+        }
+      />
+
+
+      {/* =====================================================
+          LIVE TALK COLOR
+          ===================================================== */}
+
+      <Route
+        path="/live-talk-color"
+        element={
+          user ? (
+            <LiveTalkColor />
           ) : (
             <Navigate
               to="/login"
