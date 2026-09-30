@@ -7,7 +7,8 @@ import { chatApi, authApi, createLiveToken } from '../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
 import StormLogo from '../components/StormLogo';
 import ConfirmationModal from '../components/ConfirmationModal'; 
-import LiveTalkModal from '../components/LiveTalkModal'; 
+import LiveTalkModal from '../components/LiveTalkModal';
+import { getSavedLiveTalkColor } from '../lib/liveTalkColors';
 
 import {
   ArrowDown, ArrowUp, 
@@ -663,6 +664,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [liveTalkColor, setLiveTalkColor] = useState(() => getSavedLiveTalkColor());
   const [justFinished, setJustFinished] = useState(false);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [copiedId, setCopiedId] = useState<number | string | null>(null);
@@ -1140,6 +1142,18 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       filePreviewsRef.current.forEach(fp => {
         if (fp.preview) URL.revokeObjectURL(fp.preview);
       });
+    };
+  }, []);
+
+  // Keep the composer Live Talk button synchronized with the saved Live Talk model color.
+  useEffect(() => {
+    const syncLiveTalkColor = () => setLiveTalkColor(getSavedLiveTalkColor());
+    syncLiveTalkColor();
+    window.addEventListener('twinkle-live-talk-color-change', syncLiveTalkColor);
+    window.addEventListener('storage', syncLiveTalkColor);
+    return () => {
+      window.removeEventListener('twinkle-live-talk-color-change', syncLiveTalkColor);
+      window.removeEventListener('storage', syncLiveTalkColor);
     };
   }, []);
 
@@ -2146,14 +2160,7 @@ const cleanMessageContent = (content: unknown): string => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen font-sans text-zinc-400 bg-white dark:bg-zinc-950 transition-colors duration-300">
-        <motion.div
-          animate={{ scale: [1, 1.1, 1], opacity: [0.3, 0.6, 0.3] }}
-          transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-          className="flex flex-col items-center gap-4"
-        >
-          <StormLogo className="w-12 h-12 text-black dark:text-white transition-transform duration-500 ease-in-out hover:rotate-180" />
-          <span className="tracking-widest text-[10px] font-black uppercase">Loading...</span>
-        </motion.div>
+        <span className="tracking-widest text-[10px] font-black uppercase">Loading...</span>
       </div>
     );
   }
@@ -2244,7 +2251,6 @@ const cleanMessageContent = (content: unknown): string => {
               <div className="space-y-5 md:space-y-7 pb-6 pt-2">
                 {messages.map((msg, index) => {
                   const isEditing = editingMessage?.id === msg.id;
-                  const shouldSpin = isTyping && msg.role === 'assistant' && index === messages.length - 1;
                   const attachedImages = messageAttachments[msg.id] || [];
                   const rawMessageContent = cleanMessageContent(msg.content);
                   const displayContent =
@@ -2269,7 +2275,7 @@ const cleanMessageContent = (content: unknown): string => {
                       >
                         {msg.role === 'assistant' && (
                           <div className="shrink-0 w-7 h-7 md:w-8 md:h-8 flex items-center justify-center mt-1">
-                            <StormLogo className={`w-6 h-6 text-black dark:text-white ${shouldSpin ? 'animate-spin' : ''}`} />
+                            <StormLogo className="w-6 h-6 text-black dark:text-white" />
                           </div>
                         )}
 
@@ -2935,7 +2941,11 @@ const cleanMessageContent = (content: unknown): string => {
                         title="Live Talk"
                         whileHover={{ scale: 1.06 }}
                         whileTap={{ scale: 0.92 }}
-                        className="twinkle-composer-submit flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#ec6aa8] text-white shadow-[0_8px_20px_rgba(236,106,168,.22)] transition hover:bg-[#e85f9f] sm:h-11 sm:w-11"
+                        className="twinkle-composer-submit flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white transition sm:h-11 sm:w-11"
+                        style={{
+                          background: liveTalkColor.swatch,
+                          boxShadow: `0 8px 20px ${liveTalkColor.glow}`,
+                        }}
                       >
                         <AudioLines className="h-[19px] w-[19px]" strokeWidth={2.1} />
                       </button>
