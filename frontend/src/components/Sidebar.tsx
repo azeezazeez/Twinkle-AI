@@ -443,7 +443,7 @@ function SessionList({
             aria-label="Search chats"
             className="w-full pl-10 pr-9 py-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs font-medium text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-zinc-400 transition-all"
           />
-          {searchQuery ? (
+          {searchQuery && (
             <button
               onClick={() => handleSearchChange('')}
               className="absolute inset-y-0 right-3 flex items-center text-zinc-400 hover:text-zinc-600"
