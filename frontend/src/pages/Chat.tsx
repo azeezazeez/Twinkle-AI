@@ -2161,14 +2161,16 @@ const cleanMessageContent = (content: unknown): string => {
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-white font-sans text-zinc-400 transition-colors duration-300 dark:bg-zinc-950">
+      <div className="flex h-screen items-center justify-center bg-white font-sans text-zinc-400 dark:bg-zinc-950">
         <div className="flex flex-col items-center gap-4" role="status" aria-live="polite">
           <StormLogo className="h-12 w-12 text-black dark:text-white" />
           <span
-            className="tracking-widest text-[10px] uppercase"
+            className="!font-normal !italic tracking-widest text-[10px] uppercase"
             style={{
               fontStyle: 'italic',
               fontWeight: 400,
+              transition: 'none',
+              animation: 'none',
             }}
           >
             Loading...
@@ -2256,12 +2258,17 @@ const cleanMessageContent = (content: unknown): string => {
                 >
                   <StormLogo className="twinkle-chat-logo w-12 h-12 md:w-14 md:h-14 text-zinc-800 dark:text-zinc-100" />
                 </motion.div>
-                <h2 className="text-2xl md:text-3xl lg:text-4xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-                  {emptyChatPrompt}
-                </h2>
+                <div className="flex flex-col items-center text-center">
+                  <h2 className="text-2xl md:text-3xl lg:text-4xl font-medium tracking-tight text-zinc-900 dark:text-zinc-100">
+                    Good to see you, {user.username || user.name}
+                  </h2>
+                  <p className="mt-2 text-base md:text-lg font-medium text-zinc-500 dark:text-zinc-400">
+                    {emptyChatPrompt}
+                  </p>
+                </div>
               </div>
             ) : (
-              <div className="space-y-5 md:space-y-7 pb-6 pt-2">
+              <div className="space-y-5 md:space-y-7 pb-6 pt-2 font-medium">
                 {messages.map((msg, index) => {
                   const isEditing = editingMessage?.id === msg.id;
                   const shouldSpin = isTyping && msg.role === 'assistant' && index === messages.length - 1;
