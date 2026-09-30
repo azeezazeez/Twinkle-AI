@@ -605,9 +605,12 @@ const EMPTY_CHAT_GREETINGS = [
 ];
 
 const getRandomChatGreeting = (): string => {
-  return EMPTY_CHAT_GREETINGS[
-    Math.floor(Math.random() * EMPTY_CHAT_GREETINGS.length)
+  const allGreetings = [
+    ...EMPTY_CHAT_GREETINGS,
+    ...EMPTY_CHAT_PROMPTS,
   ];
+
+  return allGreetings[Math.floor(Math.random() * allGreetings.length)];
 };
 
 
@@ -2278,7 +2281,7 @@ const cleanMessageContent = (content: unknown): string => {
                   <StormLogo className="twinkle-chat-logo w-12 h-12 md:w-14 md:h-14 text-zinc-800 dark:text-zinc-100" />
                 </motion.div>
                 <h2
-                  className="whitespace-nowrap text-[clamp(1.25rem,4vw,2.25rem)] font-medium tracking-tight text-zinc-900 dark:text-zinc-100"
+                  className="whitespace-nowrap text-[clamp(1.25rem,4vw,2.25rem)] font-normal tracking-tight text-zinc-900 dark:text-zinc-100"
                 >
                   {chatGreeting.replace(
                     '{name}',
