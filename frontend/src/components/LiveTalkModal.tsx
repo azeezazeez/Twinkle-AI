@@ -4,6 +4,7 @@ import { Mic, MicOff } from 'lucide-react';
 import { chatApi, createLiveToken } from '../lib/api';
 import { APP_LANGUAGE_KEY, getLanguageInstruction, type AppLanguage } from '../lib/i18n';
 import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw';
+import { getSavedLiveTalkColor } from '../lib/liveTalkColors';
 
 type Props = {
   open: boolean;
@@ -68,38 +69,6 @@ const getSavedVoice = () => {
   }
 };
 
-const VOICE_THEMES: Record<string, { background: string; glow: string }> = {
-  Zephyr: { background: 'radial-gradient(circle at 35% 25%, #fef9c3 0%, #dff6ff 28%, #74c7ff 58%, #1479ed 100%)', glow: 'rgba(20,121,237,.24)' },
-  Puck: { background: 'radial-gradient(circle at 35% 25%, #fff7ed 0%, #fed7aa 30%, #fb923c 62%, #ea580c 100%)', glow: 'rgba(234,88,12,.24)' },
-  Charon: { background: 'radial-gradient(circle at 35% 25%, #f5f3ff 0%, #ddd6fe 30%, #8b5cf6 62%, #5b21b6 100%)', glow: 'rgba(91,33,182,.24)' },
-  Kore: { background: 'radial-gradient(circle at 35% 25%, #f0fdf4 0%, #bbf7d0 30%, #4ade80 62%, #15803d 100%)', glow: 'rgba(21,128,61,.24)' },
-  Fenrir: { background: 'radial-gradient(circle at 35% 25%, #fef2f2 0%, #fecaca 30%, #f87171 62%, #b91c1c 100%)', glow: 'rgba(185,28,28,.24)' },
-  Leda: { background: 'radial-gradient(circle at 35% 25%, #fdf2f8 0%, #fbcfe8 30%, #f472b6 62%, #be185d 100%)', glow: 'rgba(190,24,93,.24)' },
-  Orus: { background: 'radial-gradient(circle at 35% 25%, #eff6ff 0%, #bfdbfe 30%, #60a5fa 62%, #1d4ed8 100%)', glow: 'rgba(29,78,216,.24)' },
-  Aoede: { background: 'radial-gradient(circle at 35% 25%, #ecfdf5 0%, #a7f3d0 30%, #34d399 62%, #047857 100%)', glow: 'rgba(4,120,87,.24)' },
-  Callirrhoe: { background: 'radial-gradient(circle at 35% 25%, #f0fdfa 0%, #99f6e4 30%, #2dd4bf 62%, #0f766e 100%)', glow: 'rgba(15,118,110,.24)' },
-  Autonoe: { background: 'radial-gradient(circle at 35% 25%, #fffbeb 0%, #fde68a 30%, #facc15 62%, #a16207 100%)', glow: 'rgba(161,98,7,.24)' },
-  Enceladus: { background: 'radial-gradient(circle at 35% 25%, #f8fafc 0%, #cbd5e1 30%, #94a3b8 62%, #475569 100%)', glow: 'rgba(71,85,105,.24)' },
-  Iapetus: { background: 'radial-gradient(circle at 35% 25%, #f0f9ff 0%, #bae6fd 30%, #38bdf8 62%, #0369a1 100%)', glow: 'rgba(3,105,161,.24)' },
-  Umbriel: { background: 'radial-gradient(circle at 35% 25%, #f5f5f4 0%, #d6d3d1 30%, #a8a29e 62%, #57534e 100%)', glow: 'rgba(87,83,78,.24)' },
-  Algieba: { background: 'radial-gradient(circle at 35% 25%, #fff1f2 0%, #fecdd3 30%, #fb7185 62%, #be123c 100%)', glow: 'rgba(190,18,60,.24)' },
-  Despina: { background: 'radial-gradient(circle at 35% 25%, #faf5ff 0%, #e9d5ff 30%, #c084fc 62%, #7e22ce 100%)', glow: 'rgba(126,34,206,.24)' },
-  Erinome: { background: 'radial-gradient(circle at 35% 25%, #ecfeff 0%, #a5f3fc 30%, #22d3ee 62%, #0e7490 100%)', glow: 'rgba(14,116,144,.24)' },
-  Algenib: { background: 'radial-gradient(circle at 35% 25%, #f4f4f5 0%, #d4d4d8 30%, #71717a 62%, #27272a 100%)', glow: 'rgba(39,39,42,.24)' },
-  Rasalgethi: { background: 'radial-gradient(circle at 35% 25%, #eef2ff 0%, #c7d2fe 30%, #818cf8 62%, #4338ca 100%)', glow: 'rgba(67,56,202,.24)' },
-  Laomedeia: { background: 'radial-gradient(circle at 35% 25%, #fff7ed 0%, #fed7aa 30%, #fb7185 62%, #db2777 100%)', glow: 'rgba(219,39,119,.24)' },
-  Achernar: { background: 'radial-gradient(circle at 35% 25%, #f0f9ff 0%, #bae6fd 30%, #7dd3fc 62%, #0284c7 100%)', glow: 'rgba(2,132,199,.24)' },
-  Alnilam: { background: 'radial-gradient(circle at 35% 25%, #f8fafc 0%, #e2e8f0 30%, #64748b 62%, #1e293b 100%)', glow: 'rgba(30,41,59,.24)' },
-  Schedar: { background: 'radial-gradient(circle at 35% 25%, #f7fee7 0%, #d9f99d 30%, #84cc16 62%, #3f6212 100%)', glow: 'rgba(63,98,18,.24)' },
-  Gacrux: { background: 'radial-gradient(circle at 35% 25%, #fff7ed 0%, #fed7aa 30%, #a78bfa 62%, #6d28d9 100%)', glow: 'rgba(109,40,217,.24)' },
-  Pulcherrima: { background: 'radial-gradient(circle at 35% 25%, #fdf4ff 0%, #f5d0fe 30%, #e879f9 62%, #a21caf 100%)', glow: 'rgba(162,28,175,.24)' },
-  Achird: { background: 'radial-gradient(circle at 35% 25%, #eff6ff 0%, #bfdbfe 30%, #60a5fa 62%, #2563eb 100%)', glow: 'rgba(37,99,235,.24)' },
-  Zubenelgenubi: { background: 'radial-gradient(circle at 35% 25%, #fff7ed 0%, #fde68a 30%, #fb923c 62%, #c2410c 100%)', glow: 'rgba(194,65,12,.24)' },
-  Vindemiatrix: { background: 'radial-gradient(circle at 35% 25%, #f0fdf4 0%, #bbf7d0 30%, #86efac 62%, #16a34a 100%)', glow: 'rgba(22,163,74,.24)' },
-  Sadachbia: { background: 'radial-gradient(circle at 35% 25%, #ecfeff 0%, #a5f3fc 30%, #67e8f9 62%, #0891b2 100%)', glow: 'rgba(8,145,178,.24)' },
-  Sadaltager: { background: 'radial-gradient(circle at 35% 25%, #eef2ff 0%, #c7d2fe 30%, #6366f1 62%, #3730a3 100%)', glow: 'rgba(55,48,163,.24)' },
-  Sulafat: { background: 'radial-gradient(circle at 35% 25%, #fff1f2 0%, #fecdd3 30%, #fb7185 62%, #9f1239 100%)', glow: 'rgba(159,18,57,.24)' },
-};
 
 const bytesToBase64 = (bytes: Uint8Array): string => {
   let binary = '';
@@ -183,6 +152,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
       return 'auto';
     }
   });
+  const [liveTalkColor, setLiveTalkColor] = useState(() => getSavedLiveTalkColor());
   const [status, setStatus] = useState('Connecting…');
   const [transcript, setTranscript] = useState('');
   const [error, setError] = useState('');
@@ -276,6 +246,11 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
       if (custom.detail) setAppLanguage(custom.detail);
     };
 
+    const handleColorChange = (event: Event) => {
+      const custom = event as CustomEvent<string>;
+      if (custom.detail) setLiveTalkColor(getSavedLiveTalkColor());
+    };
+
     const syncLanguage = () => {
       try {
         const saved = localStorage.getItem(APP_LANGUAGE_KEY) || 'auto';
@@ -288,9 +263,11 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     syncLanguage();
     window.addEventListener('twinkle-voice-change', handleVoiceChange);
     window.addEventListener('twinkle-language-change', handleLanguageChange);
+    window.addEventListener('twinkle-live-talk-color-change', handleColorChange);
     return () => {
       window.removeEventListener('twinkle-voice-change', handleVoiceChange);
       window.removeEventListener('twinkle-language-change', handleLanguageChange);
+      window.removeEventListener('twinkle-live-talk-color-change', handleColorChange);
     };
   }, [open]);
 
@@ -753,7 +730,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
               <div
                 className="absolute inset-0 pointer-events-none transition-all duration-500"
                 style={{
-                  background: `radial-gradient(circle at center, ${VOICE_THEMES[voiceName]?.glow ?? VOICE_THEMES.Charon.glow}, transparent 36%)`,
+                  background: `radial-gradient(circle at center, ${liveTalkColor.glow}, transparent 36%)`,
                 }}
               />
 
@@ -761,7 +738,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
                 <motion.div
                   animate={
                     speaking
-                      ? { scale: [1, 1.08, 1], boxShadow: ['0 0 0 0 rgba(236,106,168,.18)', '0 0 0 28px rgba(236,106,168,0)', '0 0 0 0 rgba(236,106,168,0)'] }
+                      ? { scale: [1, 1.08, 1], boxShadow: [`0 0 0 0 ${liveTalkColor.glow}`, `0 0 0 28px transparent`, `0 0 0 0 ${liveTalkColor.glow}`] }
                       : listening
                         ? { scale: [1, 1.035, 1] }
                         : { scale: 1 }
@@ -769,8 +746,8 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
                   transition={{ duration: speaking ? 1.15 : 1.8, repeat: speaking || listening ? Infinity : 0, ease: 'easeInOut' }}
                   className="h-28 w-28 rounded-full sm:h-36 sm:w-36"
                   style={{
-                    background: VOICE_THEMES[voiceName]?.background ?? VOICE_THEMES.Charon.background,
-                    boxShadow: `0 24px 80px ${VOICE_THEMES[voiceName]?.glow ?? VOICE_THEMES.Charon.glow}`,
+                    background: liveTalkColor.background,
+                    boxShadow: `0 24px 80px ${liveTalkColor.glow}`, 
                   }}
                 />
 
