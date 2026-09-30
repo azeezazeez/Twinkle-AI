@@ -17,7 +17,6 @@ import {
   HardDrive,
   Mic,
   Moon,
-  Palette,
   RefreshCw,
   SlidersHorizontal,
   UserRound,
@@ -28,6 +27,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import type { User, Session } from '../types';
 import { chatApi, previewGeminiVoice } from '../lib/api';
 import { getVoiceTheme } from '../lib/voiceThemes';
+import { getSavedLiveTalkColor } from '../lib/liveTalkColors';
 
 type SettingsSection =
   | 'general'
@@ -465,6 +465,8 @@ export default function Settings({
   });
 
   const selectedLanguage = APP_LANGUAGES.find(item => item.code === appLanguage) ?? APP_LANGUAGES[0];
+
+  const [liveTalkColorName, setLiveTalkColorName] = useState(() => getSavedLiveTalkColor().name);
 
   const changeAppLanguage = (code: string) => {
     const next = APP_LANGUAGES.find(item => item.code === code) ?? APP_LANGUAGES[0];
@@ -906,6 +908,26 @@ export default function Settings({
                     />
                   </label>
                 </Row>
+
+                <Row
+                  title="Live Talk Model Color"
+                  desc="Choose the color of the Live Talk model. This does not change the microphone button."
+                >
+                  <button
+                    type="button"
+                    onClick={() => navigate('/live-talk-color', { state: { from: '/settings' } })}
+                    className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 text-xs font-semibold transition hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+                    aria-label="Change Live Talk model color"
+                  >
+                    <span
+                      className="h-3 w-3 rounded-full ring-1 ring-black/10 dark:ring-white/10"
+                      style={{ background: getSavedLiveTalkColor().swatch }}
+                    />
+                    {liveTalkColorName}
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </Row>
+
                 <Row
                   title="Voice"
                   desc={`Live Talk uses ${activeVoice.name} · ${activeVoice.description}.`}
@@ -999,16 +1021,6 @@ export default function Settings({
                         className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 text-xs font-semibold transition hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
                       >
                         Change voice <ChevronRight className="h-3.5 w-3.5" />
-                      </button>
-                    </Row>
-                    <Row title="Color" desc="Choose the color of the Live Talk model. The microphone button is not affected.">
-                      <button
-                        type="button"
-                        onClick={() => navigate('/live-talk-color')}
-                        className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 text-xs font-semibold transition hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-                      >
-                        <Palette className="h-3.5 w-3.5" />
-                        Change color <ChevronRight className="h-3.5 w-3.5" />
                       </button>
                     </Row>
                   </div>
