@@ -60,7 +60,7 @@ export default function LiveTalkColor() {
             Choose your Live Talk color
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500 dark:text-zinc-400 sm:text-base">
-            Choose the color of the Live Talk model. This setting changes the model visual and glow only — the microphone button is not affected.
+            Choose the color of the Live Talk model.
           </p>
 
           <motion.div
