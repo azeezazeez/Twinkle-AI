@@ -614,7 +614,7 @@
     line-height: 1.35 !important;
   }
 
-  /* Row 2: + stays on the left; model/mic/Live Talk stay on the right. */
+  /* Row 2: + is fixed at the far left; model/mic/Live Talk are fixed as a group at the far right. */
   .twinkle-composer-actions {
     order: 2 !important;
     display: flex !important;
@@ -623,29 +623,39 @@
     min-width: 0 !important;
     align-items: center !important;
     justify-content: flex-start !important;
-    gap: 0 !important;
-    padding: 2px 0 0 !important;
+    gap: 2px !important;
+    padding: 2px 2px 0 !important;
   }
 
-  /* Mobile uses the spacer so + stays left and the controls stay right. */
+  /* Do not use the old spacer on mobile. It can collapse and pull + next to the model. */
   .twinkle-composer-actions > .min-w-0.flex-1 {
-    display: block !important;
-    flex: 1 1 auto !important;
-    min-width: 0 !important;
+    display: none !important;
   }
 
-  .twinkle-composer-plus { order: 1 !important; }
-  .twinkle-composer-model { order: 3 !important; }
-  .twinkle-composer-mic { order: 4 !important; }
+  /* + is always at the far left of the mobile action row. */
+  .twinkle-composer-plus {
+    order: 1 !important;
+    flex: 0 0 40px !important;
+    width: 40px !important;
+    margin: 0 !important;
+  }
+
+  /* Model/mic/Live Talk form one right-aligned control group. */
+  .twinkle-composer-model {
+    order: 3 !important;
+    flex: 0 0 auto !important;
+    margin-left: auto !important;
+  }
+
+  .twinkle-composer-mic {
+    order: 4 !important;
+    flex: 0 0 auto !important;
+  }
+
   .twinkle-composer-submit {
     order: 5 !important;
+    flex: 0 0 auto !important;
     margin-right: 0 !important;
-  }
-
-  /* The existing spacer inside the action row pushes the controls to the right. */
-  .twinkle-composer-actions > .min-w-0.flex-1 {
-    min-width: 0 !important;
-    flex: 1 1 auto !important;
   }
 
   .chat-input, .chat-composer, .input-container {
