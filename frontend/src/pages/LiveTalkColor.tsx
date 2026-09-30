@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Check } from 'lucide-react';
 import { motion } from 'motion/react';
 import {
@@ -9,6 +9,8 @@ import {
 } from '../lib/liveTalkColors';
 
 export default function LiveTalkColor() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [selectedColor, setSelectedColor] = useState(() => getSavedLiveTalkColor().id);
 
   useEffect(() => {
@@ -35,23 +37,30 @@ export default function LiveTalkColor() {
 
   return (
     <div className="min-h-[100dvh] w-full bg-white dark:bg-zinc-950">
-      <main className="mx-auto flex min-h-[100dvh] w-full max-w-5xl flex-col px-5 py-6 sm:px-10 sm:py-10">
+      <main className="flex min-h-[100dvh] w-full flex-col px-4 py-5 sm:px-8 sm:py-8">
         <button
           type="button"
-          onClick={() => navigate('/settings')}
-          className="mb-8 flex w-fit items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-900"
+          onClick={() => {
+            const from = (location.state as { from?: string } | null)?.from;
+            if (from) {
+              navigate(from);
+              return;
+            }
+            navigate('/settings', { replace: true });
+          }}
+          className="flex w-fit items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-900"
         >
           <ArrowLeft className="h-4 w-4" />
-          Live Talk Color
+          Back
         </button>
 
-        <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center pb-12 text-center">
+        <div className="flex w-full flex-1 flex-col items-center justify-center pb-8 text-center">
           <p className="text-sm font-medium text-zinc-400 dark:text-zinc-500">Live Talk appearance</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-950 dark:text-white sm:text-4xl">
             Choose your Live Talk color
           </h1>
-          <p className="mt-3 max-w-xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
-            This changes the color and glow of the Live Talk model only. Your microphone button stays unchanged.
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500 dark:text-zinc-400 sm:text-base">
+            Choose the color of the Live Talk model. This setting changes the model visual and glow only — the microphone button is not affected.
           </p>
 
           <motion.div
@@ -59,7 +68,7 @@ export default function LiveTalkColor() {
             initial={{ scale: 0.96, opacity: 0.85 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ duration: 0.25 }}
-            className="mt-12 h-40 w-40 rounded-full sm:h-48 sm:w-48"
+            className="mt-10 h-44 w-44 rounded-full sm:mt-12 sm:h-56 sm:w-56"
             style={{
               background: selected.background,
               boxShadow: `0 24px 90px ${selected.glow}`,
@@ -71,7 +80,7 @@ export default function LiveTalkColor() {
             {selected.name}
           </p>
 
-          <div className="mt-7 grid grid-cols-4 gap-4 sm:grid-cols-8">
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-4 sm:mt-10 sm:gap-5">
             {LIVE_TALK_COLORS.map(color => {
               const isSelected = color.id === selected.id;
               return (
