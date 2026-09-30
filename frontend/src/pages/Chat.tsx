@@ -2164,7 +2164,15 @@ const cleanMessageContent = (content: unknown): string => {
       <div className="flex h-screen items-center justify-center bg-white font-sans text-zinc-400 transition-colors duration-300 dark:bg-zinc-950">
         <div className="flex flex-col items-center gap-4" role="status" aria-live="polite">
           <StormLogo className="h-12 w-12 text-black dark:text-white" />
-          <span className="tracking-widest text-[10px] font-normal italic uppercase">Loading...</span>
+          <span
+            className="tracking-widest text-[10px] uppercase"
+            style={{
+              fontStyle: 'italic',
+              fontWeight: 400,
+            }}
+          >
+            Loading...
+          </span>
         </div>
       </div>
     );
@@ -2828,7 +2836,7 @@ const cleanMessageContent = (content: unknown): string => {
                 )}
 
                 {/* Bottom action row: plus → model → mic → send/live talk */}
-                <div className="twinkle-composer-actions flex shrink-0 items-center gap-1.5 px-1 pb-1 pt-1 sm:gap-2 sm:px-1.5 sm:pb-1.5">
+                <div className="twinkle-composer-actions flex shrink-0 items-center gap-0 px-1 pb-1 pt-1 sm:px-1.5 sm:pb-1.5">
                   {/* + attachment button */}
                   <motion.button
                     type="button"
@@ -2850,7 +2858,7 @@ const cleanMessageContent = (content: unknown): string => {
                   <div className="min-w-0 flex-1" />
 
                   {/* Model selector */}
-                  <div className="twinkle-composer-model relative shrink-0">
+                  <div className="twinkle-composer-model relative mr-2 shrink-0 sm:mr-3">
                     <motion.button
                       type="button"
                       onClick={() => setModelPickerOpen(prev => !prev)}
@@ -2930,7 +2938,7 @@ const cleanMessageContent = (content: unknown): string => {
                       title="Voice input"
                       whileHover={{ scale: 1.06 }}
                       whileTap={{ scale: 0.9 }}
-                      className="twinkle-composer-mic flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-9"
+                      className="twinkle-composer-mic ml-1 mr-2 flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:ml-2 sm:mr-3 sm:h-11 sm:w-9"
                     >
                       <Mic className="h-[20px] w-[20px]" strokeWidth={2} />
                     </motion.button>
