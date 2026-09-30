@@ -4,6 +4,7 @@ import { Session, User } from '../types';
 import {
   LogOut, Trash2, X, Search, SquarePen,
   MoreHorizontal, Pin, PinOff, Edit3,
+  MessageCircle, Sun, Moon, Sparkles,
   Settings2, UserCircle2, ChevronRight, PanelLeft,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -450,7 +451,6 @@ function SessionList({
             >
               <X className="w-3.5 h-3.5" />
             </button>
-          ) : (
           )}
         </div>
       </div>
