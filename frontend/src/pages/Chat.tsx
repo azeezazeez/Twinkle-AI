@@ -597,16 +597,67 @@ const getNextEmptyChatPrompt = (current: string): string => {
 
 const EMPTY_CHAT_GREETINGS = [
   'Good to see you, {name}',
-  'Welcome back, {name}',
-  'Nice to see you, {name}',
-  'Great to have you here, {name}',
-  'Hello, {name}',
+  'Welcome back',
+  'Nice to see you',
+  'Great to have you here',
+  'Hello there',
   'Hey, {name}. Ready to dive in?',
+  'Good to have you here',
+  'What would you like to explore?',
+  'What can we work on today?',
+  'Ready when you are',
+  'Let’s make something great today',
+  'What’s on your mind?',
+  'What shall we work on?',
+  'Where should we start?',
+  'Let’s get started',
+  'What can I help you with?',
+  'Have something in mind?',
+  'What are we building today?',
+  'What would you like to accomplish?',
+  'Let’s figure it out together',
 ];
 
+const TIME_BASED_CHAT_GREETINGS = {
+  morning: [
+    'Good morning, {name}',
+    'Good morning',
+    'A fresh morning, a fresh start',
+    'Good morning. What shall we work on?',
+    'Hope your morning is going well',
+    'Ready to make the most of your morning?',
+  ],
+  afternoon: [
+    'Good afternoon, {name}',
+    'Good afternoon',
+    'Good afternoon. What can we work on?',
+    'Hope your afternoon is going well',
+    'Ready for a productive afternoon?',
+    'What would you like to explore this afternoon?',
+  ],
+  evening: [
+    'Good evening, {name}',
+    'Good evening',
+    'Good evening. What shall we work on?',
+    'Hope your evening is going well',
+    'Ready to get something done this evening?',
+    'What would you like to explore this evening?',
+  ],
+};
+
+const getTimeOfDay = (): 'morning' | 'afternoon' | 'evening' => {
+  const hour = new Date().getHours();
+
+  if (hour < 12) return 'morning';
+  if (hour < 18) return 'afternoon';
+  return 'evening';
+};
+
 const getRandomChatGreeting = (): string => {
+  const timeGreetings = TIME_BASED_CHAT_GREETINGS[getTimeOfDay()];
   const allGreetings = [
     ...EMPTY_CHAT_GREETINGS,
+    ...timeGreetings,
     ...EMPTY_CHAT_PROMPTS,
   ];
 
@@ -2281,7 +2332,7 @@ const cleanMessageContent = (content: unknown): string => {
                   <StormLogo className="twinkle-chat-logo w-12 h-12 md:w-14 md:h-14 text-zinc-800 dark:text-zinc-100" />
                 </motion.div>
                 <h2
-                  className="whitespace-nowrap text-[clamp(1.25rem,4vw,2.25rem)] font-normal tracking-tight text-zinc-900 dark:text-zinc-100"
+                  className="whitespace-nowrap text-[clamp(1.25rem,4vw,2.25rem)] font-light tracking-tight text-zinc-900 dark:text-zinc-100"
                 >
                   {chatGreeting.replace(
                     '{name}',
