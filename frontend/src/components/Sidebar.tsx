@@ -4,7 +4,6 @@ import { Session, User } from '../types';
 import {
   LogOut, Trash2, X, Search, SquarePen,
   MoreHorizontal, Pin, PinOff, Edit3,
-  MessageCircle, Sun, Moon, Sparkles, Mic,
   Settings2, UserCircle2, ChevronRight, PanelLeft,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -452,24 +451,6 @@ function SessionList({
               <X className="w-3.5 h-3.5" />
             </button>
           ) : (
-            <button
-              type="button"
-              onClick={() => {
-                const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-                if (!SpeechRecognition) return;
-                const recognition = new SpeechRecognition();
-                recognition.lang = 'en-US';
-                recognition.interimResults = false;
-                recognition.maxAlternatives = 1;
-                recognition.onresult = (event: any) => handleSearchChange(event.results?.[0]?.[0]?.transcript || '');
-                recognition.start();
-              }}
-              className="absolute inset-y-0 right-2 flex w-7 items-center justify-center rounded-lg text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-              aria-label="Search by voice"
-              title="Search by voice"
-            >
-              <Mic className="w-3.5 h-3.5" />
-            </button>
           )}
         </div>
       </div>
