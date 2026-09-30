@@ -2164,7 +2164,7 @@ const cleanMessageContent = (content: unknown): string => {
       <div className="flex h-screen items-center justify-center bg-white font-sans text-zinc-400 transition-colors duration-300 dark:bg-zinc-950">
         <div className="flex flex-col items-center gap-4" role="status" aria-live="polite">
           <StormLogo className="h-12 w-12 text-black dark:text-white" />
-          <span className="tracking-widest text-[10px] font-medium italic uppercase">Loading...</span>
+          <span className="tracking-widest text-[10px] font-normal italic uppercase">Loading...</span>
         </div>
       </div>
     );
@@ -2828,7 +2828,7 @@ const cleanMessageContent = (content: unknown): string => {
                 )}
 
                 {/* Bottom action row: plus → model → mic → send/live talk */}
-                <div className="twinkle-composer-actions flex shrink-0 items-center gap-0 px-1 pb-1 pt-1 sm:gap-1 sm:px-1.5 sm:pb-1.5">
+                <div className="twinkle-composer-actions flex shrink-0 items-center gap-1.5 px-1 pb-1 pt-1 sm:gap-2 sm:px-1.5 sm:pb-1.5">
                   {/* + attachment button */}
                   <motion.button
                     type="button"
