@@ -911,7 +911,7 @@ export default function Settings({
 
                 <Row
                   title="Live Talk Model Color"
-                  desc="Choose the color of the Live Talk model. This does not change the microphone button."
+                  desc="Choose the color of the Live Talk model."
                 >
                   <button
                     type="button"
