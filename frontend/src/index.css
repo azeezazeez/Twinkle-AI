@@ -147,6 +147,29 @@
 }
 
 /* =========================================================
+   HORIZONTAL CHAT COMPOSER
+   ========================================================= */
+
+.twinkle-composer-row {
+  flex-wrap: nowrap !important;
+}
+
+.twinkle-composer-actions {
+  display: contents !important;
+}
+
+.twinkle-composer-prompt {
+  order: 2;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.twinkle-composer-plus { order: 1; }
+.twinkle-composer-model { order: 3; }
+.twinkle-composer-mic { order: 4; }
+.twinkle-composer-submit { order: 5; }
+
+/* =========================================================
    CHAT LAYERS
    ========================================================= */
 
@@ -538,36 +561,42 @@
     padding-top: 64px !important;
   }
   .twinkle-composer-row {
-    flex-wrap: wrap !important;
+    flex-wrap: nowrap !important;
     align-items: center !important;
     gap: 0 !important;
-    padding: 8px 10px 9px !important;
+    padding: 4px 8px !important;
   }
+
+  .twinkle-composer-actions {
+    display: contents !important;
+  }
+
+  .twinkle-composer-prompt {
+    order: 2 !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    width: auto !important;
+    min-height: 52px !important;
+    padding: 4px 6px !important;
+  }
+
   .twinkle-composer-textarea {
-    order: 1;
-    flex: 0 0 100% !important;
+    order: initial !important;
+    flex: 1 1 auto !important;
     width: 100% !important;
+    min-width: 0 !important;
     min-height: 38px !important;
     max-height: 100px !important;
-    padding: 2px 10px 7px !important;
+    padding: 0 !important;
     font-size: 16px !important;
     line-height: 1.35 !important;
   }
-  .twinkle-composer-row > .relative.min-w-0.flex-1 {
-    order: 1;
-    flex: 0 0 100% !important;
-  }
-  .twinkle-composer-row > button:first-of-type {
-    order: 2;
-  }
-  .twinkle-composer-row > .model-selector-container,
-  .twinkle-composer-row > .relative.shrink-0 {
-    order: 3;
-  }
-  .twinkle-composer-row > button:last-of-type {
-    order: 4;
-    margin-left: auto;
-  }
+
+  .twinkle-composer-plus { order: 1 !important; }
+  .twinkle-composer-model { order: 3 !important; }
+  .twinkle-composer-mic { order: 4 !important; }
+  .twinkle-composer-submit { order: 5 !important; }
+
   .chat-input, .chat-composer, .input-container {
     padding-left: 22px !important;
     padding-right: 22px !important;
