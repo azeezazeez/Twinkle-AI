@@ -2164,7 +2164,7 @@ const cleanMessageContent = (content: unknown): string => {
       <div className="flex h-screen items-center justify-center bg-white font-sans text-zinc-400 transition-colors duration-300 dark:bg-zinc-950">
         <div className="flex flex-col items-center gap-4" role="status" aria-live="polite">
           <StormLogo className="h-12 w-12 text-black dark:text-white" />
-          <span className="tracking-widest text-[10px] font-black uppercase">Loading...</span>
+          <span className="tracking-widest text-[10px] font-medium italic uppercase">Loading...</span>
         </div>
       </div>
     );
