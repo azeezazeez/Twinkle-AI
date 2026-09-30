@@ -355,7 +355,7 @@ export default function Login({
             <GoogleIcon />
 
             {googleLoading
-              ? 'Opening...'
+              ? 'Processing...'
               : 'Continue with Google'}
           </button>
 
