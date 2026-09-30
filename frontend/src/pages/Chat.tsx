@@ -2258,14 +2258,9 @@ const cleanMessageContent = (content: unknown): string => {
                 >
                   <StormLogo className="twinkle-chat-logo w-12 h-12 md:w-14 md:h-14 text-zinc-800 dark:text-zinc-100" />
                 </motion.div>
-                <div className="flex flex-col items-center text-center">
-                  <h2 className="text-2xl md:text-3xl lg:text-4xl font-medium tracking-tight text-zinc-900 dark:text-zinc-100">
-                    Good to see you, {user.username || user.name}
-                  </h2>
-                  <p className="mt-2 text-base md:text-lg font-medium text-zinc-500 dark:text-zinc-400">
-                    {emptyChatPrompt}
-                  </p>
-                </div>
+                <h2 className="text-2xl md:text-3xl lg:text-4xl font-medium tracking-tight text-zinc-900 dark:text-zinc-100">
+                  Good to see you, {(user.username || user.name || '').trim().split(/\s|_/)[0]}
+                </h2>
               </div>
             ) : (
               <div className="space-y-5 md:space-y-7 pb-6 pt-2 font-medium">
