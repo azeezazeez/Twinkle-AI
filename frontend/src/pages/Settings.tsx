@@ -17,6 +17,7 @@ import {
   HardDrive,
   Mic,
   Moon,
+  Palette,
   RefreshCw,
   SlidersHorizontal,
   UserRound,
@@ -998,6 +999,16 @@ export default function Settings({
                         className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 text-xs font-semibold transition hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
                       >
                         Change voice <ChevronRight className="h-3.5 w-3.5" />
+                      </button>
+                    </Row>
+                    <Row title="Color" desc="Choose the color of the Live Talk model. The microphone button is not affected.">
+                      <button
+                        type="button"
+                        onClick={() => navigate('/live-talk-color')}
+                        className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 text-xs font-semibold transition hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+                      >
+                        <Palette className="h-3.5 w-3.5" />
+                        Change color <ChevronRight className="h-3.5 w-3.5" />
                       </button>
                     </Row>
                   </div>
