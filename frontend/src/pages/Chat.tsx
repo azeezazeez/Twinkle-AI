@@ -664,7 +664,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [liveTalkColor, setLiveTalkColor] = useState(() => getSavedLiveTalkColor());
   const [justFinished, setJustFinished] = useState(false);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [copiedId, setCopiedId] = useState<number | string | null>(null);
@@ -677,10 +676,25 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [desktopSidebarExpanded, setDesktopSidebarExpanded] = useState(false);
   const [liveTalkOpen, setLiveTalkOpen] = useState(false);
+  const [liveTalkColor, setLiveTalkColor] = useState(() => getSavedLiveTalkColor());
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
   const [voiceInputActive, setVoiceInputActive] = useState(false);
 
   const [typedSessionTitle, setTypedSessionTitle] = useState('');
+
+  useEffect(() => {
+    const handleLiveTalkColorChange = () => {
+      setLiveTalkColor(getSavedLiveTalkColor());
+    };
+
+    window.addEventListener('twinkle-live-talk-color-change', handleLiveTalkColorChange);
+    window.addEventListener('storage', handleLiveTalkColorChange);
+
+    return () => {
+      window.removeEventListener('twinkle-live-talk-color-change', handleLiveTalkColorChange);
+      window.removeEventListener('storage', handleLiveTalkColorChange);
+    };
+  }, []);
 
   useEffect(() => {
     if (!typingSessionTitle) {
@@ -1142,18 +1156,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       filePreviewsRef.current.forEach(fp => {
         if (fp.preview) URL.revokeObjectURL(fp.preview);
       });
-    };
-  }, []);
-
-  // Keep the composer Live Talk button synchronized with the saved Live Talk model color.
-  useEffect(() => {
-    const syncLiveTalkColor = () => setLiveTalkColor(getSavedLiveTalkColor());
-    syncLiveTalkColor();
-    window.addEventListener('twinkle-live-talk-color-change', syncLiveTalkColor);
-    window.addEventListener('storage', syncLiveTalkColor);
-    return () => {
-      window.removeEventListener('twinkle-live-talk-color-change', syncLiveTalkColor);
-      window.removeEventListener('storage', syncLiveTalkColor);
     };
   }, []);
 
@@ -2159,8 +2161,11 @@ const cleanMessageContent = (content: unknown): string => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen font-sans text-zinc-400 bg-white dark:bg-zinc-950 transition-colors duration-300">
-        <span className="tracking-widest text-[10px] font-black uppercase">Loading...</span>
+      <div className="flex h-screen items-center justify-center bg-white font-sans text-zinc-400 transition-colors duration-300 dark:bg-zinc-950">
+        <div className="flex flex-col items-center gap-4" role="status" aria-live="polite">
+          <StormLogo className="h-12 w-12 text-black dark:text-white" />
+          <span className="tracking-widest text-[10px] font-black uppercase">Loading...</span>
+        </div>
       </div>
     );
   }
@@ -2251,6 +2256,7 @@ const cleanMessageContent = (content: unknown): string => {
               <div className="space-y-5 md:space-y-7 pb-6 pt-2">
                 {messages.map((msg, index) => {
                   const isEditing = editingMessage?.id === msg.id;
+                  const shouldSpin = isTyping && msg.role === 'assistant' && index === messages.length - 1;
                   const attachedImages = messageAttachments[msg.id] || [];
                   const rawMessageContent = cleanMessageContent(msg.content);
                   const displayContent =
@@ -2275,7 +2281,7 @@ const cleanMessageContent = (content: unknown): string => {
                       >
                         {msg.role === 'assistant' && (
                           <div className="shrink-0 w-7 h-7 md:w-8 md:h-8 flex items-center justify-center mt-1">
-                            <StormLogo className="w-6 h-6 text-black dark:text-white" />
+                            <StormLogo className={`w-6 h-6 text-black dark:text-white ${shouldSpin ? 'animate-spin' : ''}`} />
                           </div>
                         )}
 
