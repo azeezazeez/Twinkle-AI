@@ -199,19 +199,6 @@
   z-index: 30 !important;
 }
 
-.group\/search svg {
-  transform-origin: center;
-  transform-style: preserve-3d;
-  backface-visibility: visible;
-  perspective: 700px;
-  transition: transform 420ms cubic-bezier(.22,.61,.36,1);
-}
-
-.group\/search:hover svg,
-.group\/search:focus-visible svg {
-  transform: perspective(700px) rotateY(180deg);
-}
-
 /* =========================================================
    CHAT LAYERS
    ========================================================= */
@@ -809,29 +796,21 @@
    TWINKLE INTERACTION / RESPONSE POLISH
    ========================================================= */
 
-/* Search: a visible left-to-right 3-D perspective flip. The button stays fixed;
-   only the magnifying glass changes viewpoint. */
-.group\/search {
-  perspective: 700px;
-  transform-style: preserve-3d;
+/* Search and New Chat controls remain visually fixed on hover. */
+.group\/search,
+.group\/newchat {
+  transform: none !important;
+  animation: none !important;
 }
 
-.twinkle-search-icon {
-  display: block;
-  transform-origin: 50% 50%;
-  transform: perspective(700px) rotateY(0deg) rotateZ(0deg) scale(1);
-  transform-style: preserve-3d;
-  backface-visibility: visible;
-  will-change: transform;
-  transition: transform 480ms cubic-bezier(.22,.75,.2,1);
+.group\/search svg,
+.twinkle-search-icon,
+.twinkle-newchat-icon {
+  transform: none !important;
+  transition: none !important;
+  animation: none !important;
 }
 
-.group\/search:hover .twinkle-search-icon,
-.group\/search:focus-visible .twinkle-search-icon {
-  transform: perspective(700px) rotateY(180deg) rotateZ(10deg) scale(1.05);
-}
-
-/* New-chat square is a fixed stage. Only the pencil floats and rolls inside it. */
 .twinkle-newchat-box {
   position: relative;
   width: 32px;
@@ -841,34 +820,22 @@
   overflow: hidden;
 }
 
-.twinkle-newchat-icon {
-  display: block;
-  transform-origin: 50% 55%;
-  transform: translate3d(0, 0, 0) rotateZ(0deg) rotateY(0deg) scale(1);
-  transform-style: preserve-3d;
-  will-change: transform;
-  transition: transform 420ms cubic-bezier(.22,.75,.2,1);
+/* Quiet in-flow thinking label. It never floats above the composer. */
+.twinkle-thinking-text {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  padding-left: 0.25rem;
+  color: #71717a;
+  font-size: 0.86rem;
+  line-height: 1.25;
+  font-weight: 500;
 }
 
-.group\/newchat:hover .twinkle-newchat-icon,
-.group\/newchat:focus-visible .twinkle-newchat-icon {
-  transform: translate3d(0, -3px, 0) rotateZ(-15deg) rotateY(-20deg) scale(1.1);
+.dark .twinkle-thinking-text {
+  color: #a1a1aa;
 }
 
-/* One calm breathing dot while the model is preparing the response. */
-.twinkle-thinking-breathe {
-  animation: twinkle-thinking-breathe 1.35s ease-in-out infinite;
-  will-change: transform, opacity;
-}
-
-@keyframes twinkle-thinking-breathe {
-  0%, 100% { opacity: .42; transform: scale(.72); }
-  50% { opacity: 1; transform: scale(1.16); }
-}
-
-/* The active stream is painted in browser-frame batches, not character by
-   character. Plain text is used only while Markdown is incomplete, preventing
-   half-built tables/code blocks from jumping and breaking during the stream. */
 .twinkle-streaming-content {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -876,128 +843,24 @@
   min-height: 1.5em;
 }
 
-/* Conversation content disappears behind the top application/search region
-   instead of showing through it as the user scrolls upward. */
+/* Fade the scrollable conversation into the fixed composer without drawing a
+   visible horizontal white bar. The mask hides content as it approaches the
+   composer while leaving the composer itself untouched. */
 .twinkle-message-scroll-area {
-  isolation: isolate;
-}
-
-.twinkle-message-top-mask {
-  background: linear-gradient(
+  -webkit-mask-image: linear-gradient(
     to bottom,
-    rgba(255,255,255,1) 0%,
-    rgba(255,255,255,.99) 48%,
-    rgba(255,255,255,.72) 76%,
-    rgba(255,255,255,0) 100%
+    #000 0%,
+    #000 calc(100% - 150px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 calc(100% - 150px),
+    transparent 100%
   );
 }
 
-.dark .twinkle-message-top-mask {
-  background: linear-gradient(
-    to bottom,
-    rgba(10,10,10,1) 0%,
-    rgba(10,10,10,.99) 42%,
-    rgba(10,10,10,.80) 72%,
-    rgba(10,10,10,0) 100%
-  );
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .twinkle-search-icon,
-  .twinkle-newchat-icon {
-    transition: none !important;
-  }
-}
-
-/* Twinkle floating thinking indicator: the requested white circle with
-   three small neutral-gray breathing dots. */
-.twinkle-floating-thinking-row {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  padding: 10px 0 14px;
-  pointer-events: none;
-}
-
-.twinkle-floating-thinking,
-.twinkle-floating-thinking-fixed {
-  width: 52px;
-  height: 52px;
-  border: 1px solid #e4e4e7;
-  border-radius: 9999px;
-  background: #ffffff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.045);
-}
-
-.twinkle-floating-thinking-fixed {
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 18px);
-  transform: translateX(-50%);
-  z-index: 25;
-  pointer-events: none;
-}
-
-.twinkle-floating-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 9999px;
-  background: #737373;
-  animation: twinkle-floating-dot-breathe 1.15s ease-in-out infinite;
-}
-
-.twinkle-floating-dot:nth-child(2) { animation-delay: 140ms; }
-.twinkle-floating-dot:nth-child(3) { animation-delay: 280ms; }
-
-@keyframes twinkle-floating-dot-breathe {
-  0%, 100% { opacity: .45; transform: translateY(0) scale(.88); }
-  50% { opacity: 1; transform: translateY(-1px) scale(1.08); }
-}
-
-.dark .twinkle-floating-thinking,
-.dark .twinkle-floating-thinking-fixed {
-  border-color: #d4d4d8;
-  background: #ffffff;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .twinkle-floating-dot {
-    animation: none;
-    opacity: 0.75;
-  }
-}
-
-/* Hide conversation content as it reaches the fixed composer. The fade is
-   deliberately opaque near the input so text never appears underneath it. */
 .chat-messages-bottom-mask {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 180px;
-  z-index: 20;
-  pointer-events: none;
-  background: linear-gradient(
-    to bottom,
-    rgba(255,255,255,0) 0%,
-    rgba(255,255,255,.35) 28%,
-    rgba(255,255,255,.82) 58%,
-    rgba(255,255,255,1) 86%,
-    rgba(255,255,255,1) 100%
-  );
-}
-
-.dark .chat-messages-bottom-mask {
-  background: linear-gradient(
-    to bottom,
-    rgba(9,9,11,0) 0%,
-    rgba(9,9,11,.35) 28%,
-    rgba(9,9,11,.82) 58%,
-    rgba(9,9,11,1) 86%,
-    rgba(9,9,11,1) 100%
-  );
+  display: none !important;
 }
