@@ -221,7 +221,7 @@ function SessionList({
           className="group/newchat w-full h-12 px-2.5 bg-transparent text-zinc-900 dark:text-zinc-100 rounded-xl flex items-center gap-3 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors active:bg-zinc-100 dark:active:bg-zinc-800"
         >
           <span className="shrink-0 flex h-8 w-8 items-center justify-center rounded-lg transition-transform duration-300 ease-out group-hover/newchat:-translate-y-0.5 group-hover/newchat:rotate-[-12deg] group-hover/newchat:scale-[1.04]" aria-hidden="true">
-            <SquarePen className="w-[22px] h-[22px] text-zinc-900 dark:text-zinc-100" strokeWidth={1.7} />
+            <SquarePen className="twinkle-newchat-icon w-[22px] h-[22px] text-zinc-900 dark:text-zinc-100" strokeWidth={1.7} />
           </span>
           <span className="text-[17px] font-normal tracking-tight">New chat</span>
         </button>
@@ -989,7 +989,7 @@ export default function Sidebar({
                 whileTap={{ scale: 0.92 }}
                 className="group/search flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
               >
-                <Search className="h-[19px] w-[19px] transition-transform duration-500 ease-in-out group-hover/search:[transform:rotateY(180deg)] [transform-style:preserve-3d]" strokeWidth={1.8} />
+                <Search className="twinkle-search-icon h-[19px] w-[19px]" strokeWidth={1.8} />
               </motion.button>
 
               <div className="relative group/close">
@@ -1070,7 +1070,7 @@ export default function Sidebar({
                 aria-label="New Chat"
                 className="group/newchat w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-all"
               >
-                <SquarePen className="w-[19px] h-[19px] transition-transform duration-300 ease-out group-hover/newchat:-translate-y-0.5 group-hover/newchat:rotate-[-12deg] group-hover/newchat:scale-[1.05]" strokeWidth={1.7} />
+                <SquarePen className="twinkle-newchat-icon w-[19px] h-[19px]" strokeWidth={1.7} />
               </button>
             </IconTooltip>
 
@@ -1082,7 +1082,7 @@ export default function Sidebar({
                 aria-label="Search"
                 className="group/search w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-all"
               >
-                <Search className="w-[19px] h-[19px] transition-transform duration-500 ease-in-out group-hover/search:[transform:rotateY(180deg)] [transform-style:preserve-3d]" strokeWidth={1.7} />
+                <Search className="twinkle-search-icon w-[19px] h-[19px]" strokeWidth={1.7} />
               </button>
             </IconTooltip>
 
@@ -1139,7 +1139,7 @@ export default function Sidebar({
                     whileTap={{ scale: 0.92 }}
                     className="group/search flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
                   >
-                    <Search className="h-[19px] w-[19px] transition-transform duration-500 ease-in-out group-hover/search:[transform:rotateY(180deg)] [transform-style:preserve-3d]" strokeWidth={1.8} />
+                    <Search className="twinkle-search-icon h-[19px] w-[19px]" strokeWidth={1.8} />
                   </motion.button>
 
                   <div className="relative group/close">
