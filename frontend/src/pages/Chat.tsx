@@ -204,6 +204,21 @@ const getInitialTheme = (): boolean => {
   return window.matchMedia('(prefers-color-scheme: dark)').matches;
 };
 
+const dedupeMessages = (items: Message[]): Message[] => {
+  const seen = new Set<string>();
+  const result: Message[] = [];
+
+  for (const message of items) {
+    const content = cleanMessageContent(message.content);
+    const key = `${message.role}\u0000${content}`;
+    if (message.role === 'assistant' && content.trim() && seen.has(key)) continue;
+    if (message.role === 'assistant' && content.trim()) seen.add(key);
+    result.push(message);
+  }
+
+  return result;
+};
+
 /**
  * Deterministic, rule-based chat title generator.
  * No AI model is used for naming conversations.
@@ -731,7 +746,7 @@ const getSpeechLanguage = (): string => {
 export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [typingSessionTitle, setTypingSessionTitle] = useState<{ id: number; title: string } | null>(null);
-  const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
+  const [currentSessionId, setCurrentSessionId] = useState<number | null>(() => readPersistedSessionId());
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -1243,6 +1258,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const isSendingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamingAssistantIdRef = useRef<string | null>(null);
+  const streamReceivedTextRef = useRef('');
 
   // The backend already provides real SSE deltas. Do not simulate a
   // typewriter effect. We only coalesce deltas that arrive during the same
@@ -1278,6 +1294,13 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           : message
       );
     });
+
+    if (autoFollowScrollRef.current) {
+      requestAnimationFrame(() => {
+        const container = messagesContainerRef.current;
+        if (container) container.scrollTop = container.scrollHeight;
+      });
+    }
   }, []);
 
   const startStreamRenderer = useCallback(() => {
@@ -1396,7 +1419,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         timestamp: msg?.timestamp || new Date().toISOString(),
       }));
 
-      setMessages(normalizedMessages);
+      setMessages(dedupeMessages(normalizedMessages));
 
       const persistedAttachments: Record<string | number, string[]> = {};
       rawMessages.forEach((msg: any, index: number) => {
@@ -1416,6 +1439,17 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   }, [onLogout]);
 
   useEffect(() => { loadSessions(); }, [loadSessions]);
+
+  // Restore the last conversation after a browser refresh. If it was deleted
+  // elsewhere, clear the stale ID instead of silently creating a new chat.
+  useEffect(() => {
+    if (loading || currentSessionId === null || sessions.length === 0) return;
+    if (!sessions.some(session => session.id === currentSessionId)) {
+      setCurrentSessionId(null);
+      persistSessionId(null);
+      setMessages([]);
+    }
+  }, [loading, currentSessionId, sessions]);
 
   useEffect(() => {
     if (loading) return;
@@ -1446,56 +1480,34 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     }
   }, [currentSessionId, loadMessages]);
 
-  // Keep scrolling inside the message panel only so the floating composer
-  // remains stable while the conversation scrolls.
-  //
-  // On mobile, the first message of a newly started chat is positioned near
-  // the top of the conversation so the sent message is immediately visible.
-  // Later messages keep the existing bottom-scrolling behavior.
+  // Preserve the user's scroll position while messages stream. Only the
+  // explicit first-message placement for a brand-new chat may scroll the panel.
   useEffect(() => {
     const container = messagesContainerRef.current;
     if (!container) return;
 
+    if (!firstMessageScrollPendingRef.current) return;
+
     const frame = requestAnimationFrame(() => {
-      if (
-        firstMessageScrollPendingRef.current &&
-        window.matchMedia('(max-width: 767px)').matches
-      ) {
-        const firstMessage = container.querySelector<HTMLElement>(
-          '[data-twinkle-message]'
-        );
+      const firstMessage = container.querySelector<HTMLElement>('[data-twinkle-message]');
+      if (!firstMessage) return;
 
-        if (firstMessage) {
-          // Keep the first sent message clearly below the fixed mobile header.
-          // The message list gets a matching top inset, so the message can never
-          // be positioned underneath the navbar when a new chat starts.
-          const mobileHeaderOffset = 92;
-          const targetTop = Math.max(0, firstMessage.offsetTop - mobileHeaderOffset);
-          setShowScrollBottom(false);
-          setIsAtBottom(false);
-          container.scrollTo({
-            top: targetTop,
-            behavior: 'smooth',
-          });
-          firstMessageScrollPendingRef.current = false;
-          return;
-        }
+      if (window.matchMedia('(max-width: 767px)').matches) {
+        const mobileHeaderOffset = 92;
+        const targetTop = Math.max(0, firstMessage.offsetTop - mobileHeaderOffset);
+        container.scrollTo({ top: targetTop, behavior: 'auto' });
+      } else {
+        container.scrollTo({ top: container.scrollHeight, behavior: 'auto' });
       }
 
-      // Only follow the response if the user was already at the bottom.
-      // Reading older messages must never be interrupted by a new SSE delta.
-      if (autoFollowScrollRef.current) {
-        setShowScrollBottom(false);
-        setIsAtBottom(true);
-        container.scrollTo({
-          top: container.scrollHeight,
-          behavior: 'auto',
-        });
-      }
+      firstMessageScrollPendingRef.current = false;
+      setShowScrollBottom(false);
+      setIsAtBottom(true);
+      autoFollowScrollRef.current = true;
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [messages, isTyping]);
+  }, [messages.length]);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
@@ -1729,6 +1741,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     setIsTyping(true);
     setResponsePhase('connecting');
     streamingAssistantIdRef.current = null;
+    streamReceivedTextRef.current = '';
     setJustFinished(false);
 
     const controller = new AbortController();
@@ -1815,7 +1828,20 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                 ];
               });
 
-              streamRenderQueueRef.current += chunk;
+              // Accept both true SSE deltas and providers that occasionally
+              // send the cumulative response. This prevents duplicated text
+              // without adding any typewriter effect.
+              const previousStreamText = streamReceivedTextRef.current;
+              let delta = chunk;
+              if (previousStreamText && chunk.startsWith(previousStreamText)) {
+                delta = chunk.slice(previousStreamText.length);
+              } else if (previousStreamText && previousStreamText.endsWith(chunk)) {
+                delta = '';
+              }
+
+              if (!delta) return;
+              streamReceivedTextRef.current = previousStreamText + delta;
+              streamRenderQueueRef.current += delta;
               startStreamRenderer();
             },
           }
@@ -1882,39 +1908,37 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           : typeof response?.error === 'string'
             ? response.error
             : 'I could not generate a response for this request.';
+      const cleanedAiContent = cleanMessageContent(aiContent);
 
-      onAssistantResponse?.(aiContent);
+      onAssistantResponse?.(cleanedAiContent);
 
       const aiMsg: Message = {
         id: response?.messageId || 'ai-' + Date.now(),
         sessionId: activeSessionId,
         role: 'assistant',
-        content: cleanMessageContent(aiContent),
+        content: cleanedAiContent,
         timestamp: new Date().toISOString(),
       };
 
       setMessages(prev => {
         const streamId = streamingAssistantIdRef.current;
+        let next = prev;
 
-        // A streamed response is already present in state because onDelta
-        // inserts/updates it progressively. Replace that same message with
-        // the server's final content instead of appending a second assistant
-        // message when the stream endpoint also returns the completed text.
         if (streamId) {
           const streamIndex = prev.findIndex(m => m.id === streamId);
           if (streamIndex >= 0) {
-            return prev.map((message, index) =>
-              index === streamIndex
-                ? { ...aiMsg, id: message.id }
-                : message
+            next = prev.map((message, index) =>
+              index === streamIndex ? { ...aiMsg, id: message.id } : message
             );
           }
+        } else if (!prev.some(m => m.id === aiMsg.id)) {
+          next = [...prev, aiMsg];
         }
 
-        if (prev.some(m => m.id === aiMsg.id)) return prev;
-        return [...prev, aiMsg];
+        return dedupeMessages(next);
       });
       streamingAssistantIdRef.current = null;
+      streamReceivedTextRef.current = '';
       setResponsePhase('idle');
 
       // Generate and persist a professional AI-generated chat title.
@@ -1952,6 +1976,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       setIsTyping(false);
       setResponsePhase('idle');
       streamingAssistantIdRef.current = null;
+      streamReceivedTextRef.current = '';
 
       if (err?.name === 'AbortError') {
         console.log('Chat aborted');
@@ -2007,22 +2032,20 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         errMsg = err.message;
       }
 
-      setMessages(prev => [
-        ...prev,
-        {
+      setMessages(prev => dedupeMessages([...prev, {
           id: 'error-' + Date.now(),
           sessionId: currentSessionId || 0,
           role: 'assistant',
           content: errMsg,
           timestamp: new Date().toISOString(),
-        },
-      ]);
+        }]));
     } finally {
       isSendingRef.current = false;
       abortControllerRef.current = null;
       setIsTyping(false);
       setResponsePhase('idle');
       streamingAssistantIdRef.current = null;
+      streamReceivedTextRef.current = '';
       setJustFinished(true);
       setTimeout(() => setJustFinished(false), 3000);
       setTimeout(() => inputRef.current?.focus(), 100);
@@ -2143,6 +2166,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     setIsTyping(false);
     setResponsePhase('idle');
     streamingAssistantIdRef.current = null;
+    streamReceivedTextRef.current = '';
     isSendingRef.current = false;
     abortControllerRef.current = null;
     window.speechSynthesis?.cancel();
@@ -2521,7 +2545,7 @@ const cleanMessageContent = (content: unknown): string => {
         </header>
         {/* Messages */}
         <div
-          className="relative min-h-0 min-w-0 flex-1 w-full max-w-full overflow-x-hidden overflow-y-auto overscroll-contain scroll-hide pb-32 pt-0 md:pb-36"
+          className="twinkle-message-scroll-area relative min-h-0 min-w-0 flex-1 w-full max-w-full overflow-x-hidden overflow-y-auto overscroll-contain scroll-hide pb-32 pt-0 md:pb-36"
           ref={messagesContainerRef}
           onScroll={handleScroll}
         >
@@ -2893,22 +2917,14 @@ const cleanMessageContent = (content: unknown): string => {
                   );
                 })}
 
-                {isTyping && (isAtBottom || responsePhase !== 'streaming') && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 4, scale: 0.96 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 4, scale: 0.96 }}
-                    transition={{ duration: 0.18, ease: 'easeOut' }}
-                    className="twinkle-floating-thinking-row"
+                {isTyping && responsePhase !== 'streaming' && (
+                  <div
+                    className="twinkle-thinking-text"
                     aria-live="polite"
                     aria-label="Twinkle is thinking"
                   >
-                    <div className="twinkle-floating-thinking" aria-hidden="true">
-                      <span className="twinkle-floating-dot" />
-                      <span className="twinkle-floating-dot" />
-                      <span className="twinkle-floating-dot" />
-                    </div>
-                  </motion.div>
+                    Thinking
+                  </div>
                 )}
 
                 <div ref={messagesEndRef} />
@@ -2929,29 +2945,12 @@ const cleanMessageContent = (content: unknown): string => {
           style={{ left: desktopSidebarExpanded ? `${desktopSidebarWidth}px` : undefined }}
         >
           <div className="mx-auto w-full max-w-[920px] min-w-0 relative">
-            <AnimatePresence>
-              {isTyping && !isAtBottom && (
-                <motion.div
-                  initial={{ opacity: 0, y: 6, scale: 0.94 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 6, scale: 0.94 }}
-                  transition={{ duration: 0.16, ease: 'easeOut' }}
-                  className="twinkle-floating-thinking-fixed"
-                  aria-label="Twinkle is responding"
-                >
-                  <span className="twinkle-floating-dot" />
-                  <span className="twinkle-floating-dot" />
-                  <span className="twinkle-floating-dot" />
-                </motion.div>
-              )}
-            </AnimatePresence>
-
             <div
               aria-live="polite"
               className="mb-2.5 flex h-[18px] items-center justify-center px-2"
             >
               <p
-                className={`text-center text-[10px] leading-relaxed font-medium text-zinc-500/70 transition-opacity duration-150 dark:text-zinc-400/70 sm:text-[11px] ${
+                className={`text-center text-[10px] leading-relaxed font-medium text-zinc-500/70 transition-none dark:text-zinc-400/70 sm:text-[11px] ${
                   isAtBottom ? 'opacity-100' : 'pointer-events-none opacity-0'
                 }`}
               >
@@ -3254,12 +3253,10 @@ const cleanMessageContent = (content: unknown): string => {
                         onClick={() => setLiveTalkOpen(true)}
                         aria-label="Open Live Talk"
                         data-tooltip="Live Talk"
-                        whileHover={{ scale: 1.06 }}
-                        whileTap={{ scale: 0.92 }}
                         className="twinkle-tooltip-trigger twinkle-composer-submit relative z-[30] flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white transition sm:h-11 sm:w-11"
                         style={{
-                          background: liveTalkColor.background,
-                          boxShadow: `0 8px 20px ${liveTalkColor.glow}`,
+                          background: liveTalkColor.swatch,
+                          boxShadow: 'none',
                         }}
                       >
                         <AudioLines className="h-[19px] w-[19px]" strokeWidth={2.1} />
@@ -3272,14 +3269,12 @@ const cleanMessageContent = (content: unknown): string => {
                         disabled={!input.trim() && (!Array.isArray(filePreviews) || filePreviews.length === 0) && !isTyping}
                         aria-label={isTyping ? 'Stop response' : 'Send message'}
                         data-tooltip={isTyping ? 'Stop response' : 'Send message'}
-                        whileHover={{ scale: isTyping || input.trim() || filePreviews.length ? 1.06 : 1, y: -1 }}
-                        whileTap={{ scale: 0.92 }}
                         className={`twinkle-tooltip-trigger twinkle-composer-submit relative z-[30] flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isTyping ? 'border-transparent text-white' : 'border-transparent text-white'}`}
                         style={{
                           // Match the exact Live Talk modal button background.
                           // Do not use the settings swatch/solid color here.
-                          background: liveTalkColor.background,
-                          boxShadow: `0 8px 22px ${liveTalkColor.glow}`,
+                          background: liveTalkColor.swatch,
+                          boxShadow: 'none',
                         }}
                       >
                         {isTyping ? (
