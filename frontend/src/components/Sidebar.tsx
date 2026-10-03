@@ -828,12 +828,12 @@ export default function Sidebar({
   onProfile,
   onSettings,
   onDesktopStateChange,
+  onDesktopWidthChange, // FIXED
   onClose = () => {},
   mobileOpen = false,
   onMobileClose = () => {},
 }: Props) {
-  // Start collapsed on every fresh load so the chat interface is shown
-  // immediately. The user can expand it with the sidebar icon.
+  
   const [desktopCollapsed, setDesktopCollapsed] = useState(true);
   const [desktopWidth, setDesktopWidth] = useState<number>(() => {
     try {
