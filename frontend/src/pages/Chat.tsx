@@ -1242,6 +1242,85 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const isSendingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamingAssistantIdRef = useRef<string | null>(null);
+
+  // The backend still streams real SSE deltas. These refs only smooth the
+  // browser's rendering of those deltas so large network chunks do not appear
+  // as abrupt blocks of text. Nothing is fabricated or reordered.
+  const streamRenderQueueRef = useRef('');
+  const streamRenderTimerRef = useRef<number | null>(null);
+  const streamDrainResolverRef = useRef<(() => void) | null>(null);
+
+  const flushStreamRenderQueue = useCallback(() => {
+    const streamId = streamingAssistantIdRef.current;
+    if (!streamId) return;
+
+    const queue = streamRenderQueueRef.current;
+    if (!queue) {
+      if (streamRenderTimerRef.current !== null) {
+        window.clearInterval(streamRenderTimerRef.current);
+        streamRenderTimerRef.current = null;
+      }
+      const resolve = streamDrainResolverRef.current;
+      streamDrainResolverRef.current = null;
+      resolve?.();
+      return;
+    }
+
+    // Small, consistent pieces make real SSE output visually continuous even
+    // when the provider sends a whole sentence in one network chunk.
+    const pieceSize = 8;
+    const piece = queue.slice(0, pieceSize);
+    streamRenderQueueRef.current = queue.slice(piece.length);
+
+    setResponsePhase('streaming');
+    setMessages(prev => {
+      const index = prev.findIndex(message => message.id === streamId);
+      if (index < 0) return prev;
+      return prev.map(message =>
+        message.id === streamId
+          ? { ...message, content: message.content + piece }
+          : message
+      );
+    });
+
+    requestAnimationFrame(() => {
+      const container = messagesContainerRef.current;
+      if (!container) return;
+      const distanceFromBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight;
+      if (distanceFromBottom < 180) {
+        container.scrollTo({ top: container.scrollHeight, behavior: 'auto' });
+      }
+    });
+  }, []);
+
+  const startStreamRenderer = useCallback(() => {
+    if (streamRenderTimerRef.current !== null) return;
+    // ~267 characters/second. Fast enough to feel live, slow enough to avoid
+    // the rough block-by-block appearance caused by large SSE chunks.
+    streamRenderTimerRef.current = window.setInterval(flushStreamRenderQueue, 30);
+    flushStreamRenderQueue();
+  }, [flushStreamRenderQueue]);
+
+  const drainStreamRenderer = useCallback(() => {
+    if (!streamRenderQueueRef.current) return Promise.resolve();
+    return new Promise<void>(resolve => {
+      streamDrainResolverRef.current = resolve;
+      startStreamRenderer();
+    });
+  }, [startStreamRenderer]);
+
+  const cancelStreamRenderer = useCallback(() => {
+    streamRenderQueueRef.current = '';
+    if (streamRenderTimerRef.current !== null) {
+      window.clearInterval(streamRenderTimerRef.current);
+      streamRenderTimerRef.current = null;
+    }
+    const resolve = streamDrainResolverRef.current;
+    streamDrainResolverRef.current = null;
+    resolve?.();
+  }, []);
+
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Stores the specific session ID that should skip one message load
@@ -1256,6 +1335,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 180)}px`;
     }
   }, [input]);
+
+  useEffect(() => {
+    return () => cancelStreamRenderer();
+  }, [cancelStreamRenderer]);
 
   // Clean up object URLs
   const filePreviewsRef = useRef(filePreviews);
@@ -1722,40 +1805,29 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
               if (status === 'thinking') setResponsePhase('thinking');
             },
             onDelta: (chunk) => {
-              setResponsePhase('streaming');
+              if (!chunk) return;
+
               const streamId = streamingAssistantIdRef.current || `stream-ai-${Date.now()}`;
               streamingAssistantIdRef.current = streamId;
 
+              // Create the empty streamed assistant bubble immediately. The
+              // actual text is then rendered by the smooth SSE queue below.
               setMessages(prev => {
-                const existing = prev.find(message => message.id === streamId);
-                if (existing) {
-                  return prev.map(message =>
-                    message.id === streamId
-                      ? { ...message, content: message.content + chunk }
-                      : message
-                  );
-                }
-
+                if (prev.some(message => message.id === streamId)) return prev;
                 return [
                   ...prev,
                   {
                     id: streamId,
                     sessionId: currentSessionId || 0,
                     role: 'assistant',
-                    content: chunk,
+                    content: '',
                     timestamp: new Date().toISOString(),
                   },
                 ];
               });
 
-              requestAnimationFrame(() => {
-                const container = messagesContainerRef.current;
-                if (!container) return;
-                const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-                if (distanceFromBottom < 180) {
-                  container.scrollTo({ top: container.scrollHeight, behavior: 'auto' });
-                }
-              });
+              streamRenderQueueRef.current += chunk;
+              startStreamRenderer();
             },
           }
         );
@@ -1809,6 +1881,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         );
       }
 
+      // Let the real streamed text finish rendering before finalizing the
+      // message. This prevents the final response from jumping ahead of the
+      // visible stream.
+      await drainStreamRenderer();
       setIsTyping(false);
 
       const aiContent =
@@ -1830,12 +1906,22 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
       setMessages(prev => {
         const streamId = streamingAssistantIdRef.current;
+
+        // A streamed response is already present in state because onDelta
+        // inserts/updates it progressively. Replace that same message with
+        // the server's final content instead of appending a second assistant
+        // message when the stream endpoint also returns the completed text.
         if (streamId) {
-          const hasStreamMessage = prev.some(m => m.id === streamId);
-          if (hasStreamMessage) {
-            return prev.map(m => m.id === streamId ? aiMsg : m);
+          const streamIndex = prev.findIndex(m => m.id === streamId);
+          if (streamIndex >= 0) {
+            return prev.map((message, index) =>
+              index === streamIndex
+                ? { ...aiMsg, id: message.id }
+                : message
+            );
           }
         }
+
         if (prev.some(m => m.id === aiMsg.id)) return prev;
         return [...prev, aiMsg];
       });
@@ -1884,6 +1970,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       }
 
       console.error('Chat error:', err);
+      cancelStreamRenderer();
 
       const status = Number(err?.status);
 
@@ -1944,7 +2031,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     } finally {
       isSendingRef.current = false;
       abortControllerRef.current = null;
-      setRequestHasFiles(false);
       setIsTyping(false);
       setResponsePhase('idle');
       streamingAssistantIdRef.current = null;
@@ -2064,6 +2150,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
   const handleStopResponse = () => {
     abortControllerRef.current?.abort();
+    cancelStreamRenderer();
     setIsTyping(false);
     setResponsePhase('idle');
     streamingAssistantIdRef.current = null;
@@ -2809,6 +2896,35 @@ const cleanMessageContent = (content: unknown): string => {
                   );
                 })}
 
+                {isTyping && responsePhase !== 'streaming' && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 5 }}
+                    transition={{ duration: 0.16, ease: 'easeOut' }}
+                    className="flex w-full items-start gap-2.5 px-0 py-2 md:gap-3"
+                    aria-live="polite"
+                    aria-label="Twinkle is thinking"
+                  >
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center md:h-8 md:w-8">
+                      <StormLogo className="h-5 w-5 text-black dark:text-white" />
+                    </div>
+                    <div className="twinkle-thinking-dots flex h-7 items-center gap-1.5 px-0.5 md:h-8" aria-hidden="true">
+                      {[0, 1, 2].map(index => (
+                        <span
+                          key={index}
+                          className="twinkle-thinking-dot block h-[6px] w-[6px] rounded-full"
+                          style={{
+                            background: liveTalkColor.background,
+                            boxShadow: `0 0 9px ${liveTalkColor.glow}`,
+                            animationDelay: `${index * 140}ms`,
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+
                 <div ref={messagesEndRef} />
               </div>
             )}
@@ -2830,48 +2946,21 @@ const cleanMessageContent = (content: unknown): string => {
           style={{ left: desktopSidebarExpanded ? `${desktopSidebarWidth}px` : undefined }}
         >
           <div className="mx-auto w-full max-w-[920px] min-w-0 relative">
-            <AnimatePresence initial={false}>
-              {isAtBottom && (
-                <motion.p
-                  initial={{ opacity: 0, y: 5 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 5 }}
-                  transition={{ duration: 0.16, ease: 'easeOut' }}
-                  className="mb-2.5 px-2 text-center text-[10px] leading-relaxed font-medium text-zinc-500/70 dark:text-zinc-400/70 sm:text-[11px]"
-                >
-                  <strong className="font-semibold">Twinkle is AI and can make mistakes.</strong>{' '}
-                  Please double-check responses.
-                </motion.p>
-              )}
-            </AnimatePresence>
+            <div
+              aria-live="polite"
+              className="mb-2.5 flex h-[18px] items-center justify-center px-2"
+            >
+              <p
+                className={`text-center text-[10px] leading-relaxed font-medium text-zinc-500/70 transition-opacity duration-150 dark:text-zinc-400/70 sm:text-[11px] ${
+                  isAtBottom ? 'opacity-100' : 'pointer-events-none opacity-0'
+                }`}
+              >
+                <strong className="font-semibold">Twinkle is AI and can make mistakes.</strong>{' '}
+                Please double-check responses.
+              </p>
+            </div>
 
             <AnimatePresence>
-              {isTyping && responsePhase !== 'streaming' && (
-                <motion.div
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 4 }}
-                  transition={{ duration: 0.16, ease: 'easeOut' }}
-                  className="flex items-start gap-2.5 min-w-0 max-w-full px-1 py-2"
-                  aria-live="polite"
-                  aria-label="Twinkle is thinking"
-                >
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center">
-                    <StormLogo className="h-5 w-5 text-zinc-800 dark:text-zinc-100" />
-                  </div>
-                  <div className="flex h-7 items-center px-0.5">
-                    <span
-                      className="block h-[7px] w-[7px] rounded-full"
-                      style={{
-                        backgroundColor: liveTalkColor.swatch,
-                        boxShadow: `0 0 10px ${liveTalkColor.glow}`,
-                        animation: 'twinkle-thinking-dot 1.05s ease-in-out infinite',
-                      }}
-                    />
-                  </div>
-                </motion.div>
-              )}
-
               {showScrollBottom && messages.length > 0 && !isTyping && (
                   <motion.button
                     initial={{ opacity: 0, y: 10 }}
@@ -3169,7 +3258,7 @@ const cleanMessageContent = (content: unknown): string => {
                         whileTap={{ scale: 0.92 }}
                         className="twinkle-tooltip-trigger twinkle-composer-submit relative z-[30] flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white transition sm:h-11 sm:w-11"
                         style={{
-                          background: liveTalkColor.swatch,
+                          background: liveTalkColor.background,
                           boxShadow: `0 8px 20px ${liveTalkColor.glow}`,
                         }}
                       >
@@ -3187,6 +3276,8 @@ const cleanMessageContent = (content: unknown): string => {
                         whileTap={{ scale: 0.92 }}
                         className={`twinkle-tooltip-trigger twinkle-composer-submit relative z-[30] flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isTyping ? 'border-transparent text-white' : 'border-transparent text-white'}`}
                         style={{
+                          // Match the exact Live Talk modal button background.
+                          // Do not use the settings swatch/solid color here.
                           background: liveTalkColor.background,
                           boxShadow: `0 8px 22px ${liveTalkColor.glow}`,
                         }}
