@@ -104,7 +104,6 @@ function SessionList({
   onSettings,
 }: SessionListProps) {
   const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
-  const [menuPlacement, setMenuPlacement] = useState<'down' | 'up'>('down');
   const menuRef = useRef<HTMLDivElement>(null);
 
   const [renamingId, setRenamingId] = useState<number | null>(null);
@@ -122,22 +121,6 @@ function SessionList({
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [menuOpenId]);
-
-  useEffect(() => {
-    if (menuOpenId === null) return;
-    const updatePlacement = () => {
-      const rect = menuRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const estimatedMenuHeight = 236;
-      setMenuPlacement(rect.bottom + estimatedMenuHeight > window.innerHeight - 12 ? 'up' : 'down');
-    };
-    const frame = requestAnimationFrame(updatePlacement);
-    window.addEventListener('resize', updatePlacement);
-    return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener('resize', updatePlacement);
-    };
   }, [menuOpenId]);
 
   useEffect(() => {
@@ -354,12 +337,7 @@ function SessionList({
                                   : 'text-zinc-400 hover:bg-zinc-200/70 dark:hover:bg-zinc-700/70 hover:text-zinc-700 dark:hover:text-zinc-200'
                               }`}
                             >
-                              <MoreHorizontal
-                                className={`w-[16px] h-[16px] transition-transform duration-500 ease-out [transform-style:preserve-3d] ${
-                                  isMenuOpen ? '[transform:rotateY(180deg)]' : ''
-                                }`}
-                                strokeWidth={1.8}
-                              />
+                              <MoreHorizontal className="w-[16px] h-[16px]" strokeWidth={1.8} />
                             </button>
                             <button
                               type="button"
@@ -390,27 +368,27 @@ function SessionList({
                             animate={{ opacity: 1, scale: 1, y: 0 }}
                             exit={{ opacity: 0, scale: 0.92, y: -4 }}
                             transition={{ duration: 0.12 }}
-                            className={`absolute right-1 z-[200] w-[232px] max-w-[calc(100vw-24px)] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-[18px] shadow-[0_16px_42px_rgba(0,0,0,0.14)] dark:shadow-[0_16px_42px_rgba(0,0,0,0.42)] p-1.5 overflow-hidden ${menuPlacement === 'up' ? 'bottom-full mb-2 origin-bottom-right' : 'top-full mt-2 origin-top-right'}`}
+                            className={`absolute right-0 z-[200] w-[232px] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-[18px] shadow-[0_14px_40px_rgba(0,0,0,0.12)] dark:shadow-[0_14px_40px_rgba(0,0,0,0.4)] p-1.5 overflow-hidden ${menuPlacement === 'up' ? 'bottom-full mb-1' : 'top-full mt-1'}`}
                             onClick={e => e.stopPropagation()}
                           >
                             <button
                               type="button"
                               onClick={() => startRename(session)}
-                              className="w-full flex items-center gap-4 px-3.5 py-2.5 rounded-xl text-[14px] font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                              className="w-full flex items-center gap-3.5 px-3.5 py-3 rounded-xl text-[14px] font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                             >
-                              <Pencil className="w-[19px] h-[19px] text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
+                              <Pencil className="w-[20px] h-[20px] text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
                               <span>Rename</span>
                             </button>
 
                             <button
                               type="button"
                               onClick={() => togglePin(session.id)}
-                              className="w-full flex items-center gap-4 px-3.5 py-2.5 rounded-xl text-[14px] font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                              className="w-full flex items-center gap-3.5 px-3.5 py-3 rounded-xl text-[14px] font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                             >
                               {isPinned ? (
-                                <PinOff className="w-[19px] h-[19px] text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
+                                <PinOff className="w-[20px] h-[20px] text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
                               ) : (
-                                <Pin className="w-[19px] h-[19px] text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
+                                <Pin className="w-[20px] h-[20px] text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
                               )}
                               <span>{isPinned ? 'Unpin' : 'Pin'}</span>
                             </button>
@@ -420,9 +398,9 @@ function SessionList({
                             <button
                               type="button"
                               onClick={() => handleShare(session.id)}
-                              className="w-full flex items-center gap-4 px-3.5 py-2.5 rounded-xl text-[14px] font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                              className="w-full flex items-center gap-3.5 px-3.5 py-3 rounded-xl text-[14px] font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                             >
-                              <Upload className="w-[19px] h-[19px] text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
+                              <Upload className="w-[20px] h-[20px] text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
                               <span>Share</span>
                             </button>
 
@@ -434,9 +412,9 @@ function SessionList({
                                 e.stopPropagation();
                                 handleDelete(session.id);
                               }}
-                              className="w-full flex items-center gap-4 px-3.5 py-2.5 rounded-xl text-[14px] font-medium text-red-500 dark:text-red-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                              className="w-full flex items-center gap-3.5 px-3.5 py-3 rounded-xl text-[14px] font-medium text-red-500 dark:text-red-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                             >
-                              <Trash2 className="w-[19px] h-[19px]" strokeWidth={1.8} />
+                              <Trash2 className="w-[20px] h-[20px]" strokeWidth={1.8} />
                               <span>Delete</span>
                             </button>
                           </motion.div>
@@ -931,13 +909,11 @@ export default function Sidebar({
     window.location.assign('/settings');
   }, [onSettings]);
 
-  // Search is a full-screen surface. Close the sidebar first so the sidebar's
-  // elevated z-index can never cover the search dialog.
   const openSearch = useCallback(() => {
     setSearchModalOpen(true);
     setDesktopCollapsed(true);
     onDesktopStateChange?.(false);
-    onMobileClose();
+    onMobileClose?.();
     onClose();
   }, [onClose, onDesktopStateChange, onMobileClose]);
 
@@ -1013,7 +989,7 @@ export default function Sidebar({
                 whileTap={{ scale: 0.92 }}
                 className="group/search flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
               >
-                <Search className="h-[19px] w-[19px] transition-transform duration-500 ease-in-out [transform-style:preserve-3d] group-hover/search:[transform:rotateY(180deg)]" strokeWidth={1.8} />
+                <Search className="h-[19px] w-[19px] transition-transform duration-500 ease-in-out group-hover/search:[transform:rotateY(180deg)] [transform-style:preserve-3d]" strokeWidth={1.8} />
               </motion.button>
 
               <div className="relative group/close">
@@ -1106,7 +1082,7 @@ export default function Sidebar({
                 aria-label="Search"
                 className="group/search w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-all"
               >
-                <Search className="w-[19px] h-[19px] transition-transform duration-500 ease-in-out [transform-style:preserve-3d] group-hover/search:[transform:rotateY(180deg)]" strokeWidth={1.7} />
+                <Search className="w-[19px] h-[19px] transition-transform duration-500 ease-in-out group-hover/search:[transform:rotateY(180deg)] [transform-style:preserve-3d]" strokeWidth={1.7} />
               </button>
             </IconTooltip>
 
@@ -1163,7 +1139,7 @@ export default function Sidebar({
                     whileTap={{ scale: 0.92 }}
                     className="group/search flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
                   >
-                    <Search className="h-[19px] w-[19px] transition-transform duration-500 ease-in-out [transform-style:preserve-3d] group-hover/search:[transform:rotateY(180deg)]" strokeWidth={1.8} />
+                    <Search className="h-[19px] w-[19px] transition-transform duration-500 ease-in-out group-hover/search:[transform:rotateY(180deg)] [transform-style:preserve-3d]" strokeWidth={1.8} />
                   </motion.button>
 
                   <div className="relative group/close">
