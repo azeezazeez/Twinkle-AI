@@ -1,7 +1,15 @@
 package com.ai.chatbot_backend.service;
 
 import com.ai.chatbot_backend.exception.AIServiceException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
@@ -10,6 +18,7 @@ import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -38,9 +47,17 @@ public class GroqService {
     private String configuredModels;
 
     private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper;
+    private final OkHttpClient streamClient;
 
-    public GroqService(RestTemplate restTemplate) {
+    public GroqService(RestTemplate restTemplate, ObjectMapper objectMapper) {
         this.restTemplate = restTemplate;
+        this.objectMapper = objectMapper;
+        this.streamClient = new OkHttpClient.Builder()
+                .connectTimeout(30, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
+                .readTimeout(0, TimeUnit.MILLISECONDS)
+                .build();
     }
 
     public List<String> getAvailableModels() {
@@ -89,6 +106,86 @@ public class GroqService {
         ));
 
         return callGroq(messages, resolvedModel);
+    }
+
+    /** Streams Groq output as soon as the provider sends content. */
+    public String streamResponse(
+            String userMessage,
+            List<Map<String, String>> conversationHistory,
+            String requestedModel,
+            String requestedLanguage,
+            Consumer<String> onDelta) {
+
+        String resolvedModel = resolveModel(requestedModel);
+        List<Map<String, Object>> messages = buildHistory(conversationHistory, requestedLanguage);
+        messages.add(Map.of(
+                "role", "user",
+                "content", userMessage == null ? "" : userMessage
+        ));
+
+        try {
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("model", resolvedModel);
+            requestBody.put("messages", messages);
+            requestBody.put("temperature", 0.7);
+            requestBody.put("max_tokens", MAX_OUTPUT_TOKENS);
+            requestBody.put("stream", true);
+
+            okhttp3.MediaType json = okhttp3.MediaType.get("application/json; charset=utf-8");
+            RequestBody body = RequestBody.create(objectMapper.writeValueAsBytes(requestBody), json);
+            Request request = new Request.Builder()
+                    .url(apiUrl + "/chat/completions")
+                    .header("Authorization", "Bearer " + apiKey)
+                    .header("Content-Type", "application/json")
+                    .post(body)
+                    .build();
+
+            StringBuilder full = new StringBuilder();
+            try (Response response = streamClient.newCall(request).execute()) {
+                if (!response.isSuccessful()) {
+                    String errorBody = response.body() == null ? "" : response.body().string();
+                    throw new AIServiceException("Groq API error " + response.code() + ": " + errorBody);
+                }
+                if (response.body() == null) {
+                    throw new AIServiceException("Groq returned an empty stream.");
+                }
+
+                try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(response.body().byteStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        if (!line.startsWith("data:")) continue;
+                        String data = line.substring(5).trim();
+                        if (data.isEmpty()) continue;
+                        if ("[DONE]".equals(data)) break;
+
+                        try {
+                            Map<?, ?> root = objectMapper.readValue(data, Map.class);
+                            Object choicesObject = root.get("choices");
+                            if (!(choicesObject instanceof List<?> choices) || choices.isEmpty()) continue;
+                            Object choiceObject = choices.get(0);
+                            if (!(choiceObject instanceof Map<?, ?> choice)) continue;
+                            Object deltaObject = choice.get("delta");
+                            if (!(deltaObject instanceof Map<?, ?> delta)) continue;
+                            Object content = delta.get("content");
+                            if (content == null) continue;
+                            String chunk = content.toString();
+                            if (chunk.isEmpty()) continue;
+                            full.append(chunk);
+                            onDelta.accept(chunk);
+                        } catch (Exception parseError) {
+                            log.debug("Ignoring malformed Groq stream event: {}", parseError.getMessage());
+                        }
+                    }
+                }
+            }
+            return full.toString();
+        } catch (AIServiceException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Groq streaming failed: {}", e.getMessage(), e);
+            throw new AIServiceException("Unable to stream the Groq response.", e);
+        }
     }
 
     private String resolveModel(String requestedModel) {
