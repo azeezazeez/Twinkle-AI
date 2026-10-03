@@ -1,8 +1,3 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 export interface User {
   id: string;
   name: string;
@@ -41,4 +36,13 @@ export interface UploadedFile {
   isImage: boolean;        // server field: mimetype.startsWith("image/")
   uploadDate: string;      // server field: new Date().toISOString()
   userId: string;          // server field: req.user.id
+}
+
+
+export interface SharedChatResponse {
+  sessionId: number;
+  sessionName: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: Message[];
 }
