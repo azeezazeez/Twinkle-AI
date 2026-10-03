@@ -192,36 +192,20 @@
   flex: 0 0 44px !important;
   width: 44px !important;
   min-width: 44px !important;
-  max-width: 44px !important;
-  margin-left: 4px !important;
+  height: 44px !important;
+  margin-left: 8px !important;
   margin-right: 0 !important;
   position: relative !important;
-  z-index: 5 !important;
+  z-index: 30 !important;
 }
 
-.twinkle-composer-mic {
-  flex: 0 0 36px !important;
-  width: 36px !important;
-  min-width: 36px !important;
+.group\/search svg {
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
 }
 
-.twinkle-composer-model {
-  flex: 0 0 auto !important;
-  min-width: 0 !important;
-}
-
-/* =========================================================
-   CHAT MESSAGE FADE / COMPOSER BOUNDARY
-   ========================================================= */
-
-/* The Chat component owns the fade shield. Keep the composer controls above
-   it so conversation content can never visually bleed through the composer. */
-.twinkle-composer-submit,
-.twinkle-composer-mic,
-.twinkle-composer-model,
-.twinkle-composer-plus {
-  position: relative;
-  z-index: 5;
+.group\/search:hover svg {
+  transform: rotateY(180deg);
 }
 
 /* =========================================================
