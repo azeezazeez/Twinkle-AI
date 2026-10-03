@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
+import { useState, useEffect, useRef, useCallback, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Session, User } from '../types';
 import {
   LogOut, Trash2, X, Search, SquarePen,
-  MoreHorizontal, Pin, PinOff, Edit3,
-  MessageCircle, Sun, Moon, Sparkles,
+  MoreHorizontal, Pin, PinOff,
+  MessageCircle, Pencil, Upload,
   Settings2, UserCircle2, ChevronRight, PanelLeft,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -21,12 +21,14 @@ interface Props {
   onNewSession: () => void;
   onDeleteSession: (id: number) => void;
   onRenameSession: (id: number, name: string) => void;
+  onShareSession: (id: number) => void;
   onClearAll: () => void;
   onLogout: () => void;
   onClose?: () => void;
   onProfile?: () => void;
   onSettings?: () => void;
   onDesktopStateChange?: (expanded: boolean) => void;
+  onDesktopWidthChange?: (width: number) => void;
   mobileOpen?: boolean;
   onMobileClose?: () => void;
 }
@@ -61,114 +63,11 @@ function IconTooltip({ label, children }: { label: string; children: ReactNode }
   return (
     <div className="relative group/tip flex items-center justify-center w-full">
       {children}
-      <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-zinc-900 text-white text-xs font-bold rounded-lg whitespace-nowrap pointer-events-none z-[300] shadow-lg opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150">
+      <div className="absolute left-full ml-3 px-3 py-1.5 bg-zinc-900 text-white text-[13px] font-semibold rounded-full whitespace-nowrap pointer-events-none z-[300] shadow-lg opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150">
         {label}
         <div className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-zinc-900" />
       </div>
     </div>
-  );
-}
-
-// ─── ThemeToggleButton ────────────────────────────────────────────────────────
-function ThemeToggleButton({ className }: { className?: string }) {
-  const [isDark, setIsDark] = useState(() => {
-    if (typeof document === 'undefined') return false;
-    const savedTheme = localStorage.getItem('theme');
-    if (savedTheme === 'dark') return true;
-    if (savedTheme === 'light') return false;
-    return document.documentElement.classList.contains('dark');
-  });
-
-  const toggle = () => {
-    const next = !isDark;
-    document.documentElement.classList.toggle('dark', next);
-    localStorage.setItem('theme', next ? 'dark' : 'light');
-    setIsDark(next);
-  };
-
-  useEffect(() => {
-    const savedTheme = localStorage.getItem('theme');
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-
-    const applyTheme = (theme: 'dark' | 'light') => {
-      document.documentElement.classList.toggle('dark', theme === 'dark');
-      setIsDark(theme === 'dark');
-    };
-
-    // Explicit user choice wins; otherwise follow the device theme.
-    if (savedTheme === 'dark' || savedTheme === 'light') {
-      applyTheme(savedTheme);
-    } else {
-      applyTheme(mediaQuery.matches ? 'dark' : 'light');
-    }
-
-    const handleDeviceThemeChange = (event: MediaQueryListEvent) => {
-      // Only follow the device automatically when the user has not
-      // explicitly selected a theme.
-      const currentPreference = localStorage.getItem('theme');
-      if (currentPreference !== 'dark' && currentPreference !== 'light') {
-        applyTheme(event.matches ? 'dark' : 'light');
-      }
-    };
-
-    mediaQuery.addEventListener('change', handleDeviceThemeChange);
-
-    const observer = new MutationObserver(() => {
-      setIsDark(document.documentElement.classList.contains('dark'));
-    });
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class'],
-    });
-
-    return () => {
-      mediaQuery.removeEventListener('change', handleDeviceThemeChange);
-      observer.disconnect();
-    };
-  }, []);
-
-  return (
-    <motion.button
-      whileHover={{ scale: 1.1 }}
-      whileTap={{ scale: 0.9 }}
-      onClick={toggle}
-      aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-      className={`flex items-center justify-center rounded-full
-        bg-zinc-100 dark:bg-zinc-800
-        border border-zinc-200 dark:border-zinc-700
-        text-zinc-500 dark:text-zinc-400
-        hover:text-zinc-600 dark:hover:text-zinc-400
-        hover:border-zinc-300 dark:hover:border-zinc-600
-        shadow-sm transition-all duration-200
-        ${className ?? 'w-9 h-9'}`}
-    >
-      <AnimatePresence mode="wait" initial={false}>
-        {isDark ? (
-          <motion.span
-            key="sun"
-            initial={{ rotate: -90, opacity: 0, scale: 0.5 }}
-            animate={{ rotate: 0, opacity: 1, scale: 1 }}
-            exit={{ rotate: 90, opacity: 0, scale: 0.5 }}
-            transition={{ duration: 0.2 }}
-            className="flex items-center justify-center"
-          >
-            <Sun className="w-4 h-4" />
-          </motion.span>
-        ) : (
-          <motion.span
-            key="moon"
-            initial={{ rotate: 90, opacity: 0, scale: 0.5 }}
-            animate={{ rotate: 0, opacity: 1, scale: 1 }}
-            exit={{ rotate: -90, opacity: 0, scale: 0.5 }}
-            transition={{ duration: 0.2 }}
-            className="flex items-center justify-center"
-          >
-            <Moon className="w-4 h-4" />
-          </motion.span>
-        )}
-      </AnimatePresence>
-    </motion.button>
   );
 }
 
@@ -181,12 +80,12 @@ interface SessionListProps {
   onNewSession: () => void;
   onDeleteSession: (id: number) => void;
   onRenameSession: (id: number, name: string) => void;
+  onShareSession: (id: number) => void;
   onClearAll: () => void;
   onLogout: () => void;
   onClose: () => void;
   onProfile?: () => void;
   onSettings?: () => void;
-  focusSearchOnMount?: boolean;
 }
 
 function SessionList({
@@ -197,19 +96,13 @@ function SessionList({
   onNewSession,
   onDeleteSession,
   onRenameSession,
+  onShareSession,
   onClearAll,
   onLogout,
   onClose,
   onProfile,
   onSettings,
-  focusSearchOnMount = false,
 }: SessionListProps) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchResults, setSearchResults] = useState<Session[] | null>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-  const searchRequestRef = useRef(0);
-
   const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -218,80 +111,6 @@ function SessionList({
   const renameInputRef = useRef<HTMLInputElement>(null);
 
   const [pinnedIds, setPinnedIds] = useState<number[]>(loadPinnedIds);
-
-  useEffect(() => {
-    if (focusSearchOnMount) {
-      const timer = window.setTimeout(() => searchInputRef.current?.focus(), 80);
-      return () => window.clearTimeout(timer);
-    }
-  }, [focusSearchOnMount]);
-
-  useEffect(() => {
-    const handleKeyboard = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && searchQuery) {
-        setSearchQuery('');
-        setSearchResults(null);
-        setIsSearching(false);
-        ++searchRequestRef.current;
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyboard);
-    return () => document.removeEventListener('keydown', handleKeyboard);
-  }, [searchQuery]);
-
-  useEffect(() => {
-    const query = searchQuery.trim();
-    const requestId = ++searchRequestRef.current;
-
-    if (!query) {
-      setSearchResults(null);
-      setIsSearching(false);
-      return;
-    }
-
-    const timer = setTimeout(async () => {
-      setIsSearching(true);
-
-      try {
-        const res = await chatApi.searchSessions(query);
-        if (requestId !== searchRequestRef.current) return;
-
-        const rawResults = Array.isArray((res as any)?.sessions)
-          ? (res as any).sessions
-          : [];
-
-        const normalizedResults = rawResults
-          .map((s: any) => ({
-            ...s,
-            id: Number(s.id ?? s.sessionId ?? s.session_id),
-            sessionName: String(
-              s.sessionName ?? s.name ?? s.title ?? 'New Chat'
-            ),
-          }))
-          .filter((s: any) => Number.isFinite(s.id));
-
-        setSearchResults(normalizedResults);
-      } catch (err) {
-        if (requestId !== searchRequestRef.current) return;
-
-        // The API is unavailable/failed: search the already loaded sessions
-        // instead of leaving the mobile drawer empty.
-        const lowerQuery = query.toLowerCase();
-        setSearchResults(
-          sessions.filter(s =>
-            String(s.sessionName ?? '').toLowerCase().includes(lowerQuery)
-          )
-        );
-      } finally {
-        if (requestId === searchRequestRef.current) {
-          setIsSearching(false);
-        }
-      }
-    }, 300);
-
-    return () => clearTimeout(timer);
-  }, [searchQuery, sessions]);
 
   useEffect(() => {
     if (menuOpenId === null) return;
@@ -310,7 +129,7 @@ function SessionList({
     }
   }, [renamingId]);
 
-  const displaySessions: Session[] = (searchResults ?? sessions)
+  const displaySessions: Session[] = sessions
     .map((s: any) => ({
       ...s,
       id: Number(s.id ?? s.sessionId ?? s.session_id),
@@ -330,11 +149,6 @@ function SessionList({
     if (last && last.label === label) last.items.push(session);
     else grouped.push({ label, items: [session] });
   });
-
-  const handleSearchChange = (q: string) => {
-    setSearchQuery(q);
-    if (!q.trim()) setSearchResults(null);
-  };
 
   const togglePin = useCallback((id: number) => {
     setPinnedIds(prev => {
@@ -377,6 +191,12 @@ function SessionList({
     });
   };
 
+  const handleShare = (id: number) => {
+    setMenuOpenId(null);
+    onClose();
+    onShareSession(id);
+  };
+
   // FIX: Select the session FIRST (synchronously), then close the drawer.
   // The previous order (close -> setTimeout -> select) raced against the
   // mobile drawer's remount-on-close (Sidebar used to swap a `key` on
@@ -386,13 +206,6 @@ function SessionList({
   const handleSelectSession = (id: number) => {
     if (renamingId !== null) return;
 
-    // Clear transient search state before closing the mobile drawer. This
-    // guarantees that reopening the drawer shows the complete session list.
-    ++searchRequestRef.current;
-    setSearchQuery('');
-    setSearchResults(null);
-    setIsSearching(false);
-
     onSelectSession(id);
     onClose();
   };
@@ -400,59 +213,19 @@ function SessionList({
   return (
     <>
       {/* Top controls */}
-      <div className="p-4 shrink-0">
+      <div className="p-4 pb-2 shrink-0">
         <button
           type="button"
           onClick={() => { onNewSession(); onClose(); }}
           aria-label="New chat"
-          className="w-full h-12 px-2.5 bg-transparent text-zinc-900 dark:text-zinc-100 rounded-xl flex items-center gap-3 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors active:bg-zinc-100 dark:active:bg-zinc-800"
+          className="group/newchat w-full h-12 px-2.5 bg-transparent text-zinc-900 dark:text-zinc-100 rounded-xl flex items-center gap-3 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors active:bg-zinc-100 dark:active:bg-zinc-800"
         >
-          <SquarePen className="w-[22px] h-[22px] shrink-0 text-zinc-900 dark:text-zinc-100" strokeWidth={1.7} />
+          <span className="shrink-0 flex h-8 w-8 items-center justify-center rounded-lg transition-transform duration-300 ease-out group-hover/newchat:-translate-y-0.5 group-hover/newchat:rotate-[-12deg] group-hover/newchat:scale-[1.04]" aria-hidden="true">
+            <SquarePen className="w-[22px] h-[22px] text-zinc-900 dark:text-zinc-100" strokeWidth={1.7} />
+          </span>
           <span className="text-[17px] font-normal tracking-tight">New chat</span>
         </button>
 
-        <div className="relative group mx-auto w-full max-w-[324px]">
-          <div className="absolute inset-y-0 left-3.5 flex items-center pointer-events-none text-zinc-400 group-focus-within:text-zinc-500 transition-colors">
-            {isSearching
-              ? <Sparkles className="w-3.5 h-3.5 animate-pulse" />
-              : <Search className="w-3.5 h-3.5" />}
-          </div>
-          <input
-            ref={searchInputRef}
-            type="search"
-            value={searchQuery}
-            onChange={e => handleSearchChange(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Escape') {
-                e.preventDefault();
-                handleSearchChange('');
-                return;
-              }
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                const query = searchQuery.trim();
-                if (query) {
-                  ++searchRequestRef.current;
-                  setSearchQuery(query);
-                }
-              }
-            }}
-            placeholder="Search chats..."
-            autoComplete="off"
-            spellCheck={false}
-            aria-label="Search chats"
-            className="w-full pl-10 pr-9 py-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs font-medium text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-zinc-400 transition-all [&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-cancel-button]:-webkit-appearance-none"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => handleSearchChange('')}
-              className="absolute inset-y-0 right-3 flex items-center text-zinc-400 hover:text-zinc-600"
-              aria-label="Clear search"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
       </div>
 
       {/* Session list */}
@@ -466,10 +239,10 @@ function SessionList({
         {sortedSessions.length === 0 ? (
           <div className="mx-2 py-8 text-center bg-zinc-50 dark:bg-zinc-900 rounded-2xl border border-dashed border-zinc-200 dark:border-zinc-700">
             <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider leading-relaxed">
-              {searchQuery ? 'No matching chats' : 'No chats yet'}
+              {'No chats yet'}
               <br />
               <span className="opacity-60 font-medium">
-                {searchQuery ? 'Try a different query' : 'Start a new conversation'}
+                {'Start a new conversation'}
               </span>
             </p>
           </div>
@@ -480,7 +253,7 @@ function SessionList({
                 <span className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">
                   {group.label}
                 </span>
-                {!searchQuery && group === grouped[0] && sessions.length > 0 && (
+                {group === grouped[0] && sessions.length > 0 && (
                   <button
                     type="button"
                     onClick={(e) => {
@@ -544,19 +317,46 @@ function SessionList({
                         )}
 
                         {!isRenaming && (
-                          <button
-                            onClick={e => {
-                              e.stopPropagation();
-                              setMenuOpenId(isMenuOpen ? null : session.id);
-                            }}
-                            className={`shrink-0 p-1 rounded-md transition-all ${
-                              isMenuOpen
-                                ? 'opacity-100 bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-300'
-                                : 'opacity-60 hover:opacity-100 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-400'
+                          <div
+                            className={`shrink-0 flex items-center gap-0.5 transition-opacity ${
+                              isMenuOpen || isActive
+                                ? 'opacity-100'
+                                : 'opacity-0 group-hover/item:opacity-100'
                             }`}
                           >
-                            <MoreHorizontal className="w-4 h-4" />
-                          </button>
+                            <button
+                              type="button"
+                              onClick={e => {
+                                e.stopPropagation();
+                                setMenuOpenId(isMenuOpen ? null : session.id);
+                              }}
+                              aria-label="Chat options"
+                              className={`p-1.5 rounded-lg transition-colors ${
+                                isMenuOpen
+                                  ? 'bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200'
+                                  : 'text-zinc-400 hover:bg-zinc-200/70 dark:hover:bg-zinc-700/70 hover:text-zinc-700 dark:hover:text-zinc-200'
+                              }`}
+                            >
+                              <MoreHorizontal className="w-[16px] h-[16px]" strokeWidth={1.8} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={e => {
+                                e.stopPropagation();
+                                togglePin(session.id);
+                              }}
+                              aria-label={isPinned ? 'Unpin chat' : 'Pin chat'}
+                              title={isPinned ? 'Unpin' : 'Pin'}
+                              className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200/70 dark:hover:bg-zinc-700/70 transition-colors"
+                            >
+                              {isPinned ? (
+                                <PinOff className="w-[17px] h-[17px]" strokeWidth={1.8} />
+                              ) : (
+                                <Pin className="w-[17px] h-[17px]" strokeWidth={1.8} />
+                              )}
+                            </button>
+
+                          </div>
                         )}
                       </motion.div>
 
@@ -568,34 +368,54 @@ function SessionList({
                             animate={{ opacity: 1, scale: 1, y: 0 }}
                             exit={{ opacity: 0, scale: 0.92, y: -4 }}
                             transition={{ duration: 0.12 }}
-                            className="absolute right-0 top-full mt-1 z-[200] w-44 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl shadow-xl shadow-black/10 overflow-hidden"
+                            className="absolute right-0 top-full mt-1 z-[200] w-[292px] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-[22px] shadow-[0_14px_40px_rgba(0,0,0,0.12)] dark:shadow-[0_14px_40px_rgba(0,0,0,0.4)] p-2 overflow-hidden"
                             onClick={e => e.stopPropagation()}
                           >
                             <button
+                              type="button"
                               onClick={() => startRename(session)}
-                              className="w-full flex items-center gap-3 px-4 py-3 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+                              className="w-full flex items-center gap-4 px-4 py-3.5 rounded-xl text-[15px] font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                             >
-                              <Edit3 className="w-4 h-4 text-zinc-400" /> Rename
+                              <Pencil className="w-[21px] h-[21px] text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
+                              <span>Rename</span>
                             </button>
+
                             <button
+                              type="button"
                               onClick={() => togglePin(session.id)}
-                              className="w-full flex items-center gap-3 px-4 py-3 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+                              className="w-full flex items-center gap-4 px-4 py-3.5 rounded-xl text-[15px] font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                             >
-                              {isPinned
-                                ? <PinOff className="w-4 h-4 text-amber-500" />
-                                : <Pin className="w-4 h-4 text-zinc-400" />}
-                              {isPinned ? 'Unpin' : 'Pin'}
+                              {isPinned ? (
+                                <PinOff className="w-[21px] h-[21px] text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
+                              ) : (
+                                <Pin className="w-[21px] h-[21px] text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
+                              )}
+                              <span>{isPinned ? 'Unpin' : 'Pin'}</span>
                             </button>
-                            <div className="mx-3 border-t border-zinc-100 dark:border-zinc-800" />
+
+                            <div className="mx-3 my-1 border-t border-zinc-200 dark:border-zinc-700" />
+
+                            <button
+                              type="button"
+                              onClick={() => handleShare(session.id)}
+                              className="w-full flex items-center gap-4 px-4 py-3.5 rounded-xl text-[15px] font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                            >
+                              <Upload className="w-[21px] h-[21px] text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
+                              <span>Share</span>
+                            </button>
+
+                            <div className="mx-3 my-1 border-t border-zinc-200 dark:border-zinc-700" />
+
                             <button
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleDelete(session.id);
                               }}
-                              className="w-full flex items-center gap-3 px-4 py-3 text-xs font-semibold text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-950/30 transition-colors"
+                              className="w-full flex items-center gap-4 px-4 py-3.5 rounded-xl text-[15px] font-medium text-red-500 dark:text-red-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                             >
-                              <Trash2 className="w-4 h-4" /> Delete
+                              <Trash2 className="w-[21px] h-[21px]" strokeWidth={1.8} />
+                              <span>Delete</span>
                             </button>
                           </motion.div>
                         )}
@@ -821,6 +641,178 @@ function AccountMenu({
   );
 }
 
+
+// ─── ChatSearchModal ───────────────────────────────────────────────────────────
+function ChatSearchModal({
+  open,
+  sessions,
+  onClose,
+  onSelectSession,
+}: {
+  open: boolean;
+  sessions: Session[];
+  onClose: () => void;
+  onSelectSession: (id: number) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<Session[]>([]);
+  const [loading, setLoading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const requestRef = useRef(0);
+
+  useEffect(() => {
+    if (!open) return;
+    setQuery('');
+    setResults(sessions);
+    const timer = window.setTimeout(() => inputRef.current?.focus(), 60);
+    return () => window.clearTimeout(timer);
+  }, [open, sessions]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open) return;
+    const q = query.trim();
+    const requestId = ++requestRef.current;
+
+    if (!q) {
+      setLoading(false);
+      setResults(sessions);
+      return;
+    }
+
+    const timer = window.setTimeout(async () => {
+      setLoading(true);
+      try {
+        const response = await chatApi.searchSessions(q);
+        if (requestId !== requestRef.current) return;
+        const raw = Array.isArray((response as any)?.sessions)
+          ? (response as any).sessions
+          : [];
+        const normalized = raw
+          .map((item: any) => ({
+            ...item,
+            id: Number(item.id ?? item.sessionId ?? item.session_id),
+            sessionName: String(item.sessionName ?? item.name ?? item.title ?? 'New Chat'),
+          }))
+          .filter((item: any) => Number.isFinite(item.id));
+        setResults(normalized);
+      } catch {
+        if (requestId !== requestRef.current) return;
+        const lower = q.toLowerCase();
+        setResults(
+          sessions.filter(session =>
+            String(session.sessionName ?? '').toLowerCase().includes(lower)
+          )
+        );
+      } finally {
+        if (requestId === requestRef.current) setLoading(false);
+      }
+    }, 220);
+
+    return () => window.clearTimeout(timer);
+  }, [open, query, sessions]);
+
+  if (!open) return null;
+
+  const recentChats = [...results]
+    .sort((a: any, b: any) => {
+      const aDate = new Date((a as any).updatedAt ?? (a as any).updated_at ?? (a as any).createdAt ?? (a as any).created_at ?? 0).getTime();
+      const bDate = new Date((b as any).updatedAt ?? (b as any).updated_at ?? (b as any).createdAt ?? (b as any).created_at ?? 0).getTime();
+      return bDate - aDate;
+    })
+    .slice(0, 20);
+
+  return (
+    <div className="fixed inset-0 z-[10000] flex items-start justify-center bg-black/20 px-4 pt-[12vh] backdrop-blur-[2px] sm:px-6">
+      <button
+        type="button"
+        aria-label="Close search"
+        onClick={onClose}
+        className="absolute inset-0 cursor-default"
+      />
+
+      <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Search chats"
+        initial={{ opacity: 0, scale: 0.985, y: -6 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.985, y: -6 }}
+        className="relative z-10 flex h-[min(620px,76vh)] w-full max-w-[970px] flex-col overflow-hidden rounded-[24px] border border-zinc-200 bg-white shadow-[0_24px_70px_rgba(0,0,0,0.16)] dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-[0_24px_70px_rgba(0,0,0,0.45)]"
+      >
+        <div className="flex shrink-0 items-center border-b border-zinc-100 px-7 py-5 dark:border-zinc-800">
+          <Search className="mr-4 h-[21px] w-[21px] text-zinc-400" strokeWidth={1.8} />
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder="Search..."
+            type="search"
+            autoComplete="off"
+            spellCheck={false}
+            className="min-w-0 flex-1 bg-transparent text-[18px] font-normal text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100"
+          />
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close search"
+            className="ml-4 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          >
+            <X className="h-[20px] w-[20px]" strokeWidth={1.8} />
+          </button>
+        </div>
+
+        <div className="shrink-0 px-7 pb-3 pt-6 text-[17px] font-medium text-zinc-500 dark:text-zinc-400">
+          {query.trim() ? 'Search results' : 'Recent chats'}
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-7 sm:px-7">
+          {loading ? (
+            <div className="flex items-center gap-3 px-3 py-5 text-[15px] text-zinc-500">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700 dark:border-zinc-700 dark:border-t-zinc-200" />
+              Searching chats...
+            </div>
+          ) : recentChats.length === 0 ? (
+            <div className="px-3 py-5 text-[15px] text-zinc-500 dark:text-zinc-400">
+              {query.trim() ? 'No matching chats' : 'No recent chats'}
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {recentChats.map(session => (
+                <button
+                  key={session.id}
+                  type="button"
+                  onClick={() => {
+                    onSelectSession(session.id);
+                    onClose();
+                  }}
+                  className="flex w-full items-center gap-5 rounded-xl px-3 py-3 text-left transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                >
+                  <MessageCircle className="h-[22px] w-[22px] shrink-0 text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
+                  <span className="min-w-0 flex-1 truncate text-[17px] font-normal text-zinc-900 dark:text-zinc-100">
+                    {session.sessionName}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 // ─── Main Sidebar export ──────────────────────────────────────────────────────
 export default function Sidebar({
   user,
@@ -830,6 +822,7 @@ export default function Sidebar({
   onNewSession,
   onDeleteSession,
   onRenameSession,
+  onShareSession,
   onClearAll,
   onLogout,
   onProfile,
@@ -842,27 +835,55 @@ export default function Sidebar({
   // Start collapsed on every fresh load so the chat interface is shown
   // immediately. The user can expand it with the sidebar icon.
   const [desktopCollapsed, setDesktopCollapsed] = useState(true);
-  const [focusSearch, setFocusSearch] = useState(false);
+  const [desktopWidth, setDesktopWidth] = useState<number>(() => {
+    try {
+      const stored = Number(localStorage.getItem('Twinkle_sidebar_width'));
+      return Number.isFinite(stored) ? Math.min(440, Math.max(280, stored)) : 360;
+    } catch {
+      return 360;
+    }
+  });
+  const [searchModalOpen, setSearchModalOpen] = useState(false);
+  const resizingRef = useRef(false);
+
+  useEffect(() => {
+    onDesktopWidthChange?.(desktopWidth);
+  }, [desktopWidth, onDesktopWidthChange]);
+
+  const handleResizeStart = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    resizingRef.current = true;
+    const startX = event.clientX;
+    const startWidth = desktopWidth;
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      if (!resizingRef.current) return;
+      const nextWidth = Math.min(440, Math.max(280, startWidth + (moveEvent.clientX - startX)));
+      setDesktopWidth(nextWidth);
+      localStorage.setItem('Twinkle_sidebar_width', String(Math.round(nextWidth)));
+    };
+
+    const handlePointerUp = () => {
+      resizingRef.current = false;
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+  }, [desktopWidth]);
   useEffect(() => { onDesktopStateChange?.(false); }, [onDesktopStateChange]);
 
   const expandDesktop = useCallback(() => {
     setDesktopCollapsed(false);
     onDesktopStateChange?.(true);
     localStorage.setItem(SIDEBAR_SEEN_KEY, '1');
-    setFocusSearch(false);
-  }, [onDesktopStateChange]);
-
-  const expandDesktopToSearch = useCallback(() => {
-    setDesktopCollapsed(false);
-    onDesktopStateChange?.(true);
-    localStorage.setItem(SIDEBAR_SEEN_KEY, '1');
-    setFocusSearch(true);
   }, [onDesktopStateChange]);
 
   const collapseDesktop = useCallback(() => {
     setDesktopCollapsed(true);
     onDesktopStateChange?.(false);
-    setFocusSearch(false);
     onClose();
   }, [onClose, onDesktopStateChange]);
 
@@ -895,6 +916,7 @@ export default function Sidebar({
     onNewSession,
     onDeleteSession,
     onRenameSession,
+    onShareSession,
     onClearAll,
     onLogout,
       onProfile: handleProfile,
@@ -903,6 +925,20 @@ export default function Sidebar({
 
   return (
     <>
+      <AnimatePresence>
+        {searchModalOpen && (
+          <ChatSearchModal
+            open={searchModalOpen}
+            sessions={sessions}
+            onClose={() => setSearchModalOpen(false)}
+            onSelectSession={id => {
+              onSelectSession(id);
+              onClose();
+            }}
+          />
+        )}
+      </AnimatePresence>
+
       {/* ═══════════════════════════════════════════════════
           MOBILE / TABLET DRAWER
           Keep the drawer mounted so the session list is never lost when
@@ -935,7 +971,17 @@ export default function Sidebar({
               <h2 className="text-lg font-medium tracking-tight text-zinc-900/90 dark:text-white/90">Twinkle</h2>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <ThemeToggleButton />
+              <motion.button
+                type="button"
+                onClick={() => setSearchModalOpen(true)}
+                aria-label="Search chats"
+                title="Search chats"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.92 }}
+                className="group/search flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
+              >
+                <Search className="h-[19px] w-[19px] transition-transform duration-500 ease-in-out group-hover/search:rotate-180" strokeWidth={1.8} />
+              </motion.button>
 
               <div className="relative group/close">
                 <motion.button
@@ -986,7 +1032,6 @@ export default function Sidebar({
             <SessionList
               {...listProps}
               onClose={onMobileClose}
-              focusSearchOnMount={false}
             />
           </div>
         </aside>
@@ -1014,9 +1059,9 @@ export default function Sidebar({
               <button
                 onClick={onNewSession}
                 aria-label="New Chat"
-                className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-all"
+                className="group/newchat w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-all"
               >
-                <SquarePen className="w-[19px] h-[19px]" strokeWidth={1.7} />
+                <SquarePen className="w-[19px] h-[19px] transition-transform duration-300 ease-out group-hover/newchat:-translate-y-0.5 group-hover/newchat:rotate-[-12deg] group-hover/newchat:scale-[1.05]" strokeWidth={1.7} />
               </button>
             </IconTooltip>
 
@@ -1024,11 +1069,11 @@ export default function Sidebar({
 
             <IconTooltip label="Search">
               <button
-                onClick={expandDesktopToSearch}
+                onClick={() => setSearchModalOpen(true)}
                 aria-label="Search"
-                className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-all"
+                className="group/search w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-all"
               >
-                <Search className="w-[19px] h-[19px]" strokeWidth={1.7} />
+                <Search className="w-[19px] h-[19px] transition-transform duration-500 ease-in-out group-hover/search:rotate-180" strokeWidth={1.7} />
               </button>
             </IconTooltip>
 
@@ -1044,10 +1089,6 @@ export default function Sidebar({
           </div>
 
           <div className="flex-1" />
-
-          <IconTooltip label="Toggle theme">
-            <ThemeToggleButton className="w-10 h-10 mb-2" />
-          </IconTooltip>
 
           {/* Account menu */}
           <AccountMenu
@@ -1067,7 +1108,8 @@ export default function Sidebar({
         {!desktopCollapsed && (
           <>
             <aside
-              className="twinkle-sidebar hidden lg:flex fixed inset-y-0 left-0 z-[2147483647] w-[360px] bg-white dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 flex-col h-full shadow-2xl"
+              className="twinkle-sidebar hidden lg:flex fixed inset-y-0 left-0 z-[2147483647] bg-white dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 flex-col h-full shadow-2xl"
+              style={{ width: `${desktopWidth}px` }}
               onClick={e => e.stopPropagation()}
             >
               <div className="flex items-center justify-between px-5 pt-5 pb-2 shrink-0">
@@ -1078,7 +1120,20 @@ export default function Sidebar({
                   <h2 className="text-xl font-medium tracking-tight text-zinc-900/90 dark:text-white/90">Twinkle</h2>
                 </div>
 
-                <div className="relative group/close">
+                <div className="flex items-center gap-1 shrink-0">
+                  <motion.button
+                    type="button"
+                    onClick={() => setSearchModalOpen(true)}
+                    aria-label="Search chats"
+                    title="Search chats"
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.92 }}
+                    className="group/search flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
+                  >
+                    <Search className="h-[19px] w-[19px] transition-transform duration-500 ease-in-out group-hover/search:rotate-180" strokeWidth={1.8} />
+                  </motion.button>
+
+                  <div className="relative group/close">
                   <motion.button
                     type="button"
                     onClick={collapseDesktop}
@@ -1119,14 +1174,26 @@ export default function Sidebar({
                   <div className="pointer-events-none absolute right-0 top-full mt-2 z-[300] whitespace-nowrap rounded-lg bg-zinc-900 px-2.5 py-1.5 text-xs font-bold text-white opacity-0 shadow-lg transition-opacity duration-150 group-hover/close:opacity-100">
                     Close Sidebar
                   </div>
+                  </div>
                 </div>
               </div>
 
               <SessionList
                 {...listProps}
                 onClose={collapseDesktop}
-                focusSearchOnMount={focusSearch}
               />
+
+              {/* Drag handle: adjust desktop sidebar width */}
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize sidebar"
+                title="Drag to resize sidebar"
+                onPointerDown={handleResizeStart}
+                className="absolute right-[-3px] top-0 h-full w-[6px] cursor-col-resize touch-none group/resize"
+              >
+                <div className="mx-auto h-full w-px bg-transparent transition-colors group-hover/resize:bg-zinc-300 dark:group-hover/resize:bg-zinc-700" />
+              </div>
             </aside>
           </>
         )}
