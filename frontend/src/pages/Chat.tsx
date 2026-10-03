@@ -1694,7 +1694,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     setFilePreviews([]);
 
     const isNewSession = !currentSessionId;
-
     try {
       let response: any;
       const hasFiles = filesToSend && filesToSend.length > 0;
@@ -1945,6 +1944,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     } finally {
       isSendingRef.current = false;
       abortControllerRef.current = null;
+      setRequestHasFiles(false);
       setIsTyping(false);
       setResponsePhase('idle');
       streamingAssistantIdRef.current = null;
@@ -2445,7 +2445,7 @@ const cleanMessageContent = (content: unknown): string => {
         </header>
         {/* Messages */}
         <div
-          className="relative min-h-0 min-w-0 flex-1 w-full max-w-full overflow-x-hidden overflow-y-auto overscroll-contain scroll-hide pb-44 pt-0 md:pb-48"
+          className="relative min-h-0 min-w-0 flex-1 w-full max-w-full overflow-x-hidden overflow-y-auto overscroll-contain scroll-hide pb-32 pt-0 md:pb-36"
           ref={messagesContainerRef}
           onScroll={handleScroll}
         >
@@ -2809,33 +2809,6 @@ const cleanMessageContent = (content: unknown): string => {
                   );
                 })}
 
-                {isTyping && responsePhase !== 'streaming' && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 4 }}
-                    transition={{ duration: 0.16, ease: 'easeOut' }}
-                    className="flex items-start gap-3 min-w-0 max-w-full py-2"
-                    aria-live="polite"
-                    aria-label="Twinkle is thinking"
-                  >
-                    <div className="w-7 h-7 md:w-8 md:h-8 shrink-0 flex items-center justify-center mt-0.5">
-                      <StormLogo className="w-5 h-5 md:w-6 md:h-6 text-zinc-800 dark:text-zinc-100" />
-                    </div>
-                    <div className="flex h-7 items-center px-1">
-                      <motion.span
-                        className="block h-[7px] w-[7px] rounded-full"
-                        style={{
-                          backgroundColor: liveTalkColor.swatch,
-                          boxShadow: `0 0 10px ${liveTalkColor.glow}`,
-                        }}
-                        animate={{ opacity: [0.25, 1, 0.25], scale: [0.82, 1, 0.82] }}
-                        transition={{ duration: 1.05, repeat: Infinity, ease: 'easeInOut' }}
-                      />
-                    </div>
-                  </motion.div>
-                )}
-
                 <div ref={messagesEndRef} />
               </div>
             )}
@@ -2843,16 +2816,13 @@ const cleanMessageContent = (content: unknown): string => {
             {(messages.length === 0 && !isTyping) && <div ref={messagesEndRef} />}
           </div>
 
+          {/* Soft fade: messages visually disappear into the composer instead of
+              abruptly stopping at its top edge while the user scrolls. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-40 bg-gradient-to-t from-white via-white/95 via-55% to-transparent dark:from-zinc-950 dark:via-zinc-950/95 dark:via-55% dark:to-transparent"
+          />
         </div>
-
-        {/* Fixed message fade shield. It sits above the scrolling conversation
-            and below the composer, so content fades out before it can appear
-            behind the composer/search bar. */}
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-[8500] h-[190px] bg-gradient-to-t from-white via-white/96 via-55% to-transparent dark:from-zinc-950 dark:via-zinc-950/96 dark:via-55% dark:to-transparent"
-          style={{ left: desktopSidebarExpanded ? `${desktopSidebarWidth}px` : undefined }}
-        />
 
         {/* Input bar */}
         <div
@@ -2876,6 +2846,32 @@ const cleanMessageContent = (content: unknown): string => {
             </AnimatePresence>
 
             <AnimatePresence>
+              {isTyping && responsePhase !== 'streaming' && (
+                <motion.div
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 4 }}
+                  transition={{ duration: 0.16, ease: 'easeOut' }}
+                  className="flex items-start gap-2.5 min-w-0 max-w-full px-1 py-2"
+                  aria-live="polite"
+                  aria-label="Twinkle is thinking"
+                >
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center">
+                    <StormLogo className="h-5 w-5 text-zinc-800 dark:text-zinc-100" />
+                  </div>
+                  <div className="flex h-7 items-center px-0.5">
+                    <span
+                      className="block h-[7px] w-[7px] rounded-full"
+                      style={{
+                        backgroundColor: liveTalkColor.swatch,
+                        boxShadow: `0 0 10px ${liveTalkColor.glow}`,
+                        animation: 'twinkle-thinking-dot 1.05s ease-in-out infinite',
+                      }}
+                    />
+                  </div>
+                </motion.div>
+              )}
+
               {showScrollBottom && messages.length > 0 && !isTyping && (
                   <motion.button
                     initial={{ opacity: 0, y: 10 }}
@@ -3171,7 +3167,7 @@ const cleanMessageContent = (content: unknown): string => {
                         data-tooltip="Live Talk"
                         whileHover={{ scale: 1.06 }}
                         whileTap={{ scale: 0.92 }}
-                        className="twinkle-tooltip-trigger twinkle-composer-submit relative z-[5] ml-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white transition sm:h-11 sm:w-11"
+                        className="twinkle-tooltip-trigger twinkle-composer-submit relative z-[30] flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white transition sm:h-11 sm:w-11"
                         style={{
                           background: liveTalkColor.swatch,
                           boxShadow: `0 8px 20px ${liveTalkColor.glow}`,
@@ -3189,7 +3185,7 @@ const cleanMessageContent = (content: unknown): string => {
                         data-tooltip={isTyping ? 'Stop response' : 'Send message'}
                         whileHover={{ scale: isTyping || input.trim() || filePreviews.length ? 1.06 : 1, y: -1 }}
                         whileTap={{ scale: 0.92 }}
-                        className="twinkle-tooltip-trigger twinkle-composer-submit relative z-[5] ml-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 text-white shadow-sm transition-all duration-200 sm:h-11 sm:w-11"
+                        className={`twinkle-tooltip-trigger twinkle-composer-submit relative z-[30] flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isTyping ? 'border-transparent text-white' : 'border-transparent text-white'}`}
                         style={{
                           background: liveTalkColor.background,
                           boxShadow: `0 8px 22px ${liveTalkColor.glow}`,
@@ -3228,7 +3224,6 @@ const cleanMessageContent = (content: unknown): string => {
 
       <LiveTalkModal
         open={liveTalkOpen}
-        userName={user.username || user.name}
         onClose={() => setLiveTalkOpen(false)}
         onSessionComplete={handleLiveSessionComplete}
       />
