@@ -1239,6 +1239,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const firstMessageScrollPendingRef = useRef(false);
+  const shouldAutoFollowRef = useRef(true);
   const isSendingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamingAssistantIdRef = useRef<string | null>(null);
@@ -1266,9 +1267,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       return;
     }
 
-    // Small, consistent pieces make real SSE output visually continuous even
-    // when the provider sends a whole sentence in one network chunk.
-    const pieceSize = 8;
+    const pieceSize = 4;
     const piece = queue.slice(0, pieceSize);
     streamRenderQueueRef.current = queue.slice(piece.length);
 
@@ -1283,22 +1282,20 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       );
     });
 
-    requestAnimationFrame(() => {
-      const container = messagesContainerRef.current;
-      if (!container) return;
-      const distanceFromBottom =
-        container.scrollHeight - container.scrollTop - container.clientHeight;
-      if (distanceFromBottom < 180) {
-        container.scrollTo({ top: container.scrollHeight, behavior: 'auto' });
-      }
-    });
+    // Never take control of the user's scroll position. We only follow the
+    // response when the user was already at the bottom.
+    if (shouldAutoFollowRef.current) {
+      requestAnimationFrame(() => {
+        const container = messagesContainerRef.current;
+        if (!container || !shouldAutoFollowRef.current) return;
+        container.scrollTop = container.scrollHeight;
+      });
+    }
   }, []);
 
   const startStreamRenderer = useCallback(() => {
     if (streamRenderTimerRef.current !== null) return;
-    // ~267 characters/second. Fast enough to feel live, slow enough to avoid
-    // the rough block-by-block appearance caused by large SSE chunks.
-    streamRenderTimerRef.current = window.setInterval(flushStreamRenderQueue, 30);
+    streamRenderTimerRef.current = window.setInterval(flushStreamRenderQueue, 28);
     flushStreamRenderQueue();
   }, [flushStreamRenderQueue]);
 
@@ -1463,12 +1460,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     }
   }, [currentSessionId, loadMessages]);
 
-  // Keep scrolling inside the message panel only so the floating composer
-  // remains stable while the conversation scrolls.
-  //
-  // On mobile, the first message of a newly started chat is positioned near
-  // the top of the conversation so the sent message is immediately visible.
-  // Later messages keep the existing bottom-scrolling behavior.
+  // Keep the message panel stable. Streaming follows the bottom only while
+  // the user is already there. Manual scrolling immediately takes control.
   useEffect(() => {
     const container = messagesContainerRef.current;
     if (!container) return;
@@ -1483,42 +1476,38 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         );
 
         if (firstMessage) {
-          // Keep the first sent message clearly below the fixed mobile header.
-          // The message list gets a matching top inset, so the message can never
-          // be positioned underneath the navbar when a new chat starts.
           const mobileHeaderOffset = 92;
           const targetTop = Math.max(0, firstMessage.offsetTop - mobileHeaderOffset);
+          shouldAutoFollowRef.current = false;
           setShowScrollBottom(false);
           setIsAtBottom(false);
-          container.scrollTo({
-            top: targetTop,
-            behavior: 'smooth',
-          });
+          container.scrollTo({ top: targetTop, behavior: 'smooth' });
           firstMessageScrollPendingRef.current = false;
           return;
         }
       }
 
-      setShowScrollBottom(false);
-      setIsAtBottom(true);
-      container.scrollTo({
-        top: container.scrollHeight,
-        behavior: 'smooth',
-      });
+      if (shouldAutoFollowRef.current) {
+        container.scrollTop = container.scrollHeight;
+        setShowScrollBottom(false);
+        setIsAtBottom(true);
+      }
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [messages, isTyping]);
+  }, [messages.length, currentSessionId]);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
-    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    const distanceFromBottom = Math.max(
+      0,
+      scrollHeight - scrollTop - clientHeight
+    );
+    const atBottom = distanceFromBottom <= 40;
 
-    // The scroll-to-bottom control is meaningful only when a conversation
-    // exists and the user is actually away from the latest messages.
-    const awayFromBottom = distanceFromBottom > 100;
-    setShowScrollBottom(messages.length > 0 && awayFromBottom);
-    setIsAtBottom(distanceFromBottom <= 40);
+    shouldAutoFollowRef.current = atBottom;
+    setShowScrollBottom(messages.length > 0 && distanceFromBottom > 100);
+    setIsAtBottom(atBottom);
   };
 
   const extractZipEntry = async (file: File, entryName: string): Promise<string | null> => {
@@ -1747,6 +1736,17 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
     const tempId = `temp-${Date.now()}`;
 
+    const containerBeforeSend = messagesContainerRef.current;
+    if (containerBeforeSend) {
+      const distanceFromBottom =
+        containerBeforeSend.scrollHeight -
+        containerBeforeSend.scrollTop -
+        containerBeforeSend.clientHeight;
+      shouldAutoFollowRef.current = distanceFromBottom <= 40;
+    } else {
+      shouldAutoFollowRef.current = true;
+    }
+
     // Remember that this is the first message in a new chat so mobile can
     // move the sent message into view near the top of the conversation.
     const existingMessageCount = messagesSnapshot?.length ?? messages.length;
@@ -1885,7 +1885,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       // message. This prevents the final response from jumping ahead of the
       // visible stream.
       await drainStreamRenderer();
-      setIsTyping(false);
+
+      const completedStreamId = streamingAssistantIdRef.current;
 
       const aiContent =
         typeof response?.response === 'string'
@@ -1896,37 +1897,66 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
       onAssistantResponse?.(aiContent);
 
-      const aiMsg: Message = {
-        id: response?.messageId || 'ai-' + Date.now(),
-        sessionId: activeSessionId,
-        role: 'assistant',
-        content: cleanMessageContent(aiContent),
-        timestamp: new Date().toISOString(),
-      };
+      const finalContent = cleanMessageContent(aiContent);
+      const finalMessageId = response?.messageId || 'ai-' + Date.now();
 
       setMessages(prev => {
-        const streamId = streamingAssistantIdRef.current;
-
-        // A streamed response is already present in state because onDelta
-        // inserts/updates it progressively. Replace that same message with
-        // the server's final content instead of appending a second assistant
-        // message when the stream endpoint also returns the completed text.
-        if (streamId) {
-          const streamIndex = prev.findIndex(m => m.id === streamId);
+        if (completedStreamId) {
+          const streamIndex = prev.findIndex(m => m.id === completedStreamId);
           if (streamIndex >= 0) {
             return prev.map((message, index) =>
               index === streamIndex
-                ? { ...aiMsg, id: message.id }
+                ? {
+                    ...message,
+                    sessionId: activeSessionId,
+                    role: 'assistant',
+                    content: finalContent,
+                    timestamp: new Date().toISOString(),
+                  }
                 : message
             );
           }
         }
 
-        if (prev.some(m => m.id === aiMsg.id)) return prev;
-        return [...prev, aiMsg];
+        const backendIndex = prev.findIndex(
+          message => String(message.id) === String(finalMessageId)
+        );
+        if (backendIndex >= 0) {
+          return prev.map((message, index) =>
+            index === backendIndex
+              ? {
+                  ...message,
+                  sessionId: activeSessionId,
+                  role: 'assistant',
+                  content: finalContent,
+                }
+              : message
+          );
+        }
+
+        const duplicateIndex = prev.findIndex(
+          message =>
+            message.role === 'assistant' &&
+            cleanMessageContent(message.content).trim() === finalContent.trim() &&
+            finalContent.trim().length > 0
+        );
+        if (duplicateIndex >= 0) return prev;
+
+        return [
+          ...prev,
+          {
+            id: finalMessageId,
+            sessionId: activeSessionId,
+            role: 'assistant' as const,
+            content: finalContent,
+            timestamp: new Date().toISOString(),
+          },
+        ];
       });
+
       streamingAssistantIdRef.current = null;
       setResponsePhase('idle');
+      setIsTyping(false);
 
       // Generate and persist a professional AI-generated chat title.
       if ((isNewSession || regenerateTitle) && activeSessionId) {
@@ -2584,7 +2614,18 @@ const cleanMessageContent = (content: unknown): string => {
                       >
                         {msg.role === 'assistant' && (
                           <div className="shrink-0 w-7 h-7 md:w-8 md:h-8 flex items-center justify-center mt-1">
-                            <StormLogo className={`w-6 h-6 text-black dark:text-white ${shouldSpin ? 'animate-spin' : ''}`} />
+                            {shouldSpin && displayContent.trim().length === 0 ? (
+                              <span
+                                className="twinkle-thinking-breathe block h-[7px] w-[7px] rounded-full"
+                                style={{
+                                  backgroundColor: liveTalkColor.swatch,
+                                  boxShadow: `0 0 10px ${liveTalkColor.swatch}66`,
+                                }}
+                                aria-hidden="true"
+                              />
+                            ) : (
+                              <StormLogo className="w-6 h-6 text-black dark:text-white" />
+                            )}
                           </div>
                         )}
 
@@ -2898,29 +2939,22 @@ const cleanMessageContent = (content: unknown): string => {
 
                 {isTyping && responsePhase !== 'streaming' && (
                   <motion.div
-                    initial={{ opacity: 0, y: 5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 5 }}
-                    transition={{ duration: 0.16, ease: 'easeOut' }}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.16 }}
                     className="flex w-full items-start gap-2.5 px-0 py-2 md:gap-3"
                     aria-live="polite"
                     aria-label="Twinkle is thinking"
                   >
                     <div className="flex h-7 w-7 shrink-0 items-center justify-center md:h-8 md:w-8">
-                      <StormLogo className="h-5 w-5 text-black dark:text-white" />
-                    </div>
-                    <div className="twinkle-thinking-dots flex h-7 items-center gap-1.5 px-0.5 md:h-8" aria-hidden="true">
-                      {[0, 1, 2].map(index => (
-                        <span
-                          key={index}
-                          className="twinkle-thinking-dot block h-[6px] w-[6px] rounded-full"
-                          style={{
-                            background: liveTalkColor.background,
-                            boxShadow: `0 0 9px ${liveTalkColor.glow}`,
-                            animationDelay: `${index * 140}ms`,
-                          }}
-                        />
-                      ))}
+                      <span
+                        className="twinkle-thinking-breathe block h-[7px] w-[7px] rounded-full"
+                        style={{
+                          backgroundColor: liveTalkColor.swatch,
+                          boxShadow: `0 0 10px ${liveTalkColor.swatch}66`,
+                        }}
+                      />
                     </div>
                   </motion.div>
                 )}
@@ -2936,9 +2970,34 @@ const cleanMessageContent = (content: unknown): string => {
               abruptly stopping at its top edge while the user scrolls. */}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-40 bg-gradient-to-t from-white via-white/95 via-55% to-transparent dark:from-zinc-950 dark:via-zinc-950/95 dark:via-55% dark:to-transparent"
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-20 bg-gradient-to-t from-white via-white/80 via-65% to-transparent dark:from-zinc-950 dark:via-zinc-950/80 dark:via-65% to-transparent"
           />
         </div>
+
+        {isTyping && showScrollBottom && (
+          <div
+            className="twinkle-floating-response-indicator pointer-events-none fixed z-[8990] flex h-8 items-center justify-center gap-1.5 rounded-full px-3"
+            style={{
+              left: desktopSidebarExpanded ? `${desktopSidebarWidth}px` : 0,
+              right: 0,
+              bottom: 'calc(92px + env(safe-area-inset-bottom, 0px))',
+            }}
+            aria-live="polite"
+            aria-label="Twinkle is responding"
+          >
+            {[0, 1, 2].map(index => (
+              <span
+                key={index}
+                className="twinkle-floating-response-dot"
+                style={{
+                  backgroundColor: liveTalkColor.swatch,
+                  boxShadow: `0 0 8px ${liveTalkColor.swatch}66`,
+                  animationDelay: `${index * 120}ms`,
+                }}
+              />
+            ))}
+          </div>
+        )}
 
         {/* Input bar */}
         <div
@@ -2966,12 +3025,13 @@ const cleanMessageContent = (content: unknown): string => {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 10 }}
-                    onClick={() =>
+                    onClick={() => {
+                      shouldAutoFollowRef.current = true;
                       messagesContainerRef.current?.scrollTo({
                         top: messagesContainerRef.current.scrollHeight,
                         behavior: 'smooth',
-                      })
-                    }
+                      });
+                    }}
                     className="twinkle-tooltip-trigger absolute -top-14 left-1/2 z-10 -translate-x-1/2 rounded-full border border-zinc-200 bg-white p-2.5 text-black shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white transition-all hover:scale-110 hover:bg-white dark:border-zinc-700 dark:bg-white dark:text-black dark:ring-white dark:hover:bg-white"
                     aria-label="Scroll to latest message"
                     data-tooltip="Scroll to latest message"
@@ -3247,6 +3307,7 @@ const cleanMessageContent = (content: unknown): string => {
 
                   {/* Live Talk / Send */}
                   
+                  <AnimatePresence mode="wait" initial={false}>
                     {!isTyping && !input.trim() && filePreviews.length === 0 ? (
                       <motion.button
                         key="live-talk"
@@ -3258,8 +3319,7 @@ const cleanMessageContent = (content: unknown): string => {
                         whileTap={{ scale: 0.92 }}
                         className="twinkle-tooltip-trigger twinkle-composer-submit relative z-[30] flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white transition sm:h-11 sm:w-11"
                         style={{
-                          background: liveTalkColor.background,
-                          boxShadow: `0 8px 20px ${liveTalkColor.glow}`,
+                          backgroundColor: liveTalkColor.swatch,
                         }}
                       >
                         <AudioLines className="h-[19px] w-[19px]" strokeWidth={2.1} />
@@ -3274,12 +3334,9 @@ const cleanMessageContent = (content: unknown): string => {
                         data-tooltip={isTyping ? 'Stop response' : 'Send message'}
                         whileHover={{ scale: isTyping || input.trim() || filePreviews.length ? 1.06 : 1, y: -1 }}
                         whileTap={{ scale: 0.92 }}
-                        className={`twinkle-tooltip-trigger twinkle-composer-submit relative z-[30] flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isTyping ? 'border-transparent text-white' : 'border-transparent text-white'}`}
+                        className="twinkle-tooltip-trigger twinkle-composer-submit relative z-[30] flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 text-white transition-all duration-200 sm:h-11 sm:w-11"
                         style={{
-                          // Match the exact Live Talk modal button background.
-                          // Do not use the settings swatch/solid color here.
-                          background: liveTalkColor.background,
-                          boxShadow: `0 8px 22px ${liveTalkColor.glow}`,
+                          backgroundColor: liveTalkColor.swatch,
                         }}
                       >
                         {isTyping ? (
@@ -3305,6 +3362,7 @@ const cleanMessageContent = (content: unknown): string => {
                       </motion.button>
                     )}
                   
+                  </AnimatePresence>
                 </div>
               </div>
 
