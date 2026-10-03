@@ -3133,7 +3133,7 @@ const cleanMessageContent = (content: unknown): string => {
         title="Delete chat?"
         message={
           <>
-            This will delete{' '}
+            This will permanently delete{' '}. This can't be undone.
             <strong className="font-bold">
               {sessionToDelete?.sessionName || 'this chat'}
             </strong>.
