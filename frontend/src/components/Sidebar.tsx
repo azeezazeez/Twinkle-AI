@@ -997,9 +997,7 @@ export default function Sidebar({
                 onClick={openSearch}
                 aria-label="Search chats"
                 title="Search chats"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.92 }}
-                className="group/search flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
+                className="group/search flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-none"
               >
                 <Search className="twinkle-search-icon h-[19px] w-[19px]" strokeWidth={1.8} />
               </motion.button>
@@ -1010,8 +1008,6 @@ export default function Sidebar({
                   onClick={onMobileClose}
                   aria-label="Close sidebar"
                   title="Close sidebar"
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.92 }}
                   className="flex h-9 w-9 items-center justify-center rounded-none
                     bg-transparent border-0 shadow-none
                     text-zinc-500 dark:text-zinc-400
@@ -1068,7 +1064,7 @@ export default function Sidebar({
             <button
               onClick={toggleDesktop}
               aria-label="Open sidebar"
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-all"
+              className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-none"
             >
               <StormLogo className="w-7 h-7 text-black dark:text-white" />
             </button>
@@ -1080,7 +1076,7 @@ export default function Sidebar({
               <button
                 onClick={onNewSession}
                 aria-label="New Chat"
-                className="group/newchat w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-all"
+                className="group/newchat w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-none"
               >
                 <SquarePen className="twinkle-newchat-icon w-[19px] h-[19px]" strokeWidth={1.7} />
               </button>
@@ -1092,7 +1088,7 @@ export default function Sidebar({
               <button
                 onClick={openSearch}
                 aria-label="Search"
-                className="group/search w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-all"
+                className="group/search w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-none"
               >
                 <Search className="twinkle-search-icon w-[19px] h-[19px]" strokeWidth={1.7} />
               </button>
@@ -1102,7 +1098,7 @@ export default function Sidebar({
               <button
                 onClick={expandDesktop}
                 aria-label="Chats"
-                className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-all"
+                className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-none"
               >
                 <MessageCircle className="w-[19px] h-[19px]" strokeWidth={1.7} />
               </button>
@@ -1147,9 +1143,7 @@ export default function Sidebar({
                     onClick={openSearch}
                     aria-label="Search chats"
                     title="Search chats"
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.92 }}
-                    className="group/search flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
+                    className="group/search flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-none"
                   >
                     <Search className="twinkle-search-icon h-[19px] w-[19px]" strokeWidth={1.8} />
                   </motion.button>
@@ -1160,8 +1154,6 @@ export default function Sidebar({
                     onClick={collapseDesktop}
                     aria-label="Close sidebar"
                     title="Close sidebar"
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.92 }}
                     className="flex h-9 w-9 shrink-0 items-center justify-center rounded-none
                       bg-transparent border-0 shadow-none
                       text-zinc-500 dark:text-zinc-400
