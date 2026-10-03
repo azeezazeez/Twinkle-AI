@@ -7,11 +7,14 @@ import com.ai.chatbot_backend.dto.ChatRequest;
 import com.ai.chatbot_backend.dto.ChatResponse;
 import com.ai.chatbot_backend.dto.ChatSession;
 import com.ai.chatbot_backend.dto.User;
+import com.ai.chatbot_backend.dto.SharedChat;
+import com.ai.chatbot_backend.dto.SharedChatResponse;
 import com.ai.chatbot_backend.service.RedisEventService;
 import com.ai.chatbot_backend.service.ChatHistoryService;
 import com.ai.chatbot_backend.service.GroqService;
 import com.ai.chatbot_backend.service.GeminiService;
 import com.ai.chatbot_backend.service.UserService;
+import com.ai.chatbot_backend.service.ChatShareService;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -31,6 +34,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -45,6 +49,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.net.URLEncoder;
 import java.util.stream.Collectors;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 
 @RestController
 @RequestMapping("/api/chat")
@@ -63,6 +69,7 @@ public class ChatController {
     private final UserService userService;
     private final RedisEventService redisEventService;
     private final ObjectMapper objectMapper;
+    private final ChatShareService chatShareService;
 
 
     // =========================================================
@@ -178,6 +185,164 @@ public class ChatController {
         return ResponseEntity.ok(response);
     }
 
+
+    // =========================================================
+    // SEND - STREAMING JSON
+    // =========================================================
+
+    @PostMapping(
+            value = "/send/stream",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE
+    )
+    public SseEmitter streamMessage(
+            @Valid @RequestBody ChatRequest request,
+            HttpSession session) {
+
+        SseEmitter emitter = new SseEmitter(0L);
+
+        try {
+            User currentUser = getCurrentUser(session);
+            Long sessionId = request.getSessionId();
+            Long savedUserMessageId = null;
+
+            List<Map<String, String>> conversationHistory = new ArrayList<>();
+
+            if (currentUser != null) {
+                if (sessionId == null) {
+                    ChatSession newSession = chatHistoryService.createNewSession(currentUser, "New Chat");
+                    sessionId = newSession.getId();
+                } else if (!chatHistoryService.sessionExistsForUser(sessionId, currentUser)) {
+                    ChatSession newSession = chatHistoryService.createNewSession(currentUser, "New Chat");
+                    sessionId = newSession.getId();
+                }
+
+                List<ChatMessage> previousMessages = chatHistoryService.getSessionMessages(sessionId);
+                int startIndex = Math.max(0, previousMessages.size() - 10);
+                for (int i = startIndex; i < previousMessages.size(); i++) {
+                    ChatMessage msg = previousMessages.get(i);
+                    if (msg != null && msg.getContent() != null && !msg.getContent().isBlank()) {
+                        conversationHistory.add(Map.of(
+                                "role", msg.getRole(),
+                                "content", msg.getContent()
+                        ));
+                    }
+                }
+
+                ChatMessage savedUserMessage = chatHistoryService.saveMessage(
+                        sessionId, "user", request.getMessage());
+                savedUserMessageId = savedUserMessage.getId();
+
+                redisEventService.sendUserEvent(
+                        "MESSAGE_SENT",
+                        currentUser.getId() + ":" + sessionId
+                );
+            }
+
+            List<String> groqModels = groqService.getAvailableModels();
+            String requestedModel = request.getModel() == null || request.getModel().isBlank()
+                    ? groqModels.get(0)
+                    : request.getModel().trim();
+
+            boolean geminiRequested = geminiService.isGeminiModel(requestedModel);
+            if (!geminiRequested && !groqModels.contains(requestedModel)) {
+                requestedModel = groqModels.get(0);
+            }
+
+            final Long finalSessionId = sessionId;
+            final Long finalSavedUserMessageId = savedUserMessageId;
+            final String finalRequestedModel = requestedModel;
+            final User finalUser = currentUser;
+            final String finalMessage = request.getMessage() == null ? "" : request.getMessage().trim();
+            final String finalLanguage = request.getLanguage();
+
+            emitter.onCompletion(() -> log.debug("Streaming chat completed. sessionId={}", finalSessionId));
+            emitter.onTimeout(() -> log.debug("Streaming chat timed out. sessionId={}", finalSessionId));
+            emitter.onError(ex -> log.debug("Streaming chat connection closed. sessionId={}", finalSessionId));
+
+            emitter.send(SseEmitter.event()
+                    .name("status")
+                    .data(Map.of("status", "thinking")));
+
+            CompletableFuture.runAsync(() -> {
+                StringBuilder fullResponse = new StringBuilder();
+                try {
+                    Consumer<String> sendDelta = chunk -> {
+                        try {
+                            emitter.send(SseEmitter.event()
+                                    .name("delta")
+                                    .data(Map.of("text", chunk)));
+                        } catch (IOException e) {
+                            throw new StreamClientClosedException(e);
+                        }
+                    };
+
+                    if (geminiRequested) {
+                        fullResponse.append(geminiService.streamResponse(
+                                finalMessage, conversationHistory, List.of(), finalLanguage, sendDelta));
+                    } else {
+                        fullResponse.append(groqService.streamResponse(
+                                finalMessage, conversationHistory, finalRequestedModel, finalLanguage, sendDelta));
+                    }
+
+                    String aiResponse = fullResponse.toString();
+                    if (finalUser != null && finalSessionId != null) {
+                        ChatMessage savedAssistant = chatHistoryService.saveMessage(
+                                finalSessionId, "assistant", aiResponse);
+                        redisEventService.sendUserEvent(
+                                "AI_RESPONSE_SENT",
+                                finalUser.getId() + ":" + finalSessionId
+                        );
+
+                        emitter.send(SseEmitter.event()
+                                .name("done")
+                                .data(Map.of(
+                                        "response", aiResponse,
+                                        "sessionId", finalSessionId,
+                                        "messageId", savedAssistant.getId(),
+                                        "userMessageId", finalSavedUserMessageId == null ? 0L : finalSavedUserMessageId
+                                )));
+                    } else {
+                        emitter.send(SseEmitter.event()
+                                .name("done")
+                                .data(Map.of("response", aiResponse)));
+                    }
+
+                    emitter.complete();
+                } catch (StreamClientClosedException ignored) {
+                    emitter.complete();
+                } catch (Exception e) {
+                    log.error("Streaming chat failed: {}", e.getMessage(), e);
+                    try {
+                        emitter.send(SseEmitter.event()
+                                .name("error")
+                                .data(Map.of("error", e.getMessage() == null ? "Unable to generate a response." : e.getMessage())));
+                    } catch (Exception ignored) {
+                        // Client may already be gone.
+                    }
+                    emitter.completeWithError(e);
+                }
+            });
+
+        } catch (Exception e) {
+            try {
+                emitter.send(SseEmitter.event()
+                        .name("error")
+                        .data(Map.of("error", e.getMessage() == null ? "Unable to start the response." : e.getMessage())));
+            } catch (Exception ignored) {
+                // Ignore secondary send failures.
+            }
+            emitter.completeWithError(e);
+        }
+
+        return emitter;
+    }
+
+    private static class StreamClientClosedException extends RuntimeException {
+        StreamClientClosedException(Throwable cause) {
+            super(cause);
+        }
+    }
 
     // =========================================================
     // SEND - JSON
@@ -1366,6 +1531,60 @@ public class ChatController {
                             HttpStatus.INTERNAL_SERVER_ERROR
                     )
                     .body(response);
+        }
+    }
+
+
+    // =========================================================
+    // SHARE CHAT
+    // =========================================================
+
+    @PostMapping("/session/{sessionId}/share")
+    public ResponseEntity<Map<String, Object>> shareSession(
+            @PathVariable Long sessionId,
+            HttpSession session
+    ) {
+
+        Map<String, Object> response = new HashMap<>();
+        User currentUser = getCurrentUser(session);
+
+        if (currentUser == null) {
+            response.put("error", "User not logged in");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+
+        try {
+            SharedChat sharedChat = chatShareService.createOrGetShare(sessionId, currentUser);
+            response.put("success", true);
+            response.put("shareToken", sharedChat.getShareToken());
+            return ResponseEntity.ok(response);
+        } catch (AIServiceException e) {
+            response.put("success", false);
+            response.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+        } catch (Exception e) {
+            log.error("Error creating share link for session {}: {}", sessionId, e.getMessage(), e);
+            response.put("success", false);
+            response.put("error", "Could not create share link");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
+    }
+
+    // Public endpoint: authentication is intentionally not required.
+    @GetMapping("/shared/{shareToken}")
+    public ResponseEntity<?> getSharedSession(
+            @PathVariable String shareToken
+    ) {
+        try {
+            SharedChatResponse sharedChat = chatShareService.getSharedChat(shareToken);
+            return ResponseEntity.ok(sharedChat);
+        } catch (AIServiceException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("Error loading shared chat: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Could not load shared chat"));
         }
     }
 
