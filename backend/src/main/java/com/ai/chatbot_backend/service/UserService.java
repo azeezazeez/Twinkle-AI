@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
@@ -22,6 +23,7 @@ import java.util.Optional;
 public class UserService {
 
     private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
 
 
     // ============================================================
@@ -304,7 +306,7 @@ public class UserService {
                             )
                     );
 
-            user.setPassword(newPassword);
+            user.setPassword(passwordEncoder.encode(newPassword));
 
             /*
              * OTP data is NOT stored on users.
@@ -417,7 +419,7 @@ public class UserService {
                     User.builder()
                             .username(username)
                             .email(email)
-                            .password(request.getPassword())
+                            .password(passwordEncoder.encode(request.getPassword()))
                             .verified(false)
                             .build();
 
@@ -554,7 +556,7 @@ public class UserService {
                     User.builder()
                             .username(username)
                             .email(normalizedEmail)
-                            .password(generatedPassword)
+                            .password(passwordEncoder.encode(generatedPassword))
                             .verified(false)
                             .build();
 
@@ -651,8 +653,10 @@ public class UserService {
             // ----------------------------------------------------
 
             if (user.getPassword() == null ||
-                    !user.getPassword().equals(
-                            request.getPassword()
+                    !user.getPassword().startsWith("$argon2id$") ||
+                    !passwordEncoder.matches(
+                            request.getPassword(),
+                            user.getPassword()
                     )) {
 
                 throw new AIServiceException(
