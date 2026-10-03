@@ -204,6 +204,8 @@ const getInitialTheme = (): boolean => {
   return window.matchMedia('(prefers-color-scheme: dark)').matches;
 };
 
+// Message sanitizers are function declarations so they are available to history/loading callbacks
+// regardless of module evaluation order.
 const dedupeMessages = (items: Message[]): Message[] => {
   const seen = new Set<string>();
   const result: Message[] = [];
@@ -2304,7 +2306,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   };
 
   
-const normalizeTwinkleIdentity = (content: string): string => {
+function normalizeTwinkleIdentity(content: string): string {
   const normalized = content.trim();
 
   // Replace the old default identity response with a clearer Twinkle AI
@@ -2321,9 +2323,9 @@ You can ask me questions, give me a file or image to analyze, ask for help with 
   }
 
   return content;
-};
+}
 
-const cleanMessageContent = (content: unknown): string => {
+function cleanMessageContent(content: unknown): string {
     if (typeof content !== 'string') return '';
 
     let cleaned = normalizeTwinkleIdentity(content)
@@ -2399,7 +2401,7 @@ const cleanMessageContent = (content: unknown): string => {
       .trim();
 
     return cleaned;
-  };
+  }
 
   const handleStartEdit = (msg: Message) => {
     setEditingMessage({ id: msg.id, content: cleanMessageContent(msg.content) });
