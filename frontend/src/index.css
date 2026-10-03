@@ -199,13 +199,37 @@
   z-index: 30 !important;
 }
 
-.group\/search svg {
-  transform-style: preserve-3d;
-  backface-visibility: hidden;
+.twinkle-search-icon {
+  transform: scaleX(1);
+  transform-origin: center;
+  transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
 }
 
-.group\/search:hover svg {
-  transform: rotateY(180deg);
+.group\/search:hover .twinkle-search-icon {
+  transform: scaleX(-1);
+}
+
+.twinkle-newchat-icon {
+  transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+  transform-origin: center;
+  transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.group\/newchat:hover .twinkle-newchat-icon {
+  transform: translate3d(0, -3px, 0) rotate(-16deg) scale(1.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .twinkle-search-icon,
+  .twinkle-newchat-icon {
+    transition: none;
+  }
+  .group\/search:hover .twinkle-search-icon,
+  .group\/newchat:hover .twinkle-newchat-icon {
+    transform: none;
+  }
 }
 
 /* =========================================================
@@ -748,13 +772,25 @@
 
 
 @keyframes twinkle-thinking-dot {
-  0%, 100% {
-    opacity: 0.35;
-    transform: scale(0.82);
+  0%, 60%, 100% {
+    opacity: 0.28;
+    transform: translate3d(0, 0, 0) scale(0.78);
   }
-  50% {
+  30% {
     opacity: 1;
-    transform: scale(1);
+    transform: translate3d(0, -4px, 0) scale(1);
+  }
+}
+
+.twinkle-thinking-dot {
+  animation: twinkle-thinking-dot 900ms cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .twinkle-thinking-dot {
+    animation: none;
+    opacity: 0.65;
   }
 }
 
