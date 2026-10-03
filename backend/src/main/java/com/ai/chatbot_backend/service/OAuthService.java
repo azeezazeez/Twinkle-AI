@@ -22,6 +22,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
@@ -43,6 +44,7 @@ public class OAuthService {
 
     private final RestTemplate restTemplate;
     private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
 
     // ========================================================================
     // FRONTEND CONFIGURATION
@@ -610,9 +612,12 @@ public class OAuthService {
             /*
              * OAuth users don't use this password for Google login.
              */
-            user.setPassword(
+            String generatedPassword =
                     UUID.randomUUID().toString()
-                            + UUID.randomUUID().toString()
+                            + UUID.randomUUID().toString();
+
+            user.setPassword(
+                    passwordEncoder.encode(generatedPassword)
             );
 
             user.setVerified(true);
