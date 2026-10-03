@@ -6,12 +6,13 @@ import Sidebar from '../components/Sidebar';
 import { chatApi, authApi, createLiveToken } from '../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
 import StormLogo from '../components/StormLogo';
-import ConfirmationModal from '../components/ConfirmationModal'; 
+import ConfirmationModal from '../components/ConfirmationModal';
+import ShareChatModal from '../components/ShareChatModal';
 import LiveTalkModal from '../components/LiveTalkModal';
 import { getSavedLiveTalkColor } from '../lib/liveTalkColors';
 
 import {
-  ArrowDown, ArrowUp, 
+  ArrowDown, 
   Copy, Check, Edit2,
   X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, Mic, AudioLines,
 } from 'lucide-react';
@@ -734,22 +735,37 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [responsePhase, setResponsePhase] = useState<'idle' | 'connecting' | 'thinking' | 'streaming'>('idle');
   const [loading, setLoading] = useState(true);
   const [justFinished, setJustFinished] = useState(false);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const [isAtBottom, setIsAtBottom] = useState(true);
   const [copiedId, setCopiedId] = useState<number | string | null>(null);
   const [editingMessage, setEditingMessage] = useState<{ id: string | number; content: string } | null>(null);
   const [editInput, setEditInput] = useState('');
   const [modalType, setModalType] = useState<'none' | 'delete-all' | 'delete-single'>('none');
   const [sessionIdToDelete, setSessionIdToDelete] = useState<number | null>(null);
+  const [shareSessionId, setShareSessionId] = useState<number | null>(null);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
   const [serverWaking, setServerWaking] = useState(false);
   const [requestHasFiles, setRequestHasFiles] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [desktopSidebarExpanded, setDesktopSidebarExpanded] = useState(false);
+  const [desktopSidebarWidth, setDesktopSidebarWidth] = useState<number>(() => {
+    try {
+      const stored = Number(localStorage.getItem('Twinkle_sidebar_width'));
+      return Number.isFinite(stored) ? Math.min(440, Math.max(280, stored)) : 360;
+    } catch {
+      return 360;
+    }
+  });
   const [liveTalkOpen, setLiveTalkOpen] = useState(false);
   const [liveTalkColor, setLiveTalkColor] = useState(() => getSavedLiveTalkColor());
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
   const [voiceInputActive, setVoiceInputActive] = useState(false);
+  const [voiceCaptureStopped, setVoiceCaptureStopped] = useState(false);
 
   const [typedSessionTitle, setTypedSessionTitle] = useState('');
 
@@ -851,6 +867,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     voiceBaseInputRef.current = '';
     setVoiceDraftVersion(version => version + 1);
     setVoiceInputActive(false);
+    setVoiceCaptureStopped(false);
     window.setTimeout(() => inputRef.current?.focus(), 0);
   }, [cleanupVoiceAudio]);
 
@@ -899,11 +916,32 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     voiceBaseInputRef.current = '';
     setVoiceDraftVersion(version => version + 1);
     setVoiceInputActive(false);
+    setVoiceCaptureStopped(false);
     window.setTimeout(() => inputRef.current?.focus(), 0);
   }, [cleanupVoiceAudio, voiceInputActive]);
 
+  const stopVoiceCapture = useCallback(async () => {
+    if (!voiceInputActive || voiceCaptureStopped) return;
+
+    try {
+      const socket = voiceSocketRef.current;
+      if (socket?.readyState === WebSocket.OPEN) {
+        try {
+          socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
+        } catch {}
+        await new Promise(resolve => window.setTimeout(resolve, 120));
+      }
+    } catch {}
+
+    try { voiceSocketRef.current?.close(1000, 'capture-stopped'); } catch {}
+    voiceSocketRef.current = null;
+    cleanupVoiceAudio();
+    setVoiceCaptureStopped(true);
+  }, [cleanupVoiceAudio, voiceCaptureStopped, voiceInputActive]);
+
   const startVoiceInput = useCallback(async () => {
     if (voiceInputActive || isTyping || isProcessingFiles) return;
+    setVoiceCaptureStopped(false);
 
     if (!navigator.mediaDevices?.getUserMedia) {
       window.alert('Microphone access is not supported in this browser. Please use a current Chrome, Edge, or Safari browser.');
@@ -1205,6 +1243,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const firstMessageScrollPendingRef = useRef(false);
   const isSendingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const streamingAssistantIdRef = useRef<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Stores the specific session ID that should skip one message load
@@ -1369,6 +1408,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           const mobileHeaderOffset = 92;
           const targetTop = Math.max(0, firstMessage.offsetTop - mobileHeaderOffset);
           setShowScrollBottom(false);
+          setIsAtBottom(false);
           container.scrollTo({
             top: targetTop,
             behavior: 'smooth',
@@ -1379,6 +1419,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       }
 
       setShowScrollBottom(false);
+      setIsAtBottom(true);
       container.scrollTo({
         top: container.scrollHeight,
         behavior: 'smooth',
@@ -1394,7 +1435,9 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
     // The scroll-to-bottom control is meaningful only when a conversation
     // exists and the user is actually away from the latest messages.
-    setShowScrollBottom(messages.length > 0 && distanceFromBottom > 100);
+    const awayFromBottom = distanceFromBottom > 100;
+    setShowScrollBottom(messages.length > 0 && awayFromBottom);
+    setIsAtBottom(distanceFromBottom <= 40);
   };
 
   const extractZipEntry = async (file: File, entryName: string): Promise<string | null> => {
@@ -1614,6 +1657,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
     isSendingRef.current = true;
     setIsTyping(true);
+    setResponsePhase('connecting');
+    streamingAssistantIdRef.current = null;
     setJustFinished(false);
     setServerWaking(false);
 
@@ -1665,6 +1710,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       const finalMessage = messageText.trim() || (hasFiles && filesToSend.some(f => f.type.startsWith('image/')) ? 'Image uploaded' : '');
 
       if (hasFiles) {
+        // File/multimodal requests keep the existing upload pipeline. The
+        // response is progressively revealed after the backend returns so
+        // the UI remains responsive without changing attachment handling.
+        setResponsePhase('thinking');
         response = await chatApi.sendMessageWithFiles(
           finalMessage,
           currentSessionId,
@@ -1673,11 +1722,52 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           filesToSend
         );
       } else {
-        response = await chatApi.sendMessage(
+        response = await chatApi.streamMessage(
           finalMessage,
           currentSessionId,
           controller.signal,
-          selectedModel
+          selectedModel,
+          {
+            onStatus: (status) => {
+              if (status === 'thinking') setResponsePhase('thinking');
+            },
+            onDelta: (chunk) => {
+              setResponsePhase('streaming');
+              const streamId = streamingAssistantIdRef.current || `stream-ai-${Date.now()}`;
+              streamingAssistantIdRef.current = streamId;
+
+              setMessages(prev => {
+                const existing = prev.find(message => message.id === streamId);
+                if (existing) {
+                  return prev.map(message =>
+                    message.id === streamId
+                      ? { ...message, content: message.content + chunk }
+                      : message
+                  );
+                }
+
+                return [
+                  ...prev,
+                  {
+                    id: streamId,
+                    sessionId: currentSessionId || 0,
+                    role: 'assistant',
+                    content: chunk,
+                    timestamp: new Date().toISOString(),
+                  },
+                ];
+              });
+
+              requestAnimationFrame(() => {
+                const container = messagesContainerRef.current;
+                if (!container) return;
+                const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+                if (distanceFromBottom < 180) {
+                  container.scrollTo({ top: container.scrollHeight, behavior: 'auto' });
+                }
+              });
+            },
+          }
         );
       }
 
@@ -1751,9 +1841,18 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       };
 
       setMessages(prev => {
+        const streamId = streamingAssistantIdRef.current;
+        if (streamId) {
+          const hasStreamMessage = prev.some(m => m.id === streamId);
+          if (hasStreamMessage) {
+            return prev.map(m => m.id === streamId ? aiMsg : m);
+          }
+        }
         if (prev.some(m => m.id === aiMsg.id)) return prev;
         return [...prev, aiMsg];
       });
+      streamingAssistantIdRef.current = null;
+      setResponsePhase('idle');
 
       // Generate and persist a professional AI-generated chat title.
       if ((isNewSession || regenerateTitle) && activeSessionId) {
@@ -1790,6 +1889,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       clearTimeout(wakingTimer);
       setServerWaking(false);
       setIsTyping(false);
+      setResponsePhase('idle');
+      streamingAssistantIdRef.current = null;
 
       if (err?.name === 'AbortError') {
         console.log('Chat aborted');
@@ -1859,6 +1960,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       abortControllerRef.current = null;
       setRequestHasFiles(false);
       setIsTyping(false);
+      setResponsePhase('idle');
+      streamingAssistantIdRef.current = null;
       setJustFinished(true);
       setTimeout(() => setJustFinished(false), 3000);
       setTimeout(() => inputRef.current?.focus(), 100);
@@ -1976,6 +2079,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const handleStopResponse = () => {
     abortControllerRef.current?.abort();
     setIsTyping(false);
+    setResponsePhase('idle');
+    streamingAssistantIdRef.current = null;
     setServerWaking(false);
     isSendingRef.current = false;
     abortControllerRef.current = null;
@@ -2049,6 +2154,39 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     } catch (err) {
       console.error('Rename failed:', err);
     }
+  };
+
+  const shareSession = async (sid: number) => {
+    setShareSessionId(sid);
+    setShareUrl(null);
+    setShareError(null);
+    setShareLoading(true);
+
+    try {
+      const response = await chatApi.shareSession(sid) as {
+        success?: boolean;
+        shareToken?: string;
+        error?: string;
+      };
+
+      if (!response?.shareToken) {
+        throw new Error(response?.error || 'Could not create share link.');
+      }
+
+      setShareUrl(`${window.location.origin}/shared/${response.shareToken}`);
+    } catch (err) {
+      console.error('Share session failed:', err);
+      setShareError(err instanceof Error ? err.message : 'Could not create share link.');
+    } finally {
+      setShareLoading(false);
+    }
+  };
+
+  const closeShareModal = () => {
+    setShareSessionId(null);
+    setShareUrl(null);
+    setShareError(null);
+    setShareLoading(false);
   };
 
   const confirmClearAll = async () => {
@@ -2272,15 +2410,20 @@ const cleanMessageContent = (content: unknown): string => {
         }}
         onDeleteSession={deleteSession}
         onRenameSession={renameSession}
+        onShareSession={shareSession}
         onClearAll={() => setModalType('delete-all')}
         onLogout={handleLogout}
         onProfile={onProfile}
         onSettings={onSettings}
         onDesktopStateChange={setDesktopSidebarExpanded}
+        onDesktopWidthChange={setDesktopSidebarWidth}
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
       />
-      <main className={"relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent transition-[margin] duration-300 ease-out " + (desktopSidebarExpanded ? "lg:ml-[360px]" : "lg:ml-14")}>
+      <main
+        className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent transition-[margin] duration-300 ease-out"
+        style={{ marginLeft: desktopSidebarExpanded ? `${desktopSidebarWidth}px` : undefined }}
+      >
         {/* Mobile header */}
         <header
           className="lg:hidden absolute top-0 inset-x-0 z-[9997] h-14 flex items-center justify-between px-3 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800"
@@ -2317,7 +2460,7 @@ const cleanMessageContent = (content: unknown): string => {
         </header>
         {/* Messages */}
         <div
-          className="min-h-0 min-w-0 flex-1 w-full max-w-full overflow-x-hidden overflow-y-auto overscroll-contain scroll-hide pb-32 pt-0 md:pb-36"
+          className="relative min-h-0 min-w-0 flex-1 w-full max-w-full overflow-x-hidden overflow-y-auto overscroll-contain scroll-hide pb-32 pt-0 md:pb-36"
           ref={messagesContainerRef}
           onScroll={handleScroll}
         >
@@ -2634,9 +2777,9 @@ const cleanMessageContent = (content: unknown): string => {
                                   <button
                                     type="button"
                                     onClick={() => handleRetryMessage(msg)}
-                                    title="Retry message"
+                                    data-tooltip="Retry message"
                                     aria-label="Retry message"
-                                    className="p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700 text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-600 dark:text-zinc-300 transition-all touch-manipulation"
+                                    className="twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700 text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-600 dark:text-zinc-300 transition-all touch-manipulation"
                                   >
                                     <RotateCcw className="w-4 h-4 md:w-3.5 md:h-3.5" />
                                   </button>
@@ -2644,9 +2787,9 @@ const cleanMessageContent = (content: unknown): string => {
                                   <button
                                     type="button"
                                     onClick={() => handleStartEdit(msg)}
-                                    title="Edit message"
+                                    data-tooltip="Edit message"
                                     aria-label="Edit message"
-                                    className="p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700 text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-600 dark:text-zinc-300 transition-all touch-manipulation"
+                                    className="twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700 text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-600 dark:text-zinc-300 transition-all touch-manipulation"
                                   >
                                     <Edit2 className="w-4 h-4 md:w-3.5 md:h-3.5" />
                                   </button>
@@ -2661,9 +2804,9 @@ const cleanMessageContent = (content: unknown): string => {
                                   setCopiedId(msg.id);
                                   setTimeout(() => setCopiedId(null), 2000);
                                 }}
-                                title="Copy message"
+                                data-tooltip="Copy message"
                                 aria-label="Copy message"
-                                className={`p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700 transition-all touch-manipulation ${
+                                className={`twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700 transition-all touch-manipulation ${
                                   copiedId === msg.id
                                     ? 'text-zinc-500'
                                     : 'text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-600 dark:text-zinc-300'
@@ -2681,38 +2824,17 @@ const cleanMessageContent = (content: unknown): string => {
                   );
                 })}
 
-                {isTyping && (
+                {isTyping && serverWaking && (
                   <div className="flex items-start gap-3 min-w-0 max-w-full">
                     <div className="w-7 h-7 md:w-8 md:h-8 shrink-0 flex items-center justify-center mt-1">
                       <StormLogo className="w-6 h-6 text-zinc-800 dark:text-zinc-100 animate-pulse" />
                     </div>
-                    <div className="min-w-0 max-w-full px-1 py-2 flex flex-col gap-2">
-                      <div className="flex items-center gap-2">
-                        <motion.div
-                          animate={{ scale: [1, 1.2, 1], opacity: [0.3, 1, 0.3] }}
-                          transition={{ repeat: Infinity, duration: 1 }}
-                          className="w-1.5 h-1.5 bg-black rounded-full"
-                        />
-                        <motion.div
-                          animate={{ scale: [1, 1.2, 1], opacity: [0.3, 1, 0.3] }}
-                          transition={{ repeat: Infinity, duration: 1, delay: 0.2 }}
-                          className="w-1.5 h-1.5 bg-black rounded-full"
-                        />
-                        <motion.div
-                          animate={{ scale: [1, 1.2, 1], opacity: [0.3, 1, 0.3] }}
-                          transition={{ repeat: Infinity, duration: 1, delay: 0.4 }}
-                          className="w-1.5 h-1.5 bg-black rounded-full"
-                        />
-                      </div>
-                      {serverWaking && (
-                          <motion.p
-                            className="text-[10px] font-medium text-zinc-400"
-                          >
-                            {requestHasFiles
-                              ? 'Processing uploaded file — this may take 10–15 seconds…'
-                              : 'Server is waking up, please wait a moment…'}
-                          </motion.p>
-                        )}
+                    <div className="min-w-0 max-w-full px-1 py-2">
+                      <p className="text-[10px] font-medium text-zinc-400">
+                        {requestHasFiles
+                          ? 'Processing uploaded file — this may take 10–15 seconds…'
+                          : 'Server is waking up, please wait a moment…'}
+                      </p>
                     </div>
                   </div>
                 )}
@@ -2723,32 +2845,62 @@ const cleanMessageContent = (content: unknown): string => {
 
             {(messages.length === 0 && !isTyping) && <div ref={messagesEndRef} />}
           </div>
+
+          {/* Soft fade: messages visually disappear into the composer instead of
+              abruptly stopping at its top edge while the user scrolls. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-36 bg-gradient-to-t from-white via-white/90 to-transparent dark:from-zinc-950 dark:via-zinc-950/90 dark:to-transparent"
+          />
         </div>
 
         {/* Input bar */}
-        <div className={"fixed bottom-0 left-0 right-0 z-[9000] w-auto max-w-none overflow-visible bg-transparent px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-4 sm:pt-3 sm:pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-6 md:pt-4 md:pb-[calc(1rem+env(safe-area-inset-bottom))] " + (desktopSidebarExpanded ? "lg:left-[360px]" : "lg:left-14")}>
+        <div
+          className="fixed bottom-0 left-0 right-0 z-[9000] w-auto max-w-none overflow-visible bg-transparent px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-4 sm:pt-3 sm:pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-6 md:pt-4 md:pb-[calc(1rem+env(safe-area-inset-bottom))]"
+          style={{ left: desktopSidebarExpanded ? `${desktopSidebarWidth}px` : undefined }}
+        >
           <div className="mx-auto w-full max-w-[920px] min-w-0 relative">
-            <AnimatePresence>
-              {showScrollBottom && messages.length > 0 && (
-                isTyping ? (
-                  <div
-                  className="flex items-center justify-center px-4 py-2"
-                  aria-live="polite"
-                  aria-label="Generating response"
+            <AnimatePresence initial={false}>
+              {isAtBottom && (
+                <motion.p
+                  initial={{ opacity: 0, y: 5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 5 }}
+                  transition={{ duration: 0.16, ease: 'easeOut' }}
+                  className="mb-2.5 px-2 text-center text-[10px] leading-relaxed font-medium text-zinc-500/70 dark:text-zinc-400/70 sm:text-[11px]"
                 >
-                  <span className="flex items-center gap-1.5" aria-hidden="true">
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-500 dark:bg-zinc-400" />
-                    <span
-                      className="h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-500 dark:bg-zinc-400"
-                      style={{ animationDelay: '180ms' }}
-                    />
-                    <span
-                      className="h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-500 dark:bg-zinc-400"
-                      style={{ animationDelay: '360ms' }}
-                    />
-                  </span>
-                </div>
-                ) : (
+                  <strong className="font-semibold">Twinkle is AI and can make mistakes.</strong>{' '}
+                  Please double-check responses.
+                </motion.p>
+              )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+              {isTyping && responsePhase !== 'streaming' && (
+                <motion.div
+                  initial={{ opacity: 0, y: 5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 5 }}
+                  transition={{ duration: 0.15 }}
+                  className="flex items-center justify-center gap-2 px-4 py-2.5"
+                  aria-live="polite"
+                  aria-label={responsePhase === 'connecting' ? 'Connecting' : 'Thinking'}
+                >
+                  <span
+                    className="h-[7px] w-[7px] shrink-0 rounded-full"
+                    style={{
+                      backgroundColor: liveTalkColor.swatch,
+                      boxShadow: `0 0 9px ${liveTalkColor.glow}`,
+                      animation: 'twinkle-thinking-dot 1.15s ease-in-out infinite',
+                    }}
+                  />
+                  {responsePhase === 'thinking' && (
+                    <span className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400">Thinking</span>
+                  )}
+                </motion.div>
+              )}
+
+              {showScrollBottom && messages.length > 0 && !isTyping && (
                   <motion.button
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -2759,13 +2911,12 @@ const cleanMessageContent = (content: unknown): string => {
                         behavior: 'smooth',
                       })
                     }
-                    className="absolute -top-14 left-1/2 z-10 -translate-x-1/2 rounded-full border border-white/70 bg-white/60 p-2.5 text-black shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white/50 backdrop-blur-xl transition-all hover:scale-110 hover:bg-white/75 dark:border-white/15 dark:bg-zinc-900/50 dark:ring-white/10 dark:hover:bg-zinc-900/65"
+                    className="twinkle-tooltip-trigger absolute -top-14 left-1/2 z-10 -translate-x-1/2 rounded-full border border-zinc-200 bg-white p-2.5 text-black shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 ring-white transition-all hover:scale-110 hover:bg-white dark:border-zinc-700 dark:bg-white dark:text-black dark:ring-white dark:hover:bg-white"
                     aria-label="Scroll to latest message"
-                    title="Scroll to latest message"
+                    data-tooltip="Scroll to latest message"
                   >
                     <ArrowDown className="h-4 w-4 md:h-5 md:w-5" />
                   </motion.button>
-                )
               )}
             </AnimatePresence>
 
@@ -2833,63 +2984,71 @@ const cleanMessageContent = (content: unknown): string => {
                     aria-live="polite"
                     aria-label="Listening for voice input"
                   >
-                    <div className="relative flex h-10 min-w-0 flex-1 items-center overflow-hidden" aria-hidden="true">
+                    {/* Cancel dictation */}
+                    <motion.button
+                      type="button"
+                      onClick={cancelVoiceInput}
+                      aria-label="Cancel dictation"
+                      data-tooltip="Cancel"
+                      whileHover={{ scale: 1.04 }}
+                      whileTap={{ scale: 0.9 }}
+                      className="twinkle-tooltip-trigger flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-800 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-11"
+                    >
+                      <X className="h-[20px] w-[20px]" strokeWidth={2.05} />
+                    </motion.button>
+
+                    {/* Dictation waveform */}
+                    <div className="relative flex h-10 min-w-0 flex-1 items-center overflow-hidden px-1" aria-hidden="true">
                       <motion.div
                         className="flex h-full w-full min-w-0 items-center justify-between gap-[3px]"
-                        animate={{ opacity: [0.86, 1, 0.86] }}
-                        transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
+                        animate={{ opacity: voiceCaptureStopped ? 0.45 : [0.82, 1, 0.82] }}
+                        transition={{ duration: 2.2, repeat: voiceCaptureStopped ? 0 : Infinity, ease: 'easeInOut' }}
                       >
                         {[...Array(72)].map((_, index) => {
                           const heights = [8, 13, 20, 11, 28, 16, 36, 22, 43, 30, 48, 34, 25, 44, 31, 50, 27, 40, 21, 46, 33, 42, 18, 37, 26, 47, 32, 22, 41, 28, 45, 19, 35, 25, 43, 30];
                           const height = heights[index % heights.length];
-
                           return (
                             <motion.span
                               key={index}
-                              className="min-w-0 flex-1 max-w-[4px] shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500"
-                              style={{
-                                height: `${Math.max(10, height)}px`,
-                                transformOrigin: 'center',
-                              }}
-                              animate={{
-                                scaleY: [0.55, 1, 0.55],
-                              }}
-                              transition={{
-                                duration: 3.6,
-                                repeat: Infinity,
-                                delay: index * 0.045,
-                                ease: 'easeInOut',
-                              }}
+                              className="min-w-0 flex-1 max-w-[4px] shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600"
+                              style={{ height: `${Math.max(5, height * 0.62)}px`, transformOrigin: 'center' }}
+                              animate={voiceCaptureStopped ? { scaleY: 0.65 } : { scaleY: [0.55, 1, 0.55] }}
+                              transition={{ duration: 1.8, repeat: voiceCaptureStopped ? 0 : Infinity, delay: index * 0.035, ease: 'easeInOut' }}
                             />
                           );
                         })}
                       </motion.div>
                     </div>
 
-                    <div className="flex shrink-0 items-center gap-0">
-                      <motion.button
-                        type="button"
-                        onClick={cancelVoiceInput}
-                        aria-label="Reject voice text"
-                        title="Cancel"
-                        whileHover={{ scale: 1.06 }}
-                        whileTap={{ scale: 0.9 }}
-                        className="flex h-10 w-10 items-center justify-center rounded-full text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white sm:h-11 sm:w-11"
-                      >
-                        <X className="h-[20px] w-[20px]" strokeWidth={2.05} />
-                      </motion.button>
-                      <motion.button
-                        type="button"
-                        onClick={commitVoiceInput}
-                        aria-label="Accept voice text"
-                        title="Accept"
-                        whileHover={{ scale: 1.06 }}
-                        whileTap={{ scale: 0.9 }}
-                        className="flex h-10 w-10 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-11"
-                      >
-                        <Check className="h-[21px] w-[21px]" strokeWidth={2.2} />
-                      </motion.button>
-                    </div>
+                    {/* Stop recording */}
+                    <motion.button
+                      type="button"
+                      onClick={() => void stopVoiceCapture()}
+                      disabled={voiceCaptureStopped}
+                      aria-label="Stop dictation"
+                      data-tooltip="Stop"
+                      whileHover={{ scale: voiceCaptureStopped ? 1 : 1.04 }}
+                      whileTap={{ scale: 0.9 }}
+                      className="twinkle-tooltip-trigger flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-900 shadow-sm transition hover:bg-zinc-50 disabled:cursor-default disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800 sm:h-11 sm:w-11"
+                    >
+                      <span className="h-3.5 w-3.5 rounded-[3px] bg-black dark:bg-white" />
+                    </motion.button>
+
+                    {/* Accept dictation into the composer */}
+                    <motion.button
+                      type="button"
+                      onClick={() => void commitVoiceInput()}
+                      aria-label="Use dictation"
+                      data-tooltip="Use dictation"
+                      whileHover={{ scale: 1.05, y: -1 }}
+                      whileTap={{ scale: 0.92 }}
+                      className="twinkle-tooltip-trigger flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition sm:h-11 sm:w-11"
+                      style={{ background: liveTalkColor.background, boxShadow: `0 8px 20px ${liveTalkColor.glow}` }}
+                    >
+                      <svg viewBox="0 0 24 24" className="h-[20px] w-[20px]" aria-hidden="true">
+                        <path d="M12 20V4M6.5 9.5 12 4l5.5 5.5" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </motion.button>
                   </div>
                 ) : (
                   <div className="twinkle-composer-prompt relative flex min-h-[58px] min-w-0 flex-1 items-center px-2 py-2 sm:min-h-[64px] sm:px-3">
@@ -2903,7 +3062,7 @@ const cleanMessageContent = (content: unknown): string => {
                           handleSendMessage();
                         }
                       }}
-                      placeholder="Ask Anything"
+                      placeholder="Ask Twinkle"
                       rows={1}
                       className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent p-0 text-[17px] font-medium leading-[1.35] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:text-[18px] sm:min-h-[46px]"
                       onInput={(e) => {
@@ -2923,10 +3082,10 @@ const cleanMessageContent = (content: unknown): string => {
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isTyping || isProcessingFiles}
                     aria-label="Attach files"
-                    title="Attach files"
+                    data-tooltip="Attach files"
                     whileHover={{ scale: 1.04 }}
                     whileTap={{ scale: 0.94 }}
-                    className="twinkle-composer-plus group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                    className="twinkle-tooltip-trigger twinkle-composer-plus group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
                   >
                     {isProcessingFiles ? (
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
@@ -2945,10 +3104,11 @@ const cleanMessageContent = (content: unknown): string => {
                       disabled={isTyping}
                       aria-haspopup="listbox"
                       aria-expanded={modelPickerOpen}
+                      data-tooltip={activeModel.name}
                       whileHover={{ y: -1 }}
                       whileTap={{ scale: 0.97 }}
                       transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                      className="group relative inline-flex h-10 shrink-0 items-center gap-1 rounded-lg border-0 bg-transparent px-1.5 text-black shadow-none outline-none transition-colors hover:bg-zinc-100/70 dark:bg-transparent dark:text-white dark:hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50 sm:gap-1.5 sm:px-2"
+                      className="twinkle-tooltip-trigger group relative inline-flex h-10 shrink-0 items-center gap-1 rounded-lg border-0 bg-transparent px-1.5 text-black shadow-none outline-none transition-colors hover:bg-zinc-100/70 dark:bg-transparent dark:text-white dark:hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50 sm:gap-1.5 sm:px-2"
                     >
                       <span className="max-w-[135px] truncate text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:max-w-[190px] sm:text-sm">
                         {activeModel.name}
@@ -3015,10 +3175,10 @@ const cleanMessageContent = (content: unknown): string => {
                       onClick={startVoiceInput}
                       disabled={isTyping || isProcessingFiles}
                       aria-label="Voice input"
-                      title="Voice input"
+                      data-tooltip="Dictate"
                       whileHover={{ scale: 1.06 }}
                       whileTap={{ scale: 0.9 }}
-                      className="twinkle-composer-mic ml-1 mr-2 flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:ml-2 sm:mr-3 sm:h-11 sm:w-9"
+                      className="twinkle-tooltip-trigger twinkle-composer-mic ml-1 mr-2 flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:ml-2 sm:mr-3 sm:h-11 sm:w-9"
                     >
                       <Mic className="h-[20px] w-[20px]" strokeWidth={2} />
                     </motion.button>
@@ -3027,51 +3187,65 @@ const cleanMessageContent = (content: unknown): string => {
                   {/* Live Talk / Send */}
                   
                     {!isTyping && !input.trim() && filePreviews.length === 0 ? (
-                      <button
+                      <motion.button
                         key="live-talk"
                         type="button"
                         onClick={() => setLiveTalkOpen(true)}
                         aria-label="Open Live Talk"
-                        title="Live Talk"
+                        data-tooltip="Live Talk"
                         whileHover={{ scale: 1.06 }}
                         whileTap={{ scale: 0.92 }}
-                        className="twinkle-composer-submit flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white transition sm:h-11 sm:w-11"
+                        className="twinkle-tooltip-trigger twinkle-composer-submit flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white transition sm:h-11 sm:w-11"
                         style={{
                           background: liveTalkColor.swatch,
                           boxShadow: `0 8px 20px ${liveTalkColor.glow}`,
                         }}
                       >
                         <AudioLines className="h-[19px] w-[19px]" strokeWidth={2.1} />
-                      </button>
+                      </motion.button>
                     ) : (
-                      <button
+                      <motion.button
                         key="send"
                         type="button"
                         onClick={isTyping ? handleStopResponse : () => handleSendMessage()}
                         disabled={!input.trim() && (!Array.isArray(filePreviews) || filePreviews.length === 0) && !isTyping}
                         aria-label={isTyping ? 'Stop response' : 'Send message'}
-                        title={isTyping ? 'Stop response' : 'Send message'}
+                        data-tooltip={isTyping ? 'Stop response' : 'Send message'}
                         whileHover={{ scale: isTyping || input.trim() || filePreviews.length ? 1.06 : 1, y: -1 }}
                         whileTap={{ scale: 0.92 }}
-                        className={`twinkle-composer-submit relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isTyping ? 'border-[#ec6aa8] bg-[#ec6aa8] text-white shadow-[#ec6aa8]/20' : 'border-zinc-300 bg-white hover:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-800 dark:hover:border-zinc-500'}`}
+                        className={`twinkle-tooltip-trigger twinkle-composer-submit relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-11 sm:w-11 ${isTyping ? 'border-transparent text-white' : 'border-transparent text-white'}`}
+                        style={{
+                          background: liveTalkColor.background,
+                          boxShadow: `0 8px 22px ${liveTalkColor.glow}`,
+                        }}
                       >
                         {isTyping ? (
                           <span className="relative flex h-full w-full items-center justify-center">
                             <span className="h-3.5 w-3.5 rounded-[3px] bg-white shadow-sm" />
                           </span>
                         ) : (
-                          <ArrowUp className="h-4 w-4" />
+                          <svg
+                            viewBox="0 0 24 24"
+                            className="h-[20px] w-[20px]"
+                            aria-hidden="true"
+                          >
+                            <path
+                              d="M12 21V4M6.25 9.75 12 4l5.75 5.75"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.1"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
                         )}
-                      </button>
+                      </motion.button>
                     )}
                   
                 </div>
               </div>
 
             </div>
-            <p className="mt-2.5 px-2 text-center text-[10px] sm:text-[11px] leading-relaxed font-medium text-zinc-500/60 dark:text-zinc-400/60">
-              Twinkle is AI and can make mistakes. Please double-check responses.
-            </p>
           </div>
         </div>
       </main>
@@ -3126,6 +3300,15 @@ const cleanMessageContent = (content: unknown): string => {
         )}
       </AnimatePresence>
 
+      <ShareChatModal
+        isOpen={shareSessionId !== null}
+        shareUrl={shareUrl}
+        chatName={sessions.find(session => session.id === shareSessionId)?.sessionName}
+        isLoading={shareLoading}
+        error={shareError}
+        onClose={closeShareModal}
+      />
+
       <ConfirmationModal
         isOpen={modalType === 'delete-single'}
         onClose={() => setModalType('none')}
@@ -3136,8 +3319,7 @@ const cleanMessageContent = (content: unknown): string => {
             This will permanently delete{' '}
             <strong className="font-bold">
               {sessionToDelete?.sessionName || 'this chat'}
-            </strong>
-            . This can't be undone.
+            </strong>. This can't be undone.
           </>
         }
         confirmText="Delete"
