@@ -1363,14 +1363,31 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const loadSessions = useCallback(async () => {
     try {
       const response = await chatApi.getSessions() as any;
-      setSessions(response.sessions || []);
+      const rawSessions = Array.isArray(response?.sessions) ? response.sessions : [];
+
+      // Normalize IDs at the API boundary. Some JSON serializers can return
+      // numeric IDs as strings; the UI always works with numeric session IDs.
+      const normalizedSessions: Session[] = rawSessions
+        .map((session: any) => ({
+          ...session,
+          id: Number(session?.id),
+          userId: String(session?.userId ?? user.id),
+          sessionName: typeof session?.sessionName === 'string' && session.sessionName.trim()
+            ? session.sessionName
+            : 'New Chat',
+        }))
+        .filter((session: Session) => Number.isFinite(session.id) && session.id > 0);
+
+      setSessions(normalizedSessions);
+      return normalizedSessions;
     } catch (err: any) {
       console.error('Failed to load sessions:', err);
       if (err.status === 401) onLogout();
+      return null;
     } finally {
       setLoading(false);
     }
-  }, [onLogout]);
+  }, [onLogout, user.id]);
 
   // Live Talk persists turns in the background. Update the same sidebar state
   // immediately instead of forcing another GET /chat/sessions request.
@@ -1442,28 +1459,37 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
   useEffect(() => { loadSessions(); }, [loadSessions]);
 
-  // Restore the last conversation after a browser refresh. If it was deleted
-  // elsewhere, clear the stale ID instead of silently creating a new chat.
-  useEffect(() => {
-    if (loading || currentSessionId === null || sessions.length === 0) return;
-    if (!sessions.some(session => session.id === currentSessionId)) {
-      setCurrentSessionId(null);
-      persistSessionId(null);
-      setMessages([]);
-    }
-  }, [loading, currentSessionId, sessions]);
+  // Restore the exact conversation that was open before a browser refresh.
+  // Do not create a session here and do not clear the persisted ID while the
+  // sessions request is still being resolved. A stale ID is cleared only
+  // after a successful sessions response proves that the conversation no
+  // longer exists.
+  const sessionsLoadedSuccessfullyRef = useRef(false);
 
   useEffect(() => {
     if (loading) return;
-    if (currentSessionId !== null) {
-      const stillExists = sessions.some(s => s.id === currentSessionId);
-      if (!stillExists) {
+
+    const persistedId = readPersistedSessionId();
+    const persistedSessionExists = persistedId !== null
+      && sessions.some(session => session.id === persistedId);
+
+    sessionsLoadedSuccessfullyRef.current = true;
+
+    if (persistedSessionExists && persistedId !== currentSessionId) {
+      setCurrentSessionId(persistedId);
+      return;
+    }
+
+    if (persistedId !== null && !persistedSessionExists) {
+      // The persisted session was actually deleted or is no longer available.
+      // Only now is it safe to clear the stored selection.
+      persistSessionId(null);
+      if (currentSessionId !== null) {
         setCurrentSessionId(null);
-        persistSessionId(null);
         setMessages([]);
       }
     }
-  }, [sessions, loading]);
+  }, [loading, sessions, currentSessionId]);
 
   // Only skip loading messages if the currentSessionId exactly matches the
   // ID we marked to skip (the newly created session). Any other session --
