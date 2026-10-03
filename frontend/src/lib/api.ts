@@ -1027,6 +1027,132 @@ export const chatApi = {
     ),
 
   /* =======================================================
+     STREAMING TEXT CHAT
+     ======================================================= */
+
+  streamMessage: async (
+    message: string,
+    sessionId: number | null,
+    signal: AbortSignal | undefined,
+    model: string | undefined,
+    handlers: {
+      onStatus?: (status: string) => void;
+      onDelta?: (text: string) => void;
+    } = {}
+  ): Promise<any> => {
+    const headers: Record<string, string> = {
+      Accept: 'text/event-stream',
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache',
+    };
+
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE}/chat/send/stream`, {
+        method: 'POST',
+        credentials: 'include',
+        headers,
+        signal,
+        body: JSON.stringify({
+          message,
+          sessionId,
+          model,
+        }),
+      });
+    } catch (error) {
+      if ((error as any)?.name === 'AbortError') throw error;
+      throw new Error('Server is starting up, please wait a moment and try again.');
+    }
+
+    if (!response.ok) {
+      const contentType = response.headers.get('content-type') || '';
+      let data: any = {};
+      if (contentType.includes('application/json')) {
+        data = await response.json().catch(() => ({}));
+      } else {
+        const text = await response.text().catch(() => '');
+        data = { error: text };
+      }
+      const error = new Error(
+        typeof data?.error === 'string' && data.error.trim()
+          ? data.error
+          : `Request failed with status ${response.status}`
+      ) as ApiError;
+      error.status = response.status;
+      error.data = data;
+      throw error;
+    }
+
+    if (!response.body) {
+      throw new Error('The server did not provide a streaming response.');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalData: any = {};
+
+    const handleEvent = (rawEvent: string) => {
+      const lines = rawEvent.split(/\r?\n/);
+      let eventName = 'message';
+      const dataLines: string[] = [];
+
+      for (const line of lines) {
+        if (line.startsWith('event:')) eventName = line.slice(6).trim();
+        else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+      }
+
+      if (!dataLines.length) return;
+      const rawData = dataLines.join('\n');
+      let data: any;
+      try {
+        data = JSON.parse(rawData);
+      } catch {
+        data = { text: rawData };
+      }
+
+      if (eventName === 'status') {
+        handlers.onStatus?.(typeof data?.status === 'string' ? data.status : 'thinking');
+      } else if (eventName === 'delta') {
+        const text = typeof data?.text === 'string' ? data.text : '';
+        if (text) handlers.onDelta?.(text);
+      } else if (eventName === 'done') {
+        finalData = data || {};
+      } else if (eventName === 'error') {
+        const error = new Error(
+          typeof data?.error === 'string' && data.error.trim()
+            ? data.error
+            : 'Unable to generate a response.'
+        ) as ApiError;
+        throw error;
+      }
+    };
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+
+        let boundaryIndex = buffer.indexOf('\n\n');
+        while (boundaryIndex !== -1) {
+          const event = buffer.slice(0, boundaryIndex);
+          buffer = buffer.slice(boundaryIndex + 2);
+          handleEvent(event);
+          boundaryIndex = buffer.indexOf('\n\n');
+        }
+
+        if (done) break;
+      }
+
+      if (buffer.trim()) handleEvent(buffer);
+    } finally {
+      reader.releaseLock();
+    }
+
+    return finalData;
+  },
+
+  /* =======================================================
      MULTIPART FILE CHAT
      ======================================================= */
 
@@ -1231,6 +1357,28 @@ export const chatApi = {
         method: 'POST',
       }
     ),
+
+  /* =======================================================
+     PUBLIC SHARED SESSION
+     ======================================================= */
+
+  getSharedSession: (shareToken: string) =>
+    fetch(`${API_BASE}/chat/shared/${encodeURIComponent(shareToken)}`, {
+      method: 'GET',
+      credentials: 'include',
+      cache: 'no-store',
+      headers: {
+        Accept: 'application/json',
+      },
+    }).then(async response => {
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data?.error || 'This shared chat is no longer available.');
+      }
+
+      return data;
+    }),
 };
 
 /* =========================================================
