@@ -36,8 +36,8 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
     };
 
     const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
 
+    document.body.style.overflow = 'hidden';
     document.addEventListener('keydown', handleKeyDown);
 
     requestAnimationFrame(() => {
@@ -78,7 +78,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
             "
           />
 
-          {/* Confirmation Modal */}
+          {/* Confirmation modal */}
           <motion.div
             role="dialog"
             aria-modal="true"
@@ -232,7 +232,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                 className={`
                   min-w-[150px]
                   rounded-full
-                  border
+                  border-0
                   px-6
                   py-3
                   text-[17px]
@@ -245,21 +245,17 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                   ${
                     isDestructive
                       ? `
-                        border-zinc-300
-                        bg-white
-                        text-[#ff2d3f]
-                        hover:bg-zinc-50
-                        dark:border-zinc-600
-                        dark:bg-zinc-900
-                        dark:text-[#ff5c6c]
-                        dark:hover:bg-zinc-800
+                        bg-[#fbe5e7]
+                        text-[#e62f3d]
+                        hover:bg-[#f8dadd]
+                        dark:bg-[#3a2023]
+                        dark:text-[#ff6672]
+                        dark:hover:bg-[#48272b]
                       `
                       : `
-                        border-zinc-900
                         bg-zinc-900
                         text-white
                         hover:bg-zinc-800
-                        dark:border-zinc-100
                         dark:bg-zinc-100
                         dark:text-zinc-900
                         dark:hover:bg-zinc-200
