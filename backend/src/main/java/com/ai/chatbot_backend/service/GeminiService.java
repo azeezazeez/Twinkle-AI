@@ -14,6 +14,10 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -23,6 +27,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 @Service
 @Slf4j
@@ -49,10 +55,16 @@ public class GeminiService {
 
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private final OkHttpClient streamClient;
 
     public GeminiService(RestTemplate restTemplate, ObjectMapper objectMapper) {
         this.restTemplate = restTemplate;
         this.objectMapper = objectMapper;
+        this.streamClient = new OkHttpClient.Builder()
+                .connectTimeout(30, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
+                .readTimeout(0, TimeUnit.MILLISECONDS)
+                .build();
     }
 
     public String getModel() {
@@ -173,6 +185,136 @@ public class GeminiService {
         requestBody.put("generationConfig", generationConfig);
 
         return callGemini(requestBody);
+    }
+
+    /** Streams Gemini output using the provider SSE endpoint. */
+    public String streamResponse(
+            String userMessage,
+            List<Map<String, String>> conversationHistory,
+            List<String> attachmentDataUrls,
+            String requestedLanguage,
+            Consumer<String> onDelta) {
+
+        if (apiKey == null || apiKey.isBlank() || apiKey.equalsIgnoreCase("YOUR_GEMINI_API_KEY")) {
+            throw new AIServiceException("Gemini API key is not configured.");
+        }
+
+        Map<String, Object> requestBody = buildRequestBody(
+                userMessage, conversationHistory, attachmentDataUrls, requestedLanguage);
+
+        try {
+            okhttp3.MediaType json = okhttp3.MediaType.get("application/json; charset=utf-8");
+            RequestBody body = RequestBody.create(objectMapper.writeValueAsBytes(requestBody), json);
+            String endpoint = apiUrl.replaceAll("/+$$", "")
+                    + "/models/" + model + ":streamGenerateContent?alt=sse";
+            Request request = new Request.Builder()
+                    .url(endpoint)
+                    .header("x-goog-api-key", apiKey)
+                    .header("Content-Type", "application/json")
+                    .post(body)
+                    .build();
+
+            StringBuilder full = new StringBuilder();
+            try (Response response = streamClient.newCall(request).execute()) {
+                if (!response.isSuccessful()) {
+                    String errorBody = response.body() == null ? "" : response.body().string();
+                    throw new AIServiceException("Gemini API error " + response.code() + ": " + errorBody);
+                }
+                if (response.body() == null) throw new AIServiceException("Gemini returned an empty stream.");
+
+                try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(response.body().byteStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        if (!line.startsWith("data:")) continue;
+                        String data = line.substring(5).trim();
+                        if (data.isEmpty()) continue;
+                        try {
+                            Map<?, ?> root = objectMapper.readValue(data, Map.class);
+                            Object candidatesObject = root.get("candidates");
+                            if (!(candidatesObject instanceof List<?> candidates)) continue;
+                            for (Object candidateObject : candidates) {
+                                if (!(candidateObject instanceof Map<?, ?> candidate)) continue;
+                                Object contentObject = candidate.get("content");
+                                if (!(contentObject instanceof Map<?, ?> content)) continue;
+                                Object partsObject = content.get("parts");
+                                if (!(partsObject instanceof List<?> parts)) continue;
+                                for (Object partObject : parts) {
+                                    if (!(partObject instanceof Map<?, ?> part)) continue;
+                                    Object text = part.get("text");
+                                    if (text == null) continue;
+                                    String chunk = text.toString();
+                                    if (chunk.isEmpty()) continue;
+                                    full.append(chunk);
+                                    onDelta.accept(chunk);
+                                }
+                            }
+                        } catch (Exception parseError) {
+                            log.debug("Ignoring malformed Gemini stream event: {}", parseError.getMessage());
+                        }
+                    }
+                }
+            }
+            return full.toString();
+        } catch (AIServiceException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Gemini streaming failed: {}", e.getMessage(), e);
+            throw new AIServiceException("Unable to stream the Gemini response.", e);
+        }
+    }
+
+    private Map<String, Object> buildRequestBody(
+            String userMessage,
+            List<Map<String, String>> conversationHistory,
+            List<String> attachmentDataUrls,
+            String requestedLanguage) {
+        if (apiKey == null || apiKey.isBlank() || apiKey.equalsIgnoreCase("YOUR_GEMINI_API_KEY")) {
+            throw new AIServiceException("Gemini API key is not configured.");
+        }
+        List<Map<String, Object>> contents = new ArrayList<>();
+        if (conversationHistory != null) {
+            for (Map<String, String> historyItem : conversationHistory) {
+                if (historyItem == null) continue;
+                String role = normalizeRole(historyItem.get("role"));
+                String content = historyItem.get("content");
+                if (content == null || content.isBlank()) continue;
+                contents.add(Map.of("role", role, "parts", List.of(Map.of("text", content))));
+            }
+        }
+        List<Map<String, Object>> parts = new ArrayList<>();
+        String text = userMessage == null ? "" : userMessage.trim();
+        if (!text.isBlank()) parts.add(Map.of("text", text));
+        if (attachmentDataUrls != null) {
+            for (String dataUrl : attachmentDataUrls) {
+                if (dataUrl == null || dataUrl.isBlank()) continue;
+                ParsedDataUrl parsed = parseDataUrl(dataUrl);
+                if (parsed == null) continue;
+                if (isTextMimeType(parsed.mimeType)) {
+                    String decodedText = decodeText(parsed.base64Data);
+                    if (!decodedText.isBlank()) parts.add(Map.of("text", "Attached file: " + parsed.filename + "\n\n" + decodedText));
+                    continue;
+                }
+                if (!isGeminiInlineMimeType(parsed.mimeType)) continue;
+                Map<String, Object> inlineData = new LinkedHashMap<>();
+                inlineData.put("mime_type", parsed.mimeType);
+                inlineData.put("data", parsed.base64Data);
+                parts.add(Map.of("inline_data", inlineData));
+            }
+        }
+        if (parts.isEmpty()) parts.add(Map.of("text", "Please answer the user's request."));
+        contents.add(Map.of("role", "user", "parts", parts));
+        Map<String, Object> systemInstruction = Map.of("parts", List.of(Map.of("text", systemPrompt(requestedLanguage))));
+        Map<String, Object> generationConfig = new LinkedHashMap<>();
+        generationConfig.put("maxOutputTokens", Math.max(1024, Math.min(maxOutputTokens, 65536)));
+        Map<String, Object> thinkingConfig = new LinkedHashMap<>();
+        thinkingConfig.put("thinkingLevel", normalizeThinkingLevel());
+        generationConfig.put("thinkingConfig", thinkingConfig);
+        Map<String, Object> requestBody = new LinkedHashMap<>();
+        requestBody.put("system_instruction", systemInstruction);
+        requestBody.put("contents", contents);
+        requestBody.put("generationConfig", generationConfig);
+        return requestBody;
     }
 
     private String callGemini(Map<String, Object> requestBody) {
