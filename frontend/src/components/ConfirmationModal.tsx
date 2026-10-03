@@ -68,10 +68,17 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
             exit={{ opacity: 0 }}
             transition={{ duration: 0.15 }}
             onClick={onClose}
-            className="absolute inset-0 cursor-default border-0 bg-black/30 backdrop-blur-[1.5px]"
+            className="
+              absolute
+              inset-0
+              cursor-default
+              border-0
+              bg-black/30
+              backdrop-blur-[1.5px]
+            "
           />
 
-          {/* Modal */}
+          {/* Confirmation Modal */}
           <motion.div
             role="dialog"
             aria-modal="true"
@@ -176,7 +183,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
               {message}
             </div>
 
-            {/* Buttons */}
+            {/* Action buttons */}
             <div
               className="
                 mt-7
@@ -186,7 +193,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                 gap-3
               "
             >
-              {/* Cancel */}
+              {/* Cancel button */}
               <motion.button
                 ref={cancelButtonRef}
                 type="button"
@@ -217,7 +224,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                 {cancelText}
               </motion.button>
 
-              {/* Delete */}
+              {/* Delete button */}
               <motion.button
                 type="button"
                 whileTap={{ scale: 0.98 }}
@@ -238,14 +245,14 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                   ${
                     isDestructive
                       ? `
-                        border-red-100
-                        bg-[#ffe4e7]
+                        border-zinc-300
+                        bg-white
                         text-[#ff2d3f]
-                        hover:bg-[#ffd9dd]
-                        dark:border-red-900/40
-                        dark:bg-red-950/40
+                        hover:bg-zinc-50
+                        dark:border-zinc-600
+                        dark:bg-zinc-900
                         dark:text-[#ff5c6c]
-                        dark:hover:bg-red-950/60
+                        dark:hover:bg-zinc-800
                       `
                       : `
                         border-zinc-900
