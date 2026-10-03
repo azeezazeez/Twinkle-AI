@@ -104,6 +104,7 @@ function SessionList({
   onSettings,
 }: SessionListProps) {
   const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
+  const [menuPlacement, setMenuPlacement] = useState<'up' | 'down'>('down');
   const menuRef = useRef<HTMLDivElement>(null);
 
   const [renamingId, setRenamingId] = useState<number | null>(null);
@@ -220,7 +221,7 @@ function SessionList({
           aria-label="New chat"
           className="group/newchat w-full h-12 px-2.5 bg-transparent text-zinc-900 dark:text-zinc-100 rounded-xl flex items-center gap-3 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors active:bg-zinc-100 dark:active:bg-zinc-800"
         >
-          <span className="shrink-0 flex h-8 w-8 items-center justify-center rounded-lg transition-transform duration-300 ease-out group-hover/newchat:-translate-y-0.5 group-hover/newchat:rotate-[-12deg] group-hover/newchat:scale-[1.04]" aria-hidden="true">
+          <span className="twinkle-newchat-box shrink-0 flex h-8 w-8 items-center justify-center rounded-lg" aria-hidden="true">
             <SquarePen className="twinkle-newchat-icon w-[22px] h-[22px] text-zinc-900 dark:text-zinc-100" strokeWidth={1.7} />
           </span>
           <span className="text-[17px] font-normal tracking-tight">New chat</span>
@@ -328,7 +329,18 @@ function SessionList({
                               type="button"
                               onClick={e => {
                                 e.stopPropagation();
-                                setMenuOpenId(isMenuOpen ? null : session.id);
+                                if (isMenuOpen) {
+                                  setMenuOpenId(null);
+                                  return;
+                                }
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                const estimatedMenuHeight = 250;
+                                setMenuPlacement(
+                                  rect.bottom + estimatedMenuHeight > window.innerHeight
+                                    ? 'up'
+                                    : 'down'
+                                );
+                                setMenuOpenId(session.id);
                               }}
                               aria-label="Chat options"
                               className={`p-1.5 rounded-lg transition-colors ${
