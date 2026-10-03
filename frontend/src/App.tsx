@@ -26,6 +26,7 @@ import Chat from './pages/Chat';
 import Profile from './pages/Profile';
 import Settings from './pages/Settings';
 import LiveTalkColor from './pages/LiveTalkColor';
+import SharedChat from './pages/SharedChat';
 
 import StormLogo from './components/StormLogo';
 
@@ -262,6 +263,17 @@ function AuthenticatedApp({
             <ForgotPassword />
           )
         }
+      />
+
+
+      {/* =====================================================
+          PUBLIC SHARED CHAT
+          This route intentionally does not require authentication.
+          ===================================================== */}
+
+      <Route
+        path="/shared/:token"
+        element={<SharedChat />}
       />
 
 
