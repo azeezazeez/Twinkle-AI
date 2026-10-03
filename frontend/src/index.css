@@ -11,7 +11,7 @@
   :root {
     --brand-primary: #000000;
     --brand-secondary: #000000;
-    --bg-main: #FFFFFF; 
+    --bg-main: #FFFFFF;
     --surface: #F9FAFB;
     --text-main: #111111;
     --text-muted: #666666;
@@ -728,4 +728,58 @@
 .dark [role="status"][class*="text-emerald-"] {
   color: #4ade80 !important;
   text-align: center !important;
+}
+
+
+@keyframes twinkle-thinking-dot {
+  0%, 100% {
+    opacity: 0.35;
+    transform: scale(0.82);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+
+/* ChatGPT/Claude-style compact hover cards for icon controls. */
+.twinkle-tooltip-trigger {
+  position: relative;
+}
+
+.twinkle-tooltip-trigger::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translate(-50%, 4px);
+  z-index: 100000;
+  pointer-events: none;
+  white-space: nowrap;
+  border-radius: 999px;
+  background: #111111;
+  color: #ffffff;
+  padding: 7px 12px;
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  box-shadow: 0 8px 24px rgba(0,0,0,.16);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .14s ease, transform .14s ease, visibility .14s ease;
+}
+
+.twinkle-tooltip-trigger:hover::after,
+.twinkle-tooltip-trigger:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+}
+
+@media (max-width: 767px) {
+  .twinkle-tooltip-trigger::after {
+    display: none;
+  }
 }
