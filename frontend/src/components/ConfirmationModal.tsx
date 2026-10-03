@@ -36,13 +36,9 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
     };
 
     const previousOverflow = document.body.style.overflow;
-
     document.body.style.overflow = 'hidden';
     document.addEventListener('keydown', handleKeyDown);
-
-    requestAnimationFrame(() => {
-      cancelButtonRef.current?.focus();
-    });
+    requestAnimationFrame(() => cancelButtonRef.current?.focus());
 
     return () => {
       document.body.style.overflow = previousOverflow;
@@ -59,7 +55,6 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
     <AnimatePresence>
       {isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          {/* Background overlay */}
           <motion.button
             type="button"
             aria-label="Close confirmation dialog"
@@ -68,200 +63,59 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
             exit={{ opacity: 0 }}
             transition={{ duration: 0.15 }}
             onClick={onClose}
-            className="
-              absolute
-              inset-0
-              cursor-default
-              border-0
-              bg-black/30
-              backdrop-blur-[1.5px]
-            "
+            className="absolute inset-0 cursor-default border-0 bg-black/30 backdrop-blur-[1.5px]"
           />
 
-          {/* Confirmation modal */}
           <motion.div
             role="dialog"
             aria-modal="true"
             aria-labelledby="confirmation-modal-title"
-            initial={{
-              opacity: 0,
-              scale: 0.98,
-              y: 5,
-            }}
-            animate={{
-              opacity: 1,
-              scale: 1,
-              y: 0,
-            }}
-            exit={{
-              opacity: 0,
-              scale: 0.98,
-              y: 5,
-            }}
-            transition={{
-              duration: 0.16,
-              ease: 'easeOut',
-            }}
-            className="
-              relative
-              w-full
-              max-w-[656px]
-              rounded-[28px]
-              border
-              border-zinc-200
-              bg-white
-              px-8
-              py-8
-              shadow-[0_18px_50px_rgba(0,0,0,0.14)]
-              dark:border-zinc-700
-              dark:bg-zinc-900
-              dark:shadow-[0_18px_50px_rgba(0,0,0,0.45)]
-              sm:px-8
-              sm:py-8
-            "
+            initial={{ opacity: 0, scale: 0.98, y: 5 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.98, y: 5 }}
+            transition={{ duration: 0.16, ease: 'easeOut' }}
+            className="relative w-full max-w-[540px] rounded-[22px] border border-zinc-200 bg-white px-6 py-6 shadow-[0_18px_45px_rgba(0,0,0,0.14)] dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-[0_18px_45px_rgba(0,0,0,0.45)] sm:px-7 sm:py-6"
           >
-            {/* Close button */}
             <button
               type="button"
               onClick={onClose}
               aria-label="Close"
-              className="
-                absolute
-                right-5
-                top-5
-                flex
-                h-8
-                w-8
-                items-center
-                justify-center
-                rounded-full
-                text-zinc-800
-                transition-colors
-                hover:bg-zinc-100
-                focus:outline-none
-                focus:ring-2
-                focus:ring-zinc-400/40
-                dark:text-zinc-200
-                dark:hover:bg-zinc-800
-              "
+              className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full text-zinc-800 transition-colors hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-400/40 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
-              <X
-                className="h-[20px] w-[20px]"
-                strokeWidth={1.8}
-              />
+              <X className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
 
-            {/* Title */}
             <h2
               id="confirmation-modal-title"
-              className="
-                pr-12
-                text-[28px]
-                font-normal
-                leading-[1.2]
-                tracking-[-0.025em]
-                text-zinc-900
-                dark:text-zinc-100
-              "
+              className="pr-10 text-[23px] font-normal leading-tight tracking-[-0.025em] text-zinc-900 dark:text-zinc-100"
             >
               {title}
             </h2>
 
-            {/* Message */}
-            <div
-              className="
-                mt-4
-                max-w-[560px]
-                text-[17px]
-                font-normal
-                leading-[1.55]
-                tracking-[-0.01em]
-                text-zinc-500
-                dark:text-zinc-400
-              "
-            >
+            <div className="mt-3.5 max-w-[470px] text-[16px] font-normal leading-[1.5] tracking-[-0.01em] text-zinc-500 dark:text-zinc-400">
               {message}
             </div>
 
-            {/* Action buttons */}
-            <div
-              className="
-                mt-7
-                flex
-                items-center
-                justify-end
-                gap-3
-              "
-            >
-              {/* Cancel button */}
+            <div className="mt-5 flex items-center justify-end gap-2.5">
               <motion.button
                 ref={cancelButtonRef}
                 type="button"
                 whileTap={{ scale: 0.98 }}
                 onClick={onClose}
-                className="
-                  min-w-[125px]
-                  rounded-full
-                  border
-                  border-zinc-300
-                  bg-white
-                  px-6
-                  py-3
-                  text-[17px]
-                  font-medium
-                  text-zinc-900
-                  transition-colors
-                  hover:bg-zinc-50
-                  focus:outline-none
-                  focus:ring-2
-                  focus:ring-zinc-400/40
-                  dark:border-zinc-600
-                  dark:bg-zinc-900
-                  dark:text-zinc-100
-                  dark:hover:bg-zinc-800
-                "
+                className="min-w-[92px] rounded-full border border-zinc-300 bg-white px-5 py-2.5 text-[15px] font-medium text-zinc-900 transition-colors hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-400/40 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
               >
                 {cancelText}
               </motion.button>
 
-              {/* Delete button */}
               <motion.button
                 type="button"
                 whileTap={{ scale: 0.98 }}
                 onClick={handleConfirm}
-                className={`
-                  min-w-[150px]
-                  rounded-full
-                  border-0
-                  px-6
-                  py-3
-                  text-[17px]
-                  font-medium
-                  transition-colors
-                  focus:outline-none
-                  focus:ring-2
-                  focus:ring-red-500/20
-
-                  ${
-                    isDestructive
-                      ? `
-                        bg-[#fbe5e7]
-                        text-[#e62f3d]
-                        hover:bg-[#f8dadd]
-                        dark:bg-[#3a2023]
-                        dark:text-[#ff6672]
-                        dark:hover:bg-[#48272b]
-                      `
-                      : `
-                        bg-zinc-900
-                        text-white
-                        hover:bg-zinc-800
-                        dark:bg-zinc-100
-                        dark:text-zinc-900
-                        dark:hover:bg-zinc-200
-                      `
-                  }
-                `}
+                className={`min-w-[108px] rounded-full border-0 px-5 py-2.5 text-[15px] font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-red-500/20 ${
+                  isDestructive
+                    ? 'bg-[#fbe5e7] text-[#e62f3d] hover:bg-[#f8dadd] dark:bg-[#3a2023] dark:text-[#ff6672] dark:hover:bg-[#48272b]'
+                    : 'bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200'
+                }`}
               >
                 {confirmText}
               </motion.button>
