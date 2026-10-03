@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
@@ -18,6 +19,7 @@ import java.util.Optional;
 public class AuthService {
 
     private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
     private final OTPService otpService;
     private final EmailService emailService;
     private final RedisEventService redisEventService;
@@ -709,7 +711,7 @@ public class AuthService {
             User user =
                     userOptional.get();
 
-            user.setPassword(newPassword);
+            user.setPassword(passwordEncoder.encode(newPassword));
 
             userRepository.save(user);
 
