@@ -5,7 +5,7 @@ import {
   LogOut, Trash2, X, Search, SquarePen,
   MoreHorizontal, Pin, PinOff,
   MessageCircle, Pencil, Upload,
-  Settings2, UserCircle2, ChevronRight, PanelLeft,
+  Settings2, UserCircle2, ChevronRight, PanelLeft, LibraryBig,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import UserAvatar from './UserAvatar'; 
@@ -73,18 +73,22 @@ function IconTooltip({
   return (
     <div className="relative group/tip flex items-center justify-center w-full">
       {children}
-      <div className="absolute left-full ml-3 flex items-center gap-2.5 px-5 py-2.5 bg-[#111111] text-white text-[16px] font-semibold rounded-full whitespace-nowrap pointer-events-none z-[300] shadow-[0_12px_32px_rgba(0,0,0,0.18)] opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150">
+      <div className="absolute left-full ml-3 flex items-center gap-2 px-4 py-2.5 bg-[#111111] text-white text-[15px] font-semibold rounded-full whitespace-nowrap pointer-events-none z-[300] shadow-[0_12px_32px_rgba(0,0,0,0.18)] opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150">
         <span>{label}</span>
         {shortcut && (
-          <kbd className="rounded-full bg-zinc-600 px-2.5 py-0.5 text-[16px] font-semibold leading-6 text-zinc-100 shadow-inner">
+          <kbd className="rounded-full bg-zinc-600 px-2.5 py-0.5 text-[14px] font-semibold leading-5 text-zinc-100 shadow-inner">
             {shortcut}
           </kbd>
         )}
-        <div className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-zinc-900" />
       </div>
     </div>
   );
 }
+
+type CollapsedPopupAnchor = {
+  top: number;
+  right: number;
+};
 
 // ─── Collapsed-sidebar Recents popup ──────────────────────────────────────────
 function CollapsedRecentsPopup({
@@ -92,11 +96,13 @@ function CollapsedRecentsPopup({
   currentSessionId,
   onSelectSession,
   onClose,
+  anchor,
 }: {
   sessions: Session[];
   currentSessionId: number | null;
   onSelectSession: (id: number) => void;
   onClose: () => void;
+  anchor: CollapsedPopupAnchor | null;
 }) {
   const popupRef = useRef<HTMLDivElement>(null);
 
@@ -130,6 +136,8 @@ function CollapsedRecentsPopup({
     })
     .slice(0, 8);
 
+  if (!anchor) return null;
+
   return (
     <motion.div
       ref={popupRef}
@@ -137,7 +145,8 @@ function CollapsedRecentsPopup({
       animate={{ opacity: 1, scale: 1, x: 0 }}
       exit={{ opacity: 0, scale: 0.97, x: -4 }}
       transition={{ duration: 0.14, ease: 'easeOut' }}
-      className="fixed left-[58px] top-[239px] z-[2147483647] w-[370px] overflow-hidden rounded-[20px] border border-zinc-200 bg-white shadow-[0_12px_35px_rgba(0,0,0,0.12)] dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-[0_12px_35px_rgba(0,0,0,0.35)]"
+      className="fixed z-[2147483647] w-[370px] max-w-[calc(100vw-118px)] overflow-hidden rounded-[20px] border border-zinc-200 bg-white shadow-[0_12px_35px_rgba(0,0,0,0.12)] dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-[0_12px_35px_rgba(0,0,0,0.35)]"
+      style={{ left: anchor.right + 12, top: anchor.top }}
       onPointerDown={event => event.stopPropagation()}
     >
       <div className="px-7 pb-2 pt-6">
@@ -188,12 +197,14 @@ function CollapsedPinnedPopup({
   pinnedIds,
   onSelectSession,
   onClose,
+  anchor,
 }: {
   sessions: Session[];
   currentSessionId: number | null;
   pinnedIds: number[];
   onSelectSession: (id: number) => void;
   onClose: () => void;
+  anchor: CollapsedPopupAnchor | null;
 }) {
   const popupRef = useRef<HTMLDivElement>(null);
 
@@ -232,6 +243,8 @@ function CollapsedPinnedPopup({
     })
     .slice(0, 12);
 
+  if (!anchor) return null;
+
   return (
     <motion.div
       ref={popupRef}
@@ -239,7 +252,8 @@ function CollapsedPinnedPopup({
       animate={{ opacity: 1, scale: 1, x: 0 }}
       exit={{ opacity: 0, scale: 0.97, x: -4 }}
       transition={{ duration: 0.14, ease: 'easeOut' }}
-      className="fixed left-[58px] top-[278px] z-[2147483647] w-[370px] overflow-hidden rounded-[20px] border border-zinc-200 bg-white shadow-[0_12px_35px_rgba(0,0,0,0.12)] dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-[0_12px_35px_rgba(0,0,0,0.35)]"
+      className="fixed z-[2147483647] w-[370px] max-w-[calc(100vw-118px)] overflow-hidden rounded-[20px] border border-zinc-200 bg-white shadow-[0_12px_35px_rgba(0,0,0,0.12)] dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-[0_12px_35px_rgba(0,0,0,0.35)]"
+      style={{ left: anchor.right + 12, top: anchor.top }}
       onPointerDown={event => event.stopPropagation()}
     >
       <div className="px-7 pb-2 pt-6">
@@ -1074,6 +1088,10 @@ export default function Sidebar({
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [recentsPopupOpen, setRecentsPopupOpen] = useState(false);
   const [pinnedPopupOpen, setPinnedPopupOpen] = useState(false);
+  const [libraryPopupOpen, setLibraryPopupOpen] = useState(false);
+  const [recentsAnchor, setRecentsAnchor] = useState<CollapsedPopupAnchor | null>(null);
+  const [pinnedAnchor, setPinnedAnchor] = useState<CollapsedPopupAnchor | null>(null);
+  const [libraryAnchor, setLibraryAnchor] = useState<CollapsedPopupAnchor | null>(null);
   const [pinnedIds, setPinnedIds] = useState<number[]>(loadPinnedIds);
   const resizingRef = useRef(false);
 
@@ -1121,6 +1139,10 @@ export default function Sidebar({
   const expandDesktop = useCallback(() => {
     setRecentsPopupOpen(false);
     setPinnedPopupOpen(false);
+    setLibraryPopupOpen(false);
+    setRecentsAnchor(null);
+    setPinnedAnchor(null);
+    setLibraryAnchor(null);
     setDesktopCollapsed(false);
     onDesktopStateChange?.(true);
     localStorage.setItem(SIDEBAR_SEEN_KEY, '1');
@@ -1129,6 +1151,10 @@ export default function Sidebar({
   const collapseDesktop = useCallback(() => {
     setRecentsPopupOpen(false);
     setPinnedPopupOpen(false);
+    setLibraryPopupOpen(false);
+    setRecentsAnchor(null);
+    setPinnedAnchor(null);
+    setLibraryAnchor(null);
     setDesktopCollapsed(true);
     onDesktopStateChange?.(false);
     onClose();
@@ -1314,94 +1340,106 @@ export default function Sidebar({
           DESKTOP COLLAPSED ICON RAIL  (lg+ only)
       ═══════════════════════════════════════════════════ */}
       {desktopCollapsed && (
-        <aside className="twinkle-sidebar hidden lg:flex fixed inset-y-0 left-0 z-[2147483645] w-14 bg-white dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 flex-col items-center py-4 shadow-sm">
-          {/* Top brand / sidebar control */}
-          <IconTooltip label="Toggle sidebar" shortcut="Ctrl+Shift+S">
+        <aside className="twinkle-sidebar group/collapsed hidden lg:flex fixed inset-y-0 left-0 z-[2147483645] w-[98px] bg-white dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 flex-col items-center pt-4 pb-4 shadow-sm">
+          {/* Brand stays visible. Only the sidebar toggle replaces it while hovering. */}
+          <div className="relative flex h-11 w-11 items-center justify-center">
             <button
+              type="button"
               onClick={toggleDesktop}
               aria-label="Open sidebar"
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-none"
+              className="group/sidebar-toggle relative flex h-11 w-11 items-center justify-center rounded-xl text-zinc-900 dark:text-white"
             >
+              <StormLogo className="h-[35px] w-[35px] text-zinc-900 dark:text-white transition-opacity duration-100 group-hover/sidebar-toggle:opacity-0" />
               <svg
-                width="28"
-                height="24"
+                width="30"
+                height="27"
                 viewBox="0 0 24 20"
                 fill="none"
                 aria-hidden="true"
-                className="text-zinc-900 dark:text-white"
+                className="pointer-events-none absolute opacity-0 text-zinc-900 transition-opacity duration-100 group-hover/sidebar-toggle:opacity-100 dark:text-white"
               >
-                <rect
-                  x="2"
-                  y="2"
-                  width="20"
-                  height="16"
-                  rx="4"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                />
-                <path
-                  d="M8.5 2.5V17.5"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
+                <rect x="2" y="2" width="20" height="16" rx="4" stroke="currentColor" strokeWidth="2" />
+                <path d="M8.5 2.5V17.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
               </svg>
             </button>
-          </IconTooltip>
+          </div>
 
-          {/* Same core navigation options as the reference UI */}
-          <div className="mt-4 flex flex-col items-center w-full gap-1">
+          {/* Reference-style icon rail: identical button and icon sizing. */}
+          <div className="mt-9 flex w-full flex-col items-center gap-2">
             <IconTooltip label="New Chat">
               <button
                 onClick={onNewSession}
                 aria-label="New Chat"
-                className="group/newchat w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-none"
+                className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-900 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 transition-none"
               >
-                <SquarePen className="twinkle-newchat-icon w-[19px] h-[19px]" strokeWidth={1.7} />
+                <SquarePen className="h-[29px] w-[29px]" strokeWidth={1.8} />
               </button>
             </IconTooltip>
-
-
 
             <IconTooltip label="Search" shortcut="Ctrl+K">
               <button
                 onClick={openSearch}
                 aria-label="Search"
-                className="group/search w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-none"
+                className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-900 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 transition-none"
               >
-                <Search className="twinkle-search-icon h-[27px] w-[27px]" strokeWidth={2} />
+                <Search className="h-[29px] w-[29px]" strokeWidth={1.9} />
               </button>
             </IconTooltip>
 
             <IconTooltip label="Pinned">
               <button
-                onClick={() => {
+                onClick={event => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  setPinnedAnchor({ top: rect.top, right: rect.right });
                   setPinnedPopupOpen(current => !current);
                   setRecentsPopupOpen(false);
+                  setLibraryPopupOpen(false);
+                  setRecentsAnchor(null);
+                  setLibraryAnchor(null);
                 }}
                 aria-label="Pinned"
                 aria-expanded={pinnedPopupOpen}
-                className={`w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-none ${
-                  pinnedPopupOpen ? 'bg-zinc-100 dark:bg-zinc-800' : ''
-                }`}
+                className={`flex h-11 w-11 items-center justify-center rounded-xl text-zinc-900 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 transition-none ${pinnedPopupOpen ? 'bg-zinc-100 dark:bg-zinc-800' : ''}`}
               >
-                <Pin className="w-[20px] h-[20px]" strokeWidth={1.7} />
+                <Pin className="h-[29px] w-[29px]" strokeWidth={1.8} />
               </button>
             </IconTooltip>
 
             <IconTooltip label="Recents">
               <button
-                onClick={() => {
+                onClick={event => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  setRecentsAnchor({ top: rect.top, right: rect.right });
                   setRecentsPopupOpen(current => !current);
                   setPinnedPopupOpen(false);
+                  setLibraryPopupOpen(false);
+                  setPinnedAnchor(null);
+                  setLibraryAnchor(null);
                 }}
                 aria-label="Recents"
                 aria-expanded={recentsPopupOpen}
-                className={`w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-none ${
-                  recentsPopupOpen ? 'bg-zinc-100 dark:bg-zinc-800' : ''
-                }`}
+                className={`flex h-11 w-11 items-center justify-center rounded-xl text-zinc-900 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 transition-none ${recentsPopupOpen ? 'bg-zinc-100 dark:bg-zinc-800' : ''}`}
               >
-                <MessageCircle className="w-[19px] h-[19px]" strokeWidth={1.7} />
+                <MessageCircle className="h-[29px] w-[29px]" strokeWidth={1.8} />
+              </button>
+            </IconTooltip>
+
+            <IconTooltip label="Library">
+              <button
+                onClick={event => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  setLibraryAnchor({ top: rect.top, right: rect.right });
+                  setLibraryPopupOpen(current => !current);
+                  setPinnedPopupOpen(false);
+                  setRecentsPopupOpen(false);
+                  setPinnedAnchor(null);
+                  setRecentsAnchor(null);
+                }}
+                aria-label="Library"
+                aria-expanded={libraryPopupOpen}
+                className={`flex h-11 w-11 items-center justify-center rounded-xl text-zinc-900 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 transition-none ${libraryPopupOpen ? 'bg-zinc-100 dark:bg-zinc-800' : ''}`}
+              >
+                <LibraryBig className="h-[29px] w-[29px]" strokeWidth={1.8} />
               </button>
             </IconTooltip>
           </div>
@@ -1415,7 +1453,8 @@ export default function Sidebar({
                 currentSessionId={currentSessionId}
                 pinnedIds={pinnedIds}
                 onSelectSession={onSelectSession}
-                onClose={() => setPinnedPopupOpen(false)}
+                onClose={() => { setPinnedPopupOpen(false); setPinnedAnchor(null); }}
+                anchor={pinnedAnchor}
               />
             )}
             {recentsPopupOpen && (
@@ -1423,12 +1462,26 @@ export default function Sidebar({
                 sessions={sessions}
                 currentSessionId={currentSessionId}
                 onSelectSession={onSelectSession}
-                onClose={() => setRecentsPopupOpen(false)}
+                onClose={() => { setRecentsPopupOpen(false); setRecentsAnchor(null); }}
+                anchor={recentsAnchor}
               />
+            )}
+            {libraryPopupOpen && libraryAnchor && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.97, x: -4 }}
+                animate={{ opacity: 1, scale: 1, x: 0 }}
+                exit={{ opacity: 0, scale: 0.97, x: -4 }}
+                transition={{ duration: 0.14, ease: 'easeOut' }}
+                className="fixed z-[2147483647] w-[250px] overflow-hidden rounded-[20px] border border-zinc-200 bg-white p-5 shadow-[0_12px_35px_rgba(0,0,0,0.12)] dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-[0_12px_35px_rgba(0,0,0,0.35)]"
+                style={{ left: libraryAnchor.right + 12, top: libraryAnchor.top }}
+                onPointerDown={event => event.stopPropagation()}
+              >
+                <h3 className="text-[15px] font-semibold text-zinc-900 dark:text-white">Library</h3>
+                <p className="mt-1 text-[13px] leading-5 text-zinc-500 dark:text-zinc-400">Your saved items will appear here.</p>
+              </motion.div>
             )}
           </AnimatePresence>
 
-          {/* Account menu */}
           <AccountMenu
             user={user}
             onProfile={onProfile}
