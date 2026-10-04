@@ -1143,15 +1143,24 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const commitVoiceInput = useCallback(async () => {
     if (!voiceInputActive) return;
 
-    // Stop capturing immediately, but give Gemini a short window to deliver
-    // the final input-transcription chunk before we commit it to the composer.
+    // Stop the browser recognizer immediately so its final interim result is
+    // committed before the UI leaves listening mode. Clearing the ref first
+    // also prevents the recognizer's onend handler from restarting it.
+    const recognition = voiceBrowserRecognitionRef.current;
+    const browserRecognitionWasActive = Boolean(recognition && voiceBrowserRecognitionActiveRef.current);
+    voiceBrowserRecognitionRef.current = null;
+    // Keep the browser recognizer marked active until its final onresult has
+    // had a chance to arrive, so Gemini does not append duplicate fallback
+    // text during this short commit window.
+    voiceBrowserRecognitionActiveRef.current = browserRecognitionWasActive;
+    try { recognition?.stop?.(); } catch {}
+
+    // Tell Gemini that audio capture has ended, but never block the UI on a
+    // WebSocket turn-complete event. A bounded window prevents the composer
+    // from getting stuck if the network/model does not send that event.
     try {
       const socket = voiceSocketRef.current;
       if (socket?.readyState === WebSocket.OPEN) {
-        try {
-          socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
-        } catch {}
-
         await new Promise<void>(resolve => {
           let settled = false;
           const finish = () => {
@@ -1163,8 +1172,13 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
             }
             resolve();
           };
-          const timer = window.setTimeout(finish, 550);
+          const timer = window.setTimeout(finish, 400);
           voiceTurnCompleteResolverRef.current = finish;
+          try {
+            socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
+          } catch {
+            finish();
+          }
         });
       }
     } catch {}
@@ -1173,6 +1187,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     const spoken = voiceDraftRef.current.trim();
     const combined = `${base}${base && spoken ? ' ' : ''}${spoken}`.trim();
 
+    // Invalidate all late recognition/socket callbacks before changing the UI.
     voiceStartRef.current += 1;
     try { voiceSocketRef.current?.close(1000, 'committed'); } catch {}
     voiceSocketRef.current = null;
@@ -1180,6 +1195,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     voiceTurnCompleteResolverRef.current = null;
     cleanupVoiceAudio();
 
+    // Stop/Use-dictation both return to the normal composer and preserve the
+    // recognized text. Do not leave the listening pill mounted after Stop.
     setInput(combined);
     voiceDraftRef.current = '';
     voiceBaseInputRef.current = '';
@@ -1192,24 +1209,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const stopVoiceCapture = useCallback(async () => {
     if (!voiceInputActive || voiceCaptureStopped) return;
 
-    try {
-      const socket = voiceSocketRef.current;
-      if (socket?.readyState === WebSocket.OPEN) {
-        try {
-          socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
-        } catch {}
-        await new Promise(resolve => window.setTimeout(resolve, 120));
-      }
-    } catch {}
-
-    try { voiceSocketRef.current?.close(1000, 'capture-stopped'); } catch {}
-    voiceSocketRef.current = null;
-    try { voiceBrowserRecognitionRef.current?.stop?.(); } catch {}
-    voiceBrowserRecognitionRef.current = null;
-    voiceBrowserRecognitionActiveRef.current = false;
-    cleanupVoiceAudio();
-    setVoiceCaptureStopped(true);
-  }, [cleanupVoiceAudio, voiceCaptureStopped, voiceInputActive]);
+    // The square Stop button means “finish listening and put the text in the
+    // composer”. It must not leave the recorder in a frozen/stopped state.
+    await commitVoiceInput();
+  }, [commitVoiceInput, voiceCaptureStopped, voiceInputActive]);
 
   const startVoiceInput = useCallback(async () => {
     if (voiceInputActive || isTyping || isProcessingFiles) return;
@@ -3578,7 +3581,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                     {isProcessingFiles ? (
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
                     ) : (
-                      <Plus className="h-[22px] w-[22px] stroke-[2.25]" />
+                      <Plus className="h-[22px] w-[22px] stroke-[2.25] opacity-100" />
                     )}
                   </motion.button>
 
