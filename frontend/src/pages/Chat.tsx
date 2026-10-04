@@ -20,9 +20,6 @@ import {
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown'; 
 import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
@@ -33,15 +30,115 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
  * untouched so source code containing backslashes is never interpreted as math.
  */
 const normalizeMathDelimiters = (value: string): string => {
+  // Keep math rendering dependency-free so Vite/Vercel does not require
+  // remark-math, rehype-katex, or KaTeX packages just to render a response.
+  // Convert the most common LaTeX emitted by chat models into readable
+  // Unicode mathematics before ReactMarkdown parses the message.
+  const renderExpression = (expression: string): string => {
+    let result = expression.trim();
+
+    const replacements: Array<[RegExp, string]> = [
+      [/\\hbar/g, 'ℏ'],
+      [/\\hslash/g, 'ℏ'],
+      [/\\partial/g, '∂'],
+      [/\\nabla/g, '∇'],
+      [/\\Delta/g, 'Δ'],
+      [/\\delta/g, 'δ'],
+      [/\\alpha/g, 'α'],
+      [/\\beta/g, 'β'],
+      [/\\gamma/g, 'γ'],
+      [/\\Gamma/g, 'Γ'],
+      [/\\lambda/g, 'λ'],
+      [/\\Lambda/g, 'Λ'],
+      [/\\mu/g, 'μ'],
+      [/\\pi/g, 'π'],
+      [/\\Pi/g, 'Π'],
+      [/\\sigma/g, 'σ'],
+      [/\\Sigma/g, 'Σ'],
+      [/\\phi/g, 'φ'],
+      [/\\Phi/g, 'Φ'],
+      [/\\psi/g, 'ψ'],
+      [/\\Psi/g, 'Ψ'],
+      [/\\omega/g, 'ω'],
+      [/\\Omega/g, 'Ω'],
+      [/\\theta/g, 'θ'],
+      [/\\Theta/g, 'Θ'],
+      [/\\rho/g, 'ρ'],
+      [/\\tau/g, 'τ'],
+      [/\\chi/g, 'χ'],
+      [/\\xi/g, 'ξ'],
+      [/\\Xi/g, 'Ξ'],
+      [/\\zeta/g, 'ζ'],
+      [/\\eta/g, 'η'],
+      [/\\kappa/g, 'κ'],
+      [/\\nu/g, 'ν'],
+      [/\\varphi/g, 'φ'],
+      [/\\hat\{([^{}]+)\}/g, 'ˆ$1'],
+      [/\\mathbf\{([^{}]+)\}/g, '$1'],
+      [/\\mathrm\{([^{}]+)\}/g, '$1'],
+      [/\\text\{([^{}]+)\}/g, '$1'],
+      [/\\operatorname\{([^{}]+)\}/g, '$1'],
+      [/\\sqrt\{([^{}]+)\}/g, '√($1)'],
+      [/\\int/g, '∫'],
+      [/\\sum/g, 'Σ'],
+      [/\\prod/g, 'Π'],
+      [/\\infty/g, '∞'],
+      [/\\in/g, '∈'],
+      [/\\notin/g, '∉'],
+      [/\\to/g, '→'],
+      [/\\rightarrow/g, '→'],
+      [/\\leftarrow/g, '←'],
+      [/\\Rightarrow/g, '⇒'],
+      [/\\Leftrightarrow/g, '⇔'],
+      [/\\times/g, '×'],
+      [/\\cdot/g, '·'],
+      [/\\pm/g, '±'],
+      [/\\leq/g, '≤'],
+      [/\\geq/g, '≥'],
+      [/\\neq/g, '≠'],
+      [/\\approx/g, '≈'],
+      [/\\propto/g, '∝'],
+      [/\\equiv/g, '≡'],
+    ];
+
+    replacements.forEach(([pattern, replacement]) => {
+      result = result.replace(pattern, replacement);
+    });
+
+    // Simple fractions: \frac{a}{b} -> (a)/(b). This is intentionally
+    // conservative and leaves complex nested LaTeX untouched.
+    result = result.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)');
+    result = result.replace(/\\dfrac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)');
+    result = result.replace(/\\tfrac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)');
+
+    result = result
+      .replace(/\^\{([^{}]+)\}/g, '^$1')
+      .replace(/_\{([^{}]+)\}/g, '_$1')
+      .replace(/\\([{}])/g, '$1')
+      .replace(/\\,/g, ' ')
+      .replace(/\\;/g, ' ')
+      .replace(/\\!/g, '')
+      .replace(/\\quad/g, '  ')
+      .replace(/\\qquad/g, '    ')
+      .replace(/[{}]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return result;
+  };
+
+  // Protect fenced code blocks so backslashes inside source code are never
+  // interpreted as mathematics.
   const parts = value.split(/(```[\s\S]*?```)/g);
-  return parts
-    .map((part, index) => {
-      if (index % 2 === 1) return part;
-      return part
-        .replace(/\\\[([\s\S]*?)\\\]/g, (_, expression) => `$$\n${expression.trim()}\n$$`)
-        .replace(/\\\(([\s\S]*?)\\\)/g, (_, expression) => `$${expression.trim()}$`);
-    })
-    .join('');
+  return parts.map((part, index) => {
+    if (index % 2 === 1) return part;
+
+    return part
+      .replace(/\\\[([\s\S]*?)\\\]/g, (_, expression) => renderExpression(expression))
+      .replace(/\\\(([\s\S]*?)\\\)/g, (_, expression) => renderExpression(expression))
+      .replace(/\$\$([\s\S]*?)\$\$/g, (_, expression) => renderExpression(expression))
+      .replace(/\$([^$\n]+)\$/g, (_, expression) => renderExpression(expression));
+  }).join('');
 };
 
 const PDFJS_MODULE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs';
@@ -2799,8 +2896,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                                 </div>
                               ) : (
                                 <ReactMarkdown
-                                  remarkPlugins={[remarkGfm, remarkMath]}
-                                  rehypePlugins={[rehypeKatex]}
+                                  remarkPlugins={[remarkGfm]}
                                   components={{
                                     h1({ children, ...props }: any) {
                                       return (
