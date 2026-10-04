@@ -10,6 +10,7 @@ import ConfirmationModal from '../components/ConfirmationModal';
 import ShareChatModal from '../components/ShareChatModal';
 import LiveTalkModal from '../components/LiveTalkModal';
 import { getSavedLiveTalkColor } from '../lib/liveTalkColors';
+import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw';
 
 import {
   ArrowDown, 
@@ -23,6 +24,29 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
+
+const decodeGeminiLiveMessage = async (data: unknown): Promise<any> => {
+  if (typeof data === 'string') return JSON.parse(data);
+  if (data instanceof Blob) return JSON.parse(await data.text());
+  if (data instanceof ArrayBuffer) {
+    return JSON.parse(new TextDecoder().decode(new Uint8Array(data)));
+  }
+  if (ArrayBuffer.isView(data)) {
+    const view = data as ArrayBufferView;
+    return JSON.parse(new TextDecoder().decode(new Uint8Array(view.buffer, view.byteOffset, view.byteLength)));
+  }
+  throw new Error('Unsupported Gemini Live message.');
+};
+
+const pcm16ToBase64 = (buffer: ArrayBuffer): string => {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + chunkSize, bytes.length)));
+  }
+  return btoa(binary);
+};
 
 /**
  * Normalize the LaTeX delimiters commonly emitted by chat models into the
@@ -1084,6 +1108,19 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const voiceDictationWantedRef = useRef(false);
   const voiceCommitInProgressRef = useRef(false);
   const voiceSpeechTimerRef = useRef<number | null>(null);
+  // Fallback for browsers (notably Brave) where native SpeechRecognition
+  // starts but returns the Google speech service `network` error. This uses
+  // the same Gemini Live input-transcription path as Live Talk, without
+  // changing the normal Mic flow when browser recognition works.
+  const voiceGeminiSocketRef = useRef<WebSocket | null>(null);
+  const voiceGeminiStreamRef = useRef<MediaStream | null>(null);
+  const voiceGeminiAudioContextRef = useRef<AudioContext | null>(null);
+  const voiceGeminiSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const voiceGeminiProcessorRef = useRef<AudioWorkletNode | null>(null);
+  const voiceGeminiSilentGainRef = useRef<GainNode | null>(null);
+  const voiceGeminiWorkletReadyRef = useRef<Promise<void> | null>(null);
+  const voiceGeminiFallbackActiveRef = useRef(false);
+  const voiceGeminiPendingPcmRef = useRef<string[]>([]);
   const [voiceDraftVersion, setVoiceDraftVersion] = useState(0);
   const [voiceLiveTranscript, setVoiceLiveTranscript] = useState('');
   const [voiceSpeechDetected, setVoiceSpeechDetected] = useState(false);
@@ -1105,11 +1142,197 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     }
   }, []);
 
+  const stopGeminiDictationFallback = useCallback(() => {
+    voiceGeminiFallbackActiveRef.current = false;
+    voiceGeminiPendingPcmRef.current = [];
+
+    try { voiceGeminiProcessorRef.current?.disconnect(); } catch {}
+    try { voiceGeminiSourceRef.current?.disconnect(); } catch {}
+    try { voiceGeminiSilentGainRef.current?.disconnect(); } catch {}
+    voiceGeminiProcessorRef.current = null;
+    voiceGeminiSourceRef.current = null;
+    voiceGeminiSilentGainRef.current = null;
+
+    voiceGeminiStreamRef.current?.getTracks().forEach(track => track.stop());
+    voiceGeminiStreamRef.current = null;
+
+    try { voiceGeminiSocketRef.current?.close(1000, 'Dictation stopped'); } catch {}
+    voiceGeminiSocketRef.current = null;
+
+    try { void voiceGeminiAudioContextRef.current?.close(); } catch {}
+    voiceGeminiAudioContextRef.current = null;
+  }, []);
+
+  const startGeminiDictationFallback = useCallback(async (attempt: number) => {
+    if (voiceGeminiFallbackActiveRef.current || !voiceDictationWantedRef.current) return;
+    voiceGeminiFallbackActiveRef.current = true;
+    voiceBrowserStopRequestedRef.current = true;
+
+    const nativeRecognition = voiceBrowserRecognitionRef.current;
+    try { nativeRecognition?.stop?.(); } catch {}
+    voiceBrowserRecognitionRef.current = null;
+    voiceBrowserRecognitionActiveRef.current = false;
+    voiceStartInProgressRef.current = false;
+
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Microphone access is not supported in this browser.');
+      }
+
+      const tokenPromise = createLiveToken();
+      const streamPromise = navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextCtor) throw new Error('Web Audio is not supported in this browser.');
+      const context = new AudioContextCtor();
+      voiceGeminiAudioContextRef.current = context;
+      if (context.state === 'suspended') await context.resume();
+
+      if (!voiceGeminiWorkletReadyRef.current) {
+        const workletBlob = new Blob([pcmCaptureWorkletSource], { type: 'application/javascript' });
+        const workletUrl = URL.createObjectURL(workletBlob);
+        voiceGeminiWorkletReadyRef.current = context.audioWorklet.addModule(workletUrl)
+          .finally(() => URL.revokeObjectURL(workletUrl));
+      }
+
+      const [stream, { token, model }] = await Promise.all([streamPromise, tokenPromise, voiceGeminiWorkletReadyRef.current]);
+      if (attempt !== voiceStartRef.current || !voiceDictationWantedRef.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+      voiceGeminiStreamRef.current = stream;
+
+      const socket = new WebSocket(
+        `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}`
+      );
+      voiceGeminiSocketRef.current = socket;
+
+      socket.onopen = () => {
+        if (attempt !== voiceStartRef.current || !voiceDictationWantedRef.current) {
+          try { socket.close(1000, 'Dictation stopped'); } catch {}
+          return;
+        }
+        socket.send(JSON.stringify({
+          setup: {
+            model: `models/${model || 'gemini-3.8-live'}`,
+            generationConfig: { responseModalities: ['TEXT'] },
+            inputAudioTranscription: {},
+            realtimeInputConfig: {
+              automaticActivityDetection: {
+                disabled: false,
+                prefixPaddingMs: 100,
+                silenceDurationMs: 500,
+              },
+            },
+          },
+        }));
+      };
+
+      socket.onmessage = async event => {
+        if (attempt !== voiceStartRef.current || !voiceDictationWantedRef.current) return;
+        try {
+          const message = await decodeGeminiLiveMessage(event.data);
+          const text = String(message?.serverContent?.inputTranscription?.text || '');
+          if (!text.trim()) return;
+
+          voiceFinalTranscriptRef.current = `${voiceFinalTranscriptRef.current}${text}`
+            .replace(/\s+/g, ' ')
+            .trim();
+          voiceInterimTranscriptRef.current = '';
+          voiceDraftRef.current = voiceFinalTranscriptRef.current;
+          setVoiceLiveTranscript(voiceFinalTranscriptRef.current);
+          setVoiceDraftVersion(version => version + 1);
+          setVoiceSpeechDetected(true);
+
+          if (voiceSpeechTimerRef.current !== null) window.clearTimeout(voiceSpeechTimerRef.current);
+          voiceSpeechTimerRef.current = window.setTimeout(() => {
+            voiceSpeechTimerRef.current = null;
+            if (attempt === voiceStartRef.current && voiceDictationWantedRef.current) {
+              setVoiceSpeechDetected(false);
+            }
+          }, 450);
+        } catch (error) {
+          console.warn('Twinkle Gemini dictation message error:', error);
+        }
+      };
+
+      socket.onerror = () => {
+        if (attempt === voiceStartRef.current && voiceDictationWantedRef.current) {
+          console.warn('Twinkle Gemini dictation fallback connection error.');
+        }
+      };
+
+      socket.onclose = () => {
+        if (voiceGeminiSocketRef.current === socket) voiceGeminiSocketRef.current = null;
+      };
+
+      const source = context.createMediaStreamSource(stream);
+      const processor = new AudioWorkletNode(context, 'twinkle-pcm-capture');
+      const silentGain = context.createGain();
+      silentGain.gain.value = 0;
+      source.connect(processor);
+      processor.connect(silentGain);
+      silentGain.connect(context.destination);
+
+      processor.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+        if (!voiceGeminiFallbackActiveRef.current || attempt !== voiceStartRef.current) return;
+        const data = pcm16ToBase64(event.data);
+        const liveSocket = voiceGeminiSocketRef.current;
+        if (liveSocket?.readyState === WebSocket.OPEN) {
+          liveSocket.send(JSON.stringify({
+            realtimeInput: { audio: { data, mimeType: 'audio/pcm;rate=16000' } },
+          }));
+        } else {
+          const queue = voiceGeminiPendingPcmRef.current;
+          queue.push(data);
+          if (queue.length > 60) queue.splice(0, queue.length - 60);
+        }
+      };
+
+      voiceGeminiSourceRef.current = source;
+      voiceGeminiProcessorRef.current = processor;
+      voiceGeminiSilentGainRef.current = silentGain;
+
+      const flushQueue = () => {
+        const liveSocket = voiceGeminiSocketRef.current;
+        if (liveSocket?.readyState !== WebSocket.OPEN) return;
+        const queued = voiceGeminiPendingPcmRef.current.splice(0);
+        for (const data of queued) {
+          try {
+            liveSocket.send(JSON.stringify({ realtimeInput: { audio: { data, mimeType: 'audio/pcm;rate=16000' } } }));
+          } catch {
+            break;
+          }
+        }
+      };
+      const previousOnOpen = socket.onopen;
+      socket.onopen = event => {
+        previousOnOpen?.call(socket, event);
+        window.setTimeout(flushQueue, 0);
+      };
+    } catch (error) {
+      console.warn('Twinkle Gemini dictation fallback failed:', error);
+      stopGeminiDictationFallback();
+      voiceDictationWantedRef.current = false;
+      voiceStartRef.current += 1;
+      setVoiceInputActive(false);
+    }
+  }, [stopGeminiDictationFallback]);
+
   const cleanupVoiceAudio = useCallback(() => {
     if (voiceSpeechTimerRef.current !== null) {
       window.clearTimeout(voiceSpeechTimerRef.current);
       voiceSpeechTimerRef.current = null;
     }
+
+    stopGeminiDictationFallback();
 
     const recognition = voiceBrowserRecognitionRef.current;
     voiceBrowserStopRequestedRef.current = true;
@@ -1170,6 +1393,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     // invalidated first.
     voiceStartRef.current += 1;
     voiceBrowserStopRequestedRef.current = true;
+    stopGeminiDictationFallback();
     const recognition = voiceBrowserRecognitionRef.current;
     try { recognition?.stop?.(); } catch {}
     voiceBrowserRecognitionRef.current = null;
@@ -1194,7 +1418,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     }, 0);
 
     return combined;
-  }, [input, voiceInputActive]);
+  }, [input, voiceInputActive, stopGeminiDictationFallback]);
 
   const stopVoiceCapture = useCallback(async () => {
     if (!voiceInputActive || voiceCaptureStopped || voiceCommitInProgressRef.current) return;
@@ -1324,8 +1548,16 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         return;
       }
 
-      // `no-speech`, `aborted`, and transient network errors are handled by
-      // onend while the user is still in dictation mode.
+      // Brave and some Chromium builds can return `network` even though the
+      // microphone itself is working. Fall back to Gemini Live transcription
+      // so spoken words still become text instead of leaving the composer blank.
+      if (error === 'network') {
+        void startGeminiDictationFallback(attempt);
+        return;
+      }
+
+      // `no-speech` and `aborted` are handled by onend while the user is still
+      // in dictation mode.
       console.warn('Twinkle voice recognition:', error || 'unknown error');
     };
 
@@ -1334,7 +1566,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
       voiceBrowserRecognitionActiveRef.current = false;
 
-      if (voiceBrowserStopRequestedRef.current || !voiceDictationWantedRef.current) {
+      if (voiceBrowserStopRequestedRef.current || voiceGeminiFallbackActiveRef.current || !voiceDictationWantedRef.current) {
         voiceBrowserRecognitionRef.current = null;
         return;
       }
@@ -1373,20 +1605,21 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       const message = error instanceof Error ? error.message : 'Unable to start voice dictation.';
       window.alert(message);
     }
-  }, [getSpeechRecognitionLanguage, input, isProcessingFiles, isTyping, voiceInputActive]);
+  }, [getSpeechRecognitionLanguage, input, isProcessingFiles, isTyping, voiceInputActive, startGeminiDictationFallback]);
 
   useEffect(() => () => {
     voiceStartInProgressRef.current = false;
     voiceDictationWantedRef.current = false;
     voiceStartRef.current += 1;
     voiceBrowserStopRequestedRef.current = true;
+    stopGeminiDictationFallback();
     try { voiceBrowserRecognitionRef.current?.stop?.(); } catch {}
     voiceBrowserRecognitionRef.current = null;
     if (voiceSpeechTimerRef.current !== null) {
       window.clearTimeout(voiceSpeechTimerRef.current);
       voiceSpeechTimerRef.current = null;
     }
-  }, []);
+  }, [stopGeminiDictationFallback]);
 
 
   const [selectedModel, setSelectedModel] = useState<string>(() => {
