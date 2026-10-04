@@ -899,6 +899,32 @@ const getRandomChatGreeting = (): string => {
 
 
 
+
+const VOICE_PCM_WORKLET_SOURCE = `
+class TwinkleVoiceCaptureProcessor extends AudioWorkletProcessor {
+  process(inputs) {
+    const input = inputs[0] && inputs[0][0];
+    if (!input || input.length === 0) return true;
+
+    const ratio = sampleRate / 16000;
+    const outputLength = Math.max(1, Math.floor(input.length / ratio));
+    const buffer = new ArrayBuffer(outputLength * 2);
+    const view = new DataView(buffer);
+
+    for (let i = 0; i < outputLength; i += 1) {
+      const sourceIndex = Math.min(input.length - 1, Math.floor(i * ratio));
+      const sample = Math.max(-1, Math.min(1, input[sourceIndex]));
+      view.setInt16(i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+    }
+
+    this.port.postMessage(buffer, [buffer]);
+    return true;
+  }
+}
+
+registerProcessor('twinkle-voice-capture', TwinkleVoiceCaptureProcessor);
+`;
+
 const downsamplePcm16k = (input: Float32Array, sampleRate: number): Int16Array => {
   if (sampleRate === 16000) {
     const output = new Int16Array(input.length);
@@ -1045,10 +1071,12 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const voiceAudioContextRef = useRef<AudioContext | null>(null);
   const voiceSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const voiceAnalyserRef = useRef<AnalyserNode | null>(null);
+  const voiceInputGainRef = useRef<GainNode | null>(null);
+  const voiceInputCompressorRef = useRef<DynamicsCompressorNode | null>(null);
   const voiceMeterFrameRef = useRef<number | null>(null);
   const voiceSpeechDetectedRef = useRef(false);
   const voicePendingPcmRef = useRef<string[]>([]);
-  const voiceProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const voiceProcessorRef = useRef<AudioWorkletNode | null>(null);
   const voiceSilentGainRef = useRef<GainNode | null>(null);
   const voiceStartRef = useRef(0);
   // Browser-native speech recognition starts immediately after the Mic click.
@@ -1069,10 +1097,14 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     try { voiceProcessorRef.current?.disconnect(); } catch {}
     try { voiceSourceRef.current?.disconnect(); } catch {}
     try { voiceAnalyserRef.current?.disconnect(); } catch {}
+    try { voiceInputCompressorRef.current?.disconnect(); } catch {}
+    try { voiceInputGainRef.current?.disconnect(); } catch {}
     try { voiceSilentGainRef.current?.disconnect(); } catch {}
     voiceProcessorRef.current = null;
     voiceSourceRef.current = null;
     voiceAnalyserRef.current = null;
+    voiceInputGainRef.current = null;
+    voiceInputCompressorRef.current = null;
     voiceSilentGainRef.current = null;
     voicePendingPcmRef.current = [];
     try { voiceBrowserRecognitionRef.current?.stop?.(); } catch {}
@@ -1216,6 +1248,13 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         recognition.interimResults = true;
         recognition.lang = navigator.language || 'en-US';
         recognition.maxAlternatives = 1;
+        // Prefer local/on-device dictation when the browser exposes it.
+        // Fall back automatically to the browser's normal recognition service.
+        try {
+          if ('processLocally' in recognition) {
+            (recognition as any).processLocally = true;
+          }
+        } catch {}
 
         recognition.onresult = (event: any) => {
           if (attempt !== voiceStartRef.current) return;
@@ -1291,7 +1330,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       analyser.fftSize = 512;
       analyser.smoothingTimeConstant = 0.65;
       const analyserData = new Uint8Array(analyser.fftSize);
-      source.connect(analyser);
       voiceSourceRef.current = source;
       voiceAnalyserRef.current = analyser;
 
@@ -1315,33 +1353,53 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       };
       voiceMeterFrameRef.current = requestAnimationFrame(updateVoiceMeter);
 
-      // Start the microphone audio pipeline immediately after getUserMedia().
-      // Do not wait for the token or WebSocket connection. Audio is buffered
-      // until the socket becomes ready, so the first spoken words are preserved.
-      const processor = context.createScriptProcessor(2048, 1, 1);
+      // Enhance quiet speech before it reaches Gemini. Browser AGC/noise
+      // suppression handles the microphone first; this second stage provides
+      // a controlled software boost for a user speaking from farther away.
+      const inputGain = context.createGain();
+      inputGain.gain.value = 2.2;
+
+      const inputCompressor = context.createDynamicsCompressor();
+      inputCompressor.threshold.value = -42;
+      inputCompressor.knee.value = 24;
+      inputCompressor.ratio.value = 6;
+      inputCompressor.attack.value = 0.003;
+      inputCompressor.release.value = 0.22;
+
+      // Use AudioWorklet instead of deprecated ScriptProcessorNode. The
+      // worklet runs off the main thread and keeps capture latency stable.
+      const workletBlob = new Blob(
+        [VOICE_PCM_WORKLET_SOURCE],
+        { type: 'application/javascript' },
+      );
+      const workletUrl = URL.createObjectURL(workletBlob);
+
+      try {
+        await context.audioWorklet.addModule(workletUrl);
+      } finally {
+        URL.revokeObjectURL(workletUrl);
+      }
+
+      const processor = new AudioWorkletNode(context, 'twinkle-voice-capture');
       const silentGain = context.createGain();
       silentGain.gain.value = 0;
 
-      processor.onaudioprocess = audioEvent => {
+      processor.port.onmessage = event => {
         if (attempt !== voiceStartRef.current) return;
 
-        const pcm = downsamplePcm16k(
-          audioEvent.inputBuffer.getChannelData(0),
-          context.sampleRate,
-        );
-        const encodedPcm = int16ToBase64(pcm);
-        const activeSocket = voiceSocketRef.current;
-
-        if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
-          // Keep a short rolling buffer while the token/WebSocket connects.
-          voicePendingPcmRef.current.push(encodedPcm);
-          if (voicePendingPcmRef.current.length > 80) {
-            voicePendingPcmRef.current.shift();
-          }
-          return;
-        }
-
         try {
+          const pcmBytes = new Uint8Array(event.data as ArrayBuffer);
+          const encodedPcm = bytesToBase64(pcmBytes);
+          const activeSocket = voiceSocketRef.current;
+
+          if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
+            voicePendingPcmRef.current.push(encodedPcm);
+            if (voicePendingPcmRef.current.length > 100) {
+              voicePendingPcmRef.current.shift();
+            }
+            return;
+          }
+
           activeSocket.send(JSON.stringify({
             realtimeInput: {
               audio: {
@@ -1353,9 +1411,16 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         } catch {}
       };
 
-      source.connect(processor);
+      // Meter the enhanced signal, not the raw quiet microphone signal.
+      source.connect(inputGain);
+      inputGain.connect(inputCompressor);
+      inputCompressor.connect(analyser);
+      inputCompressor.connect(processor);
       processor.connect(silentGain);
       silentGain.connect(context.destination);
+
+      voiceInputGainRef.current = inputGain;
+      voiceInputCompressorRef.current = inputCompressor;
       voiceProcessorRef.current = processor;
       voiceSilentGainRef.current = silentGain;
 
@@ -3406,26 +3471,40 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                       <X className="h-[20px] w-[20px]" strokeWidth={2.05} />
                     </motion.button>
 
-                    {/* Dictation waveform */}
+                    {/* Reference-style listening waveform */}
                     <div className="relative flex h-10 min-w-0 flex-1 items-center overflow-hidden px-1" aria-hidden="true">
+                      <div
+                        className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2"
+                        style={{
+                          borderTop: '5px dotted rgba(161,161,170,0.42)',
+                        }}
+                      />
                       <motion.div
-                        className="flex h-full w-full min-w-0 items-center justify-between gap-[3px]"
-                        animate={{ opacity: voiceCaptureStopped ? 0.45 : [0.82, 1, 0.82] }}
-                        transition={{ duration: 2.2, repeat: voiceCaptureStopped ? 0 : Infinity, ease: 'easeInOut' }}
+                        className="relative z-10 mx-auto flex h-10 w-[76px] items-center justify-center gap-[3px]"
+                        animate={{
+                          opacity: voiceCaptureStopped ? 0.45 : 1,
+                        }}
                       >
-                        {[...Array(72)].map((_, index) => {
-                          const heights = [8, 13, 20, 11, 28, 16, 36, 22, 43, 30, 48, 34, 25, 44, 31, 50, 27, 40, 21, 46, 33, 42, 18, 37, 26, 47, 32, 22, 41, 28, 45, 19, 35, 25, 43, 30];
-                          const height = heights[index % heights.length];
-                          return (
-                            <motion.span
-                              key={index}
-                              className="min-w-0 flex-1 max-w-[4px] shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600"
-                              style={{ height: `${Math.max(5, height * 0.62)}px`, transformOrigin: 'center' }}
-                              animate={voiceCaptureStopped ? { scaleY: 0.65 } : { scaleY: [0.55, 1, 0.55] }}
-                              transition={{ duration: 1.8, repeat: voiceCaptureStopped ? 0 : Infinity, delay: index * 0.035, ease: 'easeInOut' }}
-                            />
-                          );
-                        })}
+                        {[...Array(14)].map((_, index) => (
+                          <motion.span
+                            key={index}
+                            className="w-[3px] rounded-full bg-zinc-500 dark:bg-zinc-300"
+                            style={{ transformOrigin: 'center' }}
+                            animate={
+                              voiceCaptureStopped
+                                ? { height: 6, scaleY: 0.7 }
+                                : voiceSpeechDetected
+                                  ? { height: [8, 15 + ((index * 7) % 19), 8], scaleY: [0.7, 1, 0.7] }
+                                  : { height: [5, 7, 5], scaleY: [0.8, 1, 0.8] }
+                            }
+                            transition={{
+                              duration: voiceSpeechDetected ? 0.42 : 1.2,
+                              repeat: voiceCaptureStopped ? 0 : Infinity,
+                              delay: index * 0.018,
+                              ease: 'easeInOut',
+                            }}
+                          />
+                        ))}
                       </motion.div>
                     </div>
 
@@ -3499,7 +3578,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                     {isProcessingFiles ? (
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
                     ) : (
-                      <Plus className="h-[22px] w-[22px] stroke-[2.25] opacity-100" />
+                      <Plus className="h-[22px] w-[22px] stroke-[2.25]" />
                     )}
                   </motion.button>
 
