@@ -10,7 +10,7 @@ type Props = {
   open: boolean;
   onClose: () => void;
   /** Called after the final Live Talk data has been persisted. */
-  onSessionComplete?: (sessionId: number) => void;
+  onSessionComplete?: (sessionId: number, sessionName?: string) => void;
 };
 
 type WakeLockSentinelLike = {
@@ -135,6 +135,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
   const liveSessionPromiseRef = useRef<Promise<number> | null>(null);
   const liveSavePromiseRef = useRef<Promise<void> | null>(null);
   const liveTitleGeneratedRef = useRef(false);
+  const lastSavedSessionNameRef = useRef<string | null>(null);
   const userTurnRef = useRef('');
   const assistantTurnRef = useRef('');
   const endingRef = useRef(false);
@@ -200,6 +201,10 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
           typeof saved?.sessionName === 'string' && saved.sessionName.trim()
             ? saved.sessionName.trim()
             : undefined;
+
+        if (sessionName) {
+          lastSavedSessionNameRef.current = sessionName;
+        }
 
         // The backend owns Live Talk titles so every Live Talk session is
         // consistently stored as "Live Talk - [conversation topic]".
@@ -667,6 +672,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     liveSessionPromiseRef.current = null;
     liveSavePromiseRef.current = null;
     liveTitleGeneratedRef.current = false;
+    lastSavedSessionNameRef.current = null;
     void connect();
     return () => cleanup();
   }, [open, connect, cleanup]);
@@ -698,7 +704,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
       .then(sessionId => {
         const normalizedId = Number(sessionId);
         if (Number.isFinite(normalizedId)) {
-          onSessionComplete?.(normalizedId);
+          onSessionComplete?.(normalizedId, lastSavedSessionNameRef.current || undefined);
         }
       })
       .catch(error => {
@@ -708,7 +714,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
         // can still hand it back to Chat.tsx so it can attempt to load the
         // available persisted history.
         if (existingSessionId != null && Number.isFinite(existingSessionId)) {
-          onSessionComplete?.(existingSessionId);
+          onSessionComplete?.(existingSessionId, lastSavedSessionNameRef.current || undefined);
         }
       });
   };
