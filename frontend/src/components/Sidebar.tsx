@@ -71,6 +71,101 @@ function IconTooltip({ label, children }: { label: string; children: ReactNode }
   );
 }
 
+// ─── Collapsed-sidebar Recents popup ──────────────────────────────────────────
+function CollapsedRecentsPopup({
+  sessions,
+  currentSessionId,
+  onSelectSession,
+  onClose,
+}: {
+  sessions: Session[];
+  currentSessionId: number | null;
+  onSelectSession: (id: number) => void;
+  onClose: () => void;
+}) {
+  const popupRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!popupRef.current?.contains(event.target as Node)) {
+        onClose();
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose]);
+
+  const recentSessions = [...sessions]
+    .sort((a, b) => {
+      const aTime = new Date((a as any).updatedAt || (a as any).updated_at || (a as any).createdAt || 0).getTime();
+      const bTime = new Date((b as any).updatedAt || (b as any).updated_at || (b as any).createdAt || 0).getTime();
+      return bTime - aTime;
+    })
+    .slice(0, 8);
+
+  return (
+    <motion.div
+      ref={popupRef}
+      initial={{ opacity: 0, scale: 0.97, x: -4 }}
+      animate={{ opacity: 1, scale: 1, x: 0 }}
+      exit={{ opacity: 0, scale: 0.97, x: -4 }}
+      transition={{ duration: 0.14, ease: 'easeOut' }}
+      className="fixed left-[58px] top-[239px] z-[2147483647] w-[370px] overflow-hidden rounded-[20px] border border-zinc-200 bg-white shadow-[0_12px_35px_rgba(0,0,0,0.12)] dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-[0_12px_35px_rgba(0,0,0,0.35)]"
+      onPointerDown={event => event.stopPropagation()}
+    >
+      <div className="px-7 pb-2 pt-6">
+        <h3 className="text-[15px] font-medium tracking-tight text-zinc-500 dark:text-zinc-400">
+          Recents
+        </h3>
+      </div>
+
+      <div className="max-h-[360px] overflow-y-auto px-3 pb-3">
+        {recentSessions.length === 0 ? (
+          <div className="px-4 py-6 text-[14px] text-zinc-400 dark:text-zinc-500">
+            No recent chats
+          </div>
+        ) : (
+          recentSessions.map(session => {
+            const id = Number(session.id);
+            const title = String((session as any).sessionName || (session as any).name || 'New Chat');
+            const isActive = id === currentSessionId;
+
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => {
+                  onSelectSession(id);
+                  onClose();
+                }}
+                className={`flex w-full items-center rounded-xl px-4 py-3 text-left text-[15px] transition-colors ${
+                  isActive
+                    ? 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
+                    : 'text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800/80'
+                }`}
+              >
+                <span className="min-w-0 flex-1 truncate">{title}</span>
+              </button>
+            );
+          })
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
 // ─── SessionList ──────────────────────────────────────────────────────────────
 interface SessionListProps {
   user: User;
@@ -857,6 +952,7 @@ export default function Sidebar({
     }
   });
   const [searchModalOpen, setSearchModalOpen] = useState(false);
+  const [recentsPopupOpen, setRecentsPopupOpen] = useState(false);
   const resizingRef = useRef(false);
 
   useEffect(() => {
@@ -889,12 +985,14 @@ export default function Sidebar({
   useEffect(() => { onDesktopStateChange?.(false); }, [onDesktopStateChange]);
 
   const expandDesktop = useCallback(() => {
+    setRecentsPopupOpen(false);
     setDesktopCollapsed(false);
     onDesktopStateChange?.(true);
     localStorage.setItem(SIDEBAR_SEEN_KEY, '1');
   }, [onDesktopStateChange]);
 
   const collapseDesktop = useCallback(() => {
+    setRecentsPopupOpen(false);
     setDesktopCollapsed(true);
     onDesktopStateChange?.(false);
     onClose();
@@ -1096,9 +1194,12 @@ export default function Sidebar({
 
             <IconTooltip label="Recents">
               <button
-                onClick={expandDesktop}
-                aria-label="Chats"
-                className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-none"
+                onClick={() => setRecentsPopupOpen(current => !current)}
+                aria-label="Recents"
+                aria-expanded={recentsPopupOpen}
+                className={`w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-none ${
+                  recentsPopupOpen ? 'bg-zinc-100 dark:bg-zinc-800' : ''
+                }`}
               >
                 <MessageCircle className="w-[19px] h-[19px]" strokeWidth={1.7} />
               </button>
@@ -1106,6 +1207,17 @@ export default function Sidebar({
           </div>
 
           <div className="flex-1" />
+
+          <AnimatePresence>
+            {recentsPopupOpen && (
+              <CollapsedRecentsPopup
+                sessions={sessions}
+                currentSessionId={currentSessionId}
+                onSelectSession={onSelectSession}
+                onClose={() => setRecentsPopupOpen(false)}
+              />
+            )}
+          </AnimatePresence>
 
           {/* Account menu */}
           <AccountMenu
