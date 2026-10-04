@@ -126,6 +126,8 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
   const audioContextRef = useRef<AudioContext | null>(null);
   const processorRef = useRef<AudioWorkletNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const inputGainRef = useRef<GainNode | null>(null);
+  const inputCompressorRef = useRef<DynamicsCompressorNode | null>(null);
   const silentGainRef = useRef<GainNode | null>(null);
   const audioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const nextPlayTimeRef = useRef(0);
@@ -344,9 +346,13 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
   const cleanupAudioInput = useCallback(() => {
     processorRef.current?.disconnect();
     sourceRef.current?.disconnect();
+    inputCompressorRef.current?.disconnect();
+    inputGainRef.current?.disconnect();
     silentGainRef.current?.disconnect();
     processorRef.current = null;
     sourceRef.current = null;
+    inputCompressorRef.current = null;
+    inputGainRef.current = null;
     silentGainRef.current = null;
     pendingPcmRef.current = [];
     audioWorkletReadyRef.current = null;
@@ -446,6 +452,20 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     await audioWorkletReadyRef.current;
 
     const source = context.createMediaStreamSource(stream);
+
+    // Quiet-speech enhancement: AGC/noise suppression is requested from the
+    // browser, then a controlled gain + compressor lifts low-volume speech
+    // without allowing louder speech to clip the PCM stream.
+    const inputGain = context.createGain();
+    inputGain.gain.value = 2.2;
+
+    const inputCompressor = context.createDynamicsCompressor();
+    inputCompressor.threshold.value = -42;
+    inputCompressor.knee.value = 24;
+    inputCompressor.ratio.value = 6;
+    inputCompressor.attack.value = 0.003;
+    inputCompressor.release.value = 0.22;
+
     const processor = new AudioWorkletNode(context, 'twinkle-pcm-capture');
     const silentGain = context.createGain();
     silentGain.gain.value = 0;
@@ -477,12 +497,16 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
       }
     };
 
-    source.connect(processor);
+    source.connect(inputGain);
+    inputGain.connect(inputCompressor);
+    inputCompressor.connect(processor);
     processor.connect(silentGain);
     silentGain.connect(context.destination);
 
     streamRef.current = stream;
     sourceRef.current = source;
+    inputGainRef.current = inputGain;
+    inputCompressorRef.current = inputCompressor;
     processorRef.current = processor;
     silentGainRef.current = silentGain;
     void requestWakeLock();
