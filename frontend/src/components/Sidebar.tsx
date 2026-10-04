@@ -73,10 +73,10 @@ function IconTooltip({
   return (
     <div className="relative group/tip flex items-center justify-center w-full">
       {children}
-      <div className="absolute left-full ml-3 flex items-center gap-2.5 px-3 py-1.5 bg-zinc-900 text-white text-[13px] font-semibold rounded-full whitespace-nowrap pointer-events-none z-[300] shadow-[0_10px_30px_rgba(0,0,0,0.16)] opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150">
+      <div className="absolute left-full ml-3 flex items-center gap-2.5 px-5 py-2.5 bg-[#111111] text-white text-[16px] font-semibold rounded-full whitespace-nowrap pointer-events-none z-[300] shadow-[0_12px_32px_rgba(0,0,0,0.18)] opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150">
         <span>{label}</span>
         {shortcut && (
-          <kbd className="rounded-full bg-zinc-600 px-2 py-0.5 text-[12px] font-semibold leading-5 text-zinc-100 shadow-inner">
+          <kbd className="rounded-full bg-zinc-600 px-2.5 py-0.5 text-[16px] font-semibold leading-6 text-zinc-100 shadow-inner">
             {shortcut}
           </kbd>
         )}
@@ -1322,7 +1322,30 @@ export default function Sidebar({
               aria-label="Open sidebar"
               className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-none"
             >
-              <StormLogo className="w-7 h-7 text-black dark:text-white" />
+              <svg
+                width="28"
+                height="24"
+                viewBox="0 0 24 20"
+                fill="none"
+                aria-hidden="true"
+                className="text-zinc-900 dark:text-white"
+              >
+                <rect
+                  x="2"
+                  y="2"
+                  width="20"
+                  height="16"
+                  rx="4"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                />
+                <path
+                  d="M8.5 2.5V17.5"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
             </button>
           </IconTooltip>
 
@@ -1346,7 +1369,7 @@ export default function Sidebar({
                 aria-label="Search"
                 className="group/search w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-none"
               >
-                <Search className="twinkle-search-icon w-[19px] h-[19px]" strokeWidth={1.7} />
+                <Search className="twinkle-search-icon h-[27px] w-[27px]" strokeWidth={2} />
               </button>
             </IconTooltip>
 
