@@ -3220,10 +3220,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
         {/* Input bar */}
         <div
-          className="fixed bottom-0 left-0 right-0 z-[9000] w-auto max-w-none overflow-visible bg-transparent px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-4 sm:pt-3 sm:pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-6 md:pt-4 md:pb-[calc(1rem+env(safe-area-inset-bottom))]"
+          className="fixed bottom-0 left-0 right-0 z-[9000] w-auto max-w-none overflow-visible bg-transparent px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-4 sm:pt-3 sm:pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-6 md:pt-4 md:pb-[calc(1.5rem+env(safe-area-inset-bottom))]"
           style={{ left: desktopSidebarExpanded ? `${desktopSidebarWidth}px` : undefined }}
         >
-          <div className="mx-auto w-full max-w-[920px] min-w-0 relative">
+          <div className="mx-auto w-full max-w-[820px] min-w-0 relative">
             {isAtBottom && messages.length > 0 && !isTyping && (
               <div
                 className="twinkle-chat-disclaimer twinkle-chat-disclaimer-fixed"
