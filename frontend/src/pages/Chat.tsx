@@ -2973,19 +2973,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
               </p>
             </div>
 
-            {isTyping && isAtBottom && (
-              <div
-                className="twinkle-floating-thinking"
-                aria-live="polite"
-                aria-label="Twinkle is thinking"
-              >
-                <span className="twinkle-floating-thinking-dot" />
-                <span className="twinkle-floating-thinking-dot" />
-                <span className="twinkle-floating-thinking-dot" />
-              </div>
-            )}
-
-            {isTyping && !isAtBottom && (
+            {isTyping && showScrollBottom && (
               <div
                 className="twinkle-floating-thinking twinkle-floating-thinking-away"
                 aria-live="polite"
