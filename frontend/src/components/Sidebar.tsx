@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef, useCallback, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, type ReactNode, type PointerEvent as ReactPointerEvent, type SVGProps } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Session, User } from '../types';
 import {
   LogOut, Trash2, X, Search, SquarePen,
-  MoreHorizontal, Pin, PinOff,
+  MoreHorizontal, PinOff,
   MessageCircle, Pencil, Upload,
   Settings2, UserCircle2, ChevronRight, PanelLeft,
 } from 'lucide-react';
@@ -60,6 +60,33 @@ const getGroupLabel = (session: Session): string => {
 };
 
 // ─── Shared Twinkle logo ─────────────────────────────────────────────────────
+// ─── Exact sidebar Pin icon ───────────────────────────────────────────────────
+// Matches the supplied reference image: Lucide's 24×24 Pin geometry,
+// with a fixed 2px stroke and round caps/joins.
+function SidebarPinIcon({
+  className,
+  ...props
+}: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M12 17v5" />
+      <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+    </svg>
+  );
+}
+
 // ─── IconTooltip ──────────────────────────────────────────────────────────────
 function IconTooltip({
   label,
@@ -289,7 +316,7 @@ function CollapsedPinnedPopup({
                     : 'text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800/80'
                 }`}
               >
-                <Pin className="h-[18px] w-[18px] shrink-0 text-zinc-400" strokeWidth={2.15} />
+                <SidebarPinIcon className="h-[18px] w-[18px] shrink-0 text-zinc-400" />
                 <span className="min-w-0 flex-1 truncate">{title}</span>
               </button>
             );
@@ -593,7 +620,7 @@ function SessionList({
                               {isPinned ? (
                                 <PinOff className="w-[17px] h-[17px]" strokeWidth={1.8} />
                               ) : (
-                                <Pin className="w-[18px] h-[18px]" strokeWidth={2.15} />
+                                <SidebarPinIcon className="w-[18px] h-[18px]" />
                               )}
                             </button>
 
@@ -629,7 +656,7 @@ function SessionList({
                               {isPinned ? (
                                 <PinOff className="w-[20px] h-[20px] text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
                               ) : (
-                                <Pin className="w-[20px] h-[20px] text-zinc-800 dark:text-zinc-200" strokeWidth={2.15} />
+                                <SidebarPinIcon className="w-[20px] h-[20px] text-zinc-800 dark:text-zinc-200" />
                               )}
                               <span>{isPinned ? 'Unpin' : 'Pin'}</span>
                             </button>
@@ -1395,7 +1422,7 @@ export default function Sidebar({
                 aria-expanded={pinnedPopupOpen}
                 className={`flex h-10 w-10 items-center justify-center rounded-xl text-zinc-900 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 transition-none ${pinnedPopupOpen ? 'bg-zinc-100 dark:bg-zinc-800' : ''}`}
               >
-                <Pin className="h-[25px] w-[25px]" strokeWidth={2.15} />
+                <SidebarPinIcon className="h-[25px] w-[25px]" />
               </button>
             </IconTooltip>
 
