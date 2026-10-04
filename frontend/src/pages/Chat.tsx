@@ -2188,8 +2188,18 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       if (requestGeneration !== requestGenerationRef.current) return;
       setIsTyping(false);
 
-      const aiContent =
-        typeof response?.response === 'string'
+      // For a streamed response, the SSE delta stream is the single source
+      // of truth for the visible assistant message. The backend's `done`
+      // event also contains the complete response, but using that text to
+      // rebuild the bubble can race with the already-rendered stream and
+      // make the same answer appear twice. Keep the streamed text and only
+      // use `done.response` as a fallback when no stream bubble was created.
+      const streamedContent = streamingAssistantIdRef.current
+        ? streamReceivedTextRef.current
+        : '';
+      const aiContent = streamedContent
+        ? streamedContent
+        : typeof response?.response === 'string'
           ? response.response
           : typeof response?.error === 'string'
             ? response.error
