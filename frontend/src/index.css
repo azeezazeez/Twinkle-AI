@@ -847,18 +847,90 @@
    visible horizontal white bar. The mask hides content as it approaches the
    composer while leaving the composer itself untouched. */
 .twinkle-message-scroll-area {
-  -webkit-mask-image: linear-gradient(
+  position: relative;
+  /* Keep the scrolling content clipped; the fixed smoke layer below provides
+     the actual white disappearance before the composer. */
+  isolation: isolate;
+}
+
+/* White smoky boundary begins only where the fixed composer starts.
+   The conversation remains fully visible above it; content fades out only
+   during the final boundary before the composer so nothing can show behind it. */
+.twinkle-message-scroll-area::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 104px;
+  z-index: 40;
+  pointer-events: none;
+  background: linear-gradient(
     to bottom,
-    #000 0%,
-    #000 calc(100% - 150px),
-    transparent 100%
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.04) 18%,
+    rgba(255, 255, 255, 0.16) 38%,
+    rgba(255, 255, 255, 0.42) 58%,
+    rgba(255, 255, 255, 0.78) 78%,
+    #ffffff 100%
   );
-  mask-image: linear-gradient(
+}
+
+.dark .twinkle-message-scroll-area::after {
+  background: linear-gradient(
     to bottom,
-    #000 0%,
-    #000 calc(100% - 150px),
-    transparent 100%
+    rgba(24, 24, 27, 0) 0%,
+    rgba(24, 24, 27, 0.04) 18%,
+    rgba(24, 24, 27, 0.16) 38%,
+    rgba(24, 24, 27, 0.42) 58%,
+    rgba(24, 24, 27, 0.78) 78%,
+    #18181b 100%
   );
+}
+
+/* Floating thinking indicator at the composer boundary. */
+.twinkle-floating-thinking {
+  position: absolute;
+  left: 50%;
+  top: -68px;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 56px;
+  height: 56px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(228, 228, 231, 0.95);
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.08);
+}
+
+.twinkle-floating-thinking-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #71717a;
+  animation: twinkle-floating-dot-breathe 1.15s ease-in-out infinite;
+}
+
+.twinkle-floating-thinking-dot:nth-child(2) { animation-delay: 0.16s; }
+.twinkle-floating-thinking-dot:nth-child(3) { animation-delay: 0.32s; }
+
+@keyframes twinkle-floating-dot-breathe {
+  0%, 100% { opacity: 0.45; transform: scale(0.82); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+.dark .twinkle-floating-thinking {
+  border-color: rgba(63, 63, 70, 0.95);
+  background: #18181b;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.28);
+}
+
+.dark .twinkle-floating-thinking-dot {
+  background: #a1a1aa;
 }
 
 .chat-messages-bottom-mask {
