@@ -1066,6 +1066,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
   const voiceBaseInputRef = useRef('');
   const voiceDraftRef = useRef('');
+  const voiceFinalTranscriptRef = useRef('');
+  const voiceInterimTranscriptRef = useRef('');
   const voiceSocketRef = useRef<WebSocket | null>(null);
   const voiceStreamRef = useRef<MediaStream | null>(null);
   const voiceAudioContextRef = useRef<AudioContext | null>(null);
@@ -1141,6 +1143,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     voiceTurnCompleteResolverRef.current = null;
     cleanupVoiceAudio();
     voiceDraftRef.current = '';
+    voiceFinalTranscriptRef.current = '';
+    voiceInterimTranscriptRef.current = '';
     voiceGeminiDraftRef.current = '';
     voiceBaseInputRef.current = '';
     setVoiceDraftVersion(version => version + 1);
@@ -1174,7 +1178,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           }
           resolve();
         };
-        const timer = window.setTimeout(finish, 900);
+        const timer = window.setTimeout(finish, 1500);
         voiceBrowserStopResolverRef.current = finish;
         try {
           recognition.stop();
@@ -1186,7 +1190,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
     // The browser transcript is authoritative when available. Gemini is a
     // fallback only when the browser recognizer produced nothing.
-    let spoken = voiceDraftRef.current.trim();
+    let spoken = `${voiceFinalTranscriptRef.current}${voiceFinalTranscriptRef.current && voiceInterimTranscriptRef.current ? ' ' : ''}${voiceInterimTranscriptRef.current}`.replace(/\s+/g, ' ').trim();
 
     // If browser STT produced nothing, give Gemini one short bounded window.
     if (!spoken) {
@@ -1240,6 +1244,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     });
 
     voiceDraftRef.current = '';
+    voiceFinalTranscriptRef.current = '';
+    voiceInterimTranscriptRef.current = '';
     voiceGeminiDraftRef.current = '';
     voiceBaseInputRef.current = '';
     voiceBrowserStopRequestedRef.current = false;
@@ -1268,6 +1274,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     const attempt = ++voiceStartRef.current;
     voiceBaseInputRef.current = input.trim();
     voiceDraftRef.current = '';
+    voiceFinalTranscriptRef.current = '';
+    voiceInterimTranscriptRef.current = '';
     voiceGeminiDraftRef.current = '';
     voicePendingPcmRef.current = [];
     voiceSpeechDetectedRef.current = false;
@@ -1320,17 +1328,29 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
           recognition.onresult = (event: any) => {
             if (attempt !== voiceStartRef.current) return;
-            let transcript = '';
-            for (let i = 0; i < event.results.length; i += 1) {
-              transcript += String(event.results[i]?.[0]?.transcript || '');
+
+            // SpeechRecognition exposes a mixture of final and interim
+            // results. Never rebuild the transcript from the entire results
+            // array: Chrome can replace interim entries, which caused the
+            // previous implementation to lose the final words on Stop.
+            let finalText = voiceFinalTranscriptRef.current;
+            let interimText = '';
+
+            for (let i = event.resultIndex ?? 0; i < event.results.length; i += 1) {
+              const result = event.results[i];
+              const text = String(result?.[0]?.transcript || '').replace(/\s+/g, ' ').trim();
+              if (!text) continue;
+              if (result?.isFinal) {
+                finalText = `${finalText}${finalText ? ' ' : ''}${text}`.replace(/\s+/g, ' ').trim();
+              } else {
+                interimText = `${interimText}${interimText ? ' ' : ''}${text}`.replace(/\s+/g, ' ').trim();
+              }
             }
-            transcript = transcript.replace(/\s+/g, ' ').trim();
-            if (transcript) {
-              // Keep the complete latest browser transcript in a ref. This is
-              // what Stop commits, so React render timing cannot lose it.
-              voiceDraftRef.current = transcript;
-              setVoiceDraftVersion(version => version + 1);
-            }
+
+            voiceFinalTranscriptRef.current = finalText;
+            voiceInterimTranscriptRef.current = interimText;
+            voiceDraftRef.current = `${finalText}${finalText && interimText ? ' ' : ''}${interimText}`.replace(/\s+/g, ' ').trim();
+            setVoiceDraftVersion(version => version + 1);
           };
 
           recognition.onerror = (event: any) => {
@@ -3551,23 +3571,19 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                           ))}
                         </div>
                       ) : (
-                        <div className="flex w-full items-center justify-center gap-[7px]" aria-hidden="true">
-                          {[...Array(42)].map((_, index) => (
-                            <motion.span
-                              key={index}
-                              className="h-[3px] w-[3px] shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500"
-                              animate={{
-                                opacity: [0.28, 0.95, 0.28],
-                                scale: [0.8, 1.15, 0.8],
-                              }}
-                              transition={{
-                                duration: 1.05,
-                                repeat: Infinity,
-                                delay: index * 0.025,
-                                ease: 'linear',
-                              }}
-                            />
-                          ))}
+                        <div className="relative h-6 w-full overflow-hidden" aria-hidden="true">
+                          <motion.div
+                            className="absolute left-1/2 top-1/2 flex w-max -translate-y-1/2 items-center gap-[7px]"
+                            animate={{ x: ['-50%', '0%'] }}
+                            transition={{ duration: 2.8, repeat: Infinity, ease: 'linear' }}
+                          >
+                            {[...Array(84)].map((_, index) => (
+                              <span
+                                key={index}
+                                className="h-[3px] w-[3px] shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500"
+                              />
+                            ))}
+                          </motion.div>
                         </div>
                       )}
                     </div>
