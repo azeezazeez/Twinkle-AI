@@ -206,6 +206,104 @@ const getInitialTheme = (): boolean => {
 
 // Message sanitizers are function declarations so they are available to history/loading callbacks
 // regardless of module evaluation order.
+function normalizeTwinkleIdentity(content: string): string {
+  const normalized = content.trim();
+
+  // Replace the old default identity response with a clearer Twinkle AI
+  // introduction. Keep this narrowly scoped so documents mentioning Twinkle
+  // are not rewritten accidentally.
+  if (
+    /^I['’]m\s+Twinkle\s+AI,\s+a\s+helpful\s+assistant\s+designed\s+to\s+help\s+you\s+with\s+information,\s+analysis,\s+and\s+more\.?$/i.test(normalized)
+  ) {
+    return `Hi! I’m Twinkle AI, a professional AI assistant designed to help you understand information, solve problems, work with files, write and analyze content, develop software, and accomplish tasks efficiently.
+
+I adapt my responses to what you’re actually asking. I aim to provide clear, accurate, practical, and meaningful answers rather than following a rigid response template.
+
+You can ask me questions, give me a file or image to analyze, ask for help with coding or technical problems, request writing or explanations, or simply tell me what you’re trying to accomplish — I’ll help you figure out the best way forward.`;
+  }
+
+  return content;
+}
+
+function cleanMessageContent(content: unknown): string {
+    if (typeof content !== 'string') return '';
+
+    let cleaned = normalizeTwinkleIdentity(content)
+      // NEVER strip Markdown links here. Keeping the original [label](url)
+      // structure lets ReactMarkdown preserve clickability while the
+      // renderer below displays the complete URL as the visible text.
+      //
+      // Contact/project links are normalized onto separate lines so each
+      // link is easy to read in the document-style output.
+      .replace(/^([ \t]*(?:\[[^\]]+\]\((?:https?|mailto|tel):[^)]+\)[ \t]*\|[ \t]*)+\[[^\]]+\]\((?:https?|mailto|tel):[^)]+\)[ \t]*)$/gim, (line) =>
+        line.split(/\s*\|\s*/).join('\n')
+      )
+      .replace(/\s*\|\s*(?=(?:Email|Phone|Github|GitHub|LinkedIn|Portfolio)\s*:)/gi, '\n')
+      // Make document labels use the same heavy weight as **Technologies**.
+      .replace(/(^|\n)(\s*[-*]?\s*)(Github|GitHub|Live Link|Live link|Email|Phone|Technologies)\s*:/gim, '$1$2**$3:**')
+      // Keep project GitHub and Live Link entries on their own lines.
+      .replace(/\s+(\*\*(?:Github|GitHub):\*\*)\s*(https?:\/\/[^\s]+)/g, '\n$1 $2\n')
+      .replace(/\s+(\*\*(?:Live Link|Live link):\*\*)\s*(https?:\/\/[^\s]+)/g, '\n$1 $2')
+      // The resume subtitle should have the same heavy visual weight as
+      // labels such as Email/Technologies.
+      .replace(/^(Java Developer\s*[—-]\s*Java Backend Developer)\s*$/gim, '**$1**')
+      // Remove the internal attachment marker from persisted/live messages.
+      .replace(/\n?\n?\[Attached Files:.*?\]/g, '')
+      .trim();
+
+    // The upload flow can persist the internal "no question/instruction"
+    // formatting prompt as the user's message. It is an implementation
+    // detail and must never be rendered as chat content, including after
+    // the conversation is refreshed and messages are loaded from the API.
+    if (/^The user uploaded document\(s\) but did not provide a question or instruction\./i.test(cleaned)) {
+      return '';
+    }
+
+    // Remove generated helper sections that are not part of the document
+    // itself. This is intentionally done on the client too so old persisted
+    // messages are cleaned when they are loaded after refresh.
+    cleaned = cleaned
+      .replace(/\n?\s*#{1,6}\s*Additional Links\s*(?:\(Repeated in Source\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
+      .replace(/\n?\s*#{1,6}\s*Document Structure\s*(?:\(as extracted\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
+      // Remove only the extracted "Additional Section" and "Links & Contact"
+      // sections. Keep hyperlinks that belong to the actual document content.
+      .replace(/\n?\s*#{1,6}\s*Additional Section\s*(?:\(as in original document\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s*Links\s*&\s*Contact\b|$)/gi, '\n')
+      .replace(/\n?\s*#{1,6}\s*Links\s*&\s*Contact\s*\n[\s\S]*$/gi, '\n')
+      .trim();
+
+    // Remove the dedicated Architecture section/bullet requested by the UI
+    // formatting rules, without removing legitimate architecture mentions
+    // inside normal project/experience descriptions.
+    cleaned = cleaned
+      .replace(/\n?\s*#{1,6}\s*Architecture\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
+      .replace(/^\s*[-*]\s*\*\*Architecture:\*\*.*(?:\n|$)/gim, '')
+      // Remove only the generated Document Navigation section.
+      .replace(/\n?\s*#{1,6}\s*Document\s+Navigation\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
+      .trim();
+
+    // Extracted PDF text can contain the same standalone URLs twice (often a
+    // duplicate block at the end). Keep the first occurrence so links near
+    // the top of the document remain intact, and drop later duplicates.
+    const seenStandaloneLinks = new Set<string>();
+    cleaned = cleaned
+      .split('\n')
+      .filter(line => {
+        const value = line.trim();
+        if (!/^(?:https?:\/\/|mailto:|tel:)/i.test(value)) return true;
+
+        const normalized = value.replace(/[)>.,]+$/, '').replace(/\/$/, '').toLowerCase();
+        if (seenStandaloneLinks.has(normalized)) return false;
+        seenStandaloneLinks.add(normalized);
+        return true;
+      })
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+
+    return cleaned;
+  }
+
+
 const dedupeMessages = (items: Message[]): Message[] => {
   const seen = new Set<string>();
   const result: Message[] = [];
@@ -2334,103 +2432,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   };
 
   
-function normalizeTwinkleIdentity(content: string): string {
-  const normalized = content.trim();
-
-  // Replace the old default identity response with a clearer Twinkle AI
-  // introduction. Keep this narrowly scoped so documents mentioning Twinkle
-  // are not rewritten accidentally.
-  if (
-    /^I['’]m\s+Twinkle\s+AI,\s+a\s+helpful\s+assistant\s+designed\s+to\s+help\s+you\s+with\s+information,\s+analysis,\s+and\s+more\.?$/i.test(normalized)
-  ) {
-    return `Hi! I’m Twinkle AI, a professional AI assistant designed to help you understand information, solve problems, work with files, write and analyze content, develop software, and accomplish tasks efficiently.
-
-I adapt my responses to what you’re actually asking. I aim to provide clear, accurate, practical, and meaningful answers rather than following a rigid response template.
-
-You can ask me questions, give me a file or image to analyze, ask for help with coding or technical problems, request writing or explanations, or simply tell me what you’re trying to accomplish — I’ll help you figure out the best way forward.`;
-  }
-
-  return content;
-}
-
-function cleanMessageContent(content: unknown): string {
-    if (typeof content !== 'string') return '';
-
-    let cleaned = normalizeTwinkleIdentity(content)
-      // NEVER strip Markdown links here. Keeping the original [label](url)
-      // structure lets ReactMarkdown preserve clickability while the
-      // renderer below displays the complete URL as the visible text.
-      //
-      // Contact/project links are normalized onto separate lines so each
-      // link is easy to read in the document-style output.
-      .replace(/^([ \t]*(?:\[[^\]]+\]\((?:https?|mailto|tel):[^)]+\)[ \t]*\|[ \t]*)+\[[^\]]+\]\((?:https?|mailto|tel):[^)]+\)[ \t]*)$/gim, (line) =>
-        line.split(/\s*\|\s*/).join('\n')
-      )
-      .replace(/\s*\|\s*(?=(?:Email|Phone|Github|GitHub|LinkedIn|Portfolio)\s*:)/gi, '\n')
-      // Make document labels use the same heavy weight as **Technologies**.
-      .replace(/(^|\n)(\s*[-*]?\s*)(Github|GitHub|Live Link|Live link|Email|Phone|Technologies)\s*:/gim, '$1$2**$3:**')
-      // Keep project GitHub and Live Link entries on their own lines.
-      .replace(/\s+(\*\*(?:Github|GitHub):\*\*)\s*(https?:\/\/[^\s]+)/g, '\n$1 $2\n')
-      .replace(/\s+(\*\*(?:Live Link|Live link):\*\*)\s*(https?:\/\/[^\s]+)/g, '\n$1 $2')
-      // The resume subtitle should have the same heavy visual weight as
-      // labels such as Email/Technologies.
-      .replace(/^(Java Developer\s*[—-]\s*Java Backend Developer)\s*$/gim, '**$1**')
-      // Remove the internal attachment marker from persisted/live messages.
-      .replace(/\n?\n?\[Attached Files:.*?\]/g, '')
-      .trim();
-
-    // The upload flow can persist the internal "no question/instruction"
-    // formatting prompt as the user's message. It is an implementation
-    // detail and must never be rendered as chat content, including after
-    // the conversation is refreshed and messages are loaded from the API.
-    if (/^The user uploaded document\(s\) but did not provide a question or instruction\./i.test(cleaned)) {
-      return '';
-    }
-
-    // Remove generated helper sections that are not part of the document
-    // itself. This is intentionally done on the client too so old persisted
-    // messages are cleaned when they are loaded after refresh.
-    cleaned = cleaned
-      .replace(/\n?\s*#{1,6}\s*Additional Links\s*(?:\(Repeated in Source\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
-      .replace(/\n?\s*#{1,6}\s*Document Structure\s*(?:\(as extracted\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
-      // Remove only the extracted "Additional Section" and "Links & Contact"
-      // sections. Keep hyperlinks that belong to the actual document content.
-      .replace(/\n?\s*#{1,6}\s*Additional Section\s*(?:\(as in original document\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s*Links\s*&\s*Contact\b|$)/gi, '\n')
-      .replace(/\n?\s*#{1,6}\s*Links\s*&\s*Contact\s*\n[\s\S]*$/gi, '\n')
-      .trim();
-
-    // Remove the dedicated Architecture section/bullet requested by the UI
-    // formatting rules, without removing legitimate architecture mentions
-    // inside normal project/experience descriptions.
-    cleaned = cleaned
-      .replace(/\n?\s*#{1,6}\s*Architecture\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
-      .replace(/^\s*[-*]\s*\*\*Architecture:\*\*.*(?:\n|$)/gim, '')
-      // Remove only the generated Document Navigation section.
-      .replace(/\n?\s*#{1,6}\s*Document\s+Navigation\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
-      .trim();
-
-    // Extracted PDF text can contain the same standalone URLs twice (often a
-    // duplicate block at the end). Keep the first occurrence so links near
-    // the top of the document remain intact, and drop later duplicates.
-    const seenStandaloneLinks = new Set<string>();
-    cleaned = cleaned
-      .split('\n')
-      .filter(line => {
-        const value = line.trim();
-        if (!/^(?:https?:\/\/|mailto:|tel:)/i.test(value)) return true;
-
-        const normalized = value.replace(/[)>.,]+$/, '').replace(/\/$/, '').toLowerCase();
-        if (seenStandaloneLinks.has(normalized)) return false;
-        seenStandaloneLinks.add(normalized);
-        return true;
-      })
-      .join('\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-
-    return cleaned;
-  }
-
   const handleStartEdit = (msg: Message) => {
     setEditingMessage({ id: msg.id, content: cleanMessageContent(msg.content) });
     setEditInput(cleanMessageContent(msg.content));
