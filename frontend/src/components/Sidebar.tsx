@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type ReactNode, type PointerEvent as ReactPointerEvent, type SVGProps } from 'react';
+import { useState, useEffect, useRef, useCallback, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Session, User } from '../types';
 import {
@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import UserAvatar from './UserAvatar'; 
 import { chatApi } from '../lib/api';
 import StormLogo from './StormLogo';
+import exactPinIcon from './pin-icon-exact.png';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Props {
@@ -61,31 +62,32 @@ const getGroupLabel = (session: Session): string => {
 
 // ─── Shared Twinkle logo ─────────────────────────────────────────────────────
 // ─── Exact sidebar Pin icon ───────────────────────────────────────────────────
-// Matches the supplied reference image: Lucide's 24×24 Pin geometry,
-// with a fixed 2px stroke and round caps/joins.
-function SidebarPinIcon({
-  className,
-  ...props
-}: SVGProps<SVGSVGElement>) {
+// This is the actual supplied reference image, cropped and made transparent.
+// It is intentionally used everywhere a Pin icon appears in this sidebar.
+function SidebarPinIcon({ className = '' }: { className?: string }) {
   return (
-    <svg
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
+    <img
+      src={exactPinIcon}
+      alt=""
       aria-hidden="true"
-      {...props}
-    >
-      <path d="M12 17v5" />
-      <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-    </svg>
+      draggable={false}
+      className={`object-contain ${className}`}
+    />
   );
 }
+
+const getGroupLabel = (session: Session): string => {
+  const raw = (session as any).createdAt || (session as any).created_at;
+  if (!raw) return 'Recent';
+  const date = new Date(raw);
+  const now = new Date();
+  const diffDays = Math.floor((now.getTime() - date.getTime()) / 86_400_000);
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return 'This Week';
+  if (diffDays < 30) return 'This Month';
+  return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+};
 
 // ─── IconTooltip ──────────────────────────────────────────────────────────────
 function IconTooltip({
