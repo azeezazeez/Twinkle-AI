@@ -1091,6 +1091,7 @@ export const chatApi = {
     const decoder = new TextDecoder();
     let buffer = '';
     let finalData: any = {};
+    let streamedResponse = '';
 
     const handleEvent = (rawEvent: string) => {
       const lines = rawEvent.split(/\r?\n/);
@@ -1115,7 +1116,10 @@ export const chatApi = {
         handlers.onStatus?.(typeof data?.status === 'string' ? data.status : 'thinking');
       } else if (eventName === 'delta') {
         const text = typeof data?.text === 'string' ? data.text : '';
-        if (text) handlers.onDelta?.(text);
+        if (text) {
+          streamedResponse += text;
+          handlers.onDelta?.(text);
+        }
       } else if (eventName === 'done') {
         finalData = data || {};
       } else if (eventName === 'error') {
@@ -1147,6 +1151,13 @@ export const chatApi = {
       if (buffer.trim()) handleEvent(buffer);
     } finally {
       reader.releaseLock();
+    }
+
+    // Some proxies close a valid SSE stream without delivering the final
+    // `done` event. The deltas are still a complete response, so return them
+    // as the final response instead of leaving the composer in a loading state.
+    if (typeof finalData.response !== 'string' && streamedResponse) {
+      finalData = { ...finalData, response: streamedResponse };
     }
 
     return finalData;
