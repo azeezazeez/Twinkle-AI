@@ -907,6 +907,15 @@
   box-shadow: 0 8px 26px rgba(0, 0, 0, 0.08);
 }
 
+.twinkle-floating-thinking-away {
+  position: fixed;
+  left: 50%;
+  top: auto;
+  bottom: 112px;
+  transform: translateX(-50%);
+  z-index: 8995;
+}
+
 .twinkle-floating-thinking-dot {
   width: 6px;
   height: 6px;
@@ -929,7 +938,16 @@
   box-shadow: 0 8px 26px rgba(0, 0, 0, 0.28);
 }
 
-.dark .twinkle-floating-thinking-dot {
+.dark .twinkle-floating-thinking-away {
+  position: fixed;
+  left: 50%;
+  top: auto;
+  bottom: 112px;
+  transform: translateX(-50%);
+  z-index: 8995;
+}
+
+.twinkle-floating-thinking-dot {
   background: #a1a1aa;
 }
 
