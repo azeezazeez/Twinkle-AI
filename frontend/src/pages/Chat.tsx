@@ -1044,8 +1044,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
   const [voiceInputActive, setVoiceInputActive] = useState(false);
   const [voiceCaptureStopped, setVoiceCaptureStopped] = useState(false);
-  const [voiceTranscribing, setVoiceTranscribing] = useState(false);
-  const voiceTranscribingRef = useRef(false);
 
   const [typedSessionTitle, setTypedSessionTitle] = useState('');
 
@@ -1093,9 +1091,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   // =============================================================
   // CHAT-STYLE VOICE DICTATION
   //
-  // This is intentionally separate from Live Talk. Dictation captures PCM
-  // directly and uses Gemini Live input transcription so behavior is consistent
-  // across modern browsers instead of depending on SpeechRecognition.
+  // This is intentionally separate from Live Talk. Dictation uses the
+  // browser's native SpeechRecognition engine so the microphone is opened
+  // only once and words can appear in the composer immediately.
+  // Live Talk keeps its own Gemini Live microphone/session implementation.
   // =============================================================
   const voiceBaseInputRef = useRef('');
   const voiceDraftRef = useRef('');
@@ -1109,9 +1108,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const voiceDictationWantedRef = useRef(false);
   const voiceCommitInProgressRef = useRef(false);
   const voiceSpeechTimerRef = useRef<number | null>(null);
-  const voiceTranscriptionSettleTimerRef = useRef<number | null>(null);
-  const voiceTranscriptionMaxTimerRef = useRef<number | null>(null);
-  const voiceCommitVoiceInputRef = useRef<(() => Promise<string>) | null>(null);
   // Fallback for browsers (notably Brave) where native SpeechRecognition
   // starts but returns the Google speech service `network` error. This uses
   // the same Gemini Live input-transcription path as Live Talk, without
@@ -1122,6 +1118,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const voiceGeminiSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const voiceGeminiProcessorRef = useRef<AudioWorkletNode | null>(null);
   const voiceGeminiSilentGainRef = useRef<GainNode | null>(null);
+  const voiceGeminiWorkletReadyRef = useRef<Promise<void> | null>(null);
   const voiceGeminiFallbackActiveRef = useRef(false);
   const voiceGeminiPendingPcmRef = useRef<string[]>([]);
   const [voiceDraftVersion, setVoiceDraftVersion] = useState(0);
@@ -1149,15 +1146,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     voiceGeminiFallbackActiveRef.current = false;
     voiceGeminiPendingPcmRef.current = [];
 
-    if (voiceTranscriptionSettleTimerRef.current !== null) {
-      window.clearTimeout(voiceTranscriptionSettleTimerRef.current);
-      voiceTranscriptionSettleTimerRef.current = null;
-    }
-    if (voiceTranscriptionMaxTimerRef.current !== null) {
-      window.clearTimeout(voiceTranscriptionMaxTimerRef.current);
-      voiceTranscriptionMaxTimerRef.current = null;
-    }
-
     try { voiceGeminiProcessorRef.current?.disconnect(); } catch {}
     try { voiceGeminiSourceRef.current?.disconnect(); } catch {}
     try { voiceGeminiSilentGainRef.current?.disconnect(); } catch {}
@@ -1173,25 +1161,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
     try { void voiceGeminiAudioContextRef.current?.close(); } catch {}
     voiceGeminiAudioContextRef.current = null;
-  }, []);
-
-  // Stop microphone capture without closing the Gemini transcription socket.
-  // Gemini can still send the final input-transcription event after the last
-  // audio frame; keeping the socket alive here prevents the final words from
-  // being lost when the user presses Stop.
-  const stopGeminiDictationCapture = useCallback(() => {
-    // Stop sending microphone frames immediately, but keep the Gemini socket
-    // and AudioContext alive until the final input-transcription packet arrives.
-    // Closing the session here can race the final transcript on slower browsers.
-    try { voiceGeminiProcessorRef.current?.disconnect(); } catch {}
-    try { voiceGeminiSourceRef.current?.disconnect(); } catch {}
-    try { voiceGeminiSilentGainRef.current?.disconnect(); } catch {}
-    voiceGeminiProcessorRef.current = null;
-    voiceGeminiSourceRef.current = null;
-    voiceGeminiSilentGainRef.current = null;
-
-    voiceGeminiStreamRef.current?.getTracks().forEach(track => track.stop());
-    voiceGeminiStreamRef.current = null;
   }, []);
 
   const startGeminiDictationFallback = useCallback(async (attempt: number) => {
@@ -1226,23 +1195,14 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       voiceGeminiAudioContextRef.current = context;
       if (context.state === 'suspended') await context.resume();
 
-      // AudioWorklet is preferred for low-latency capture. Older Safari/WebView
-      // builds may not expose it, so the ScriptProcessor path below keeps the
-      // same microphone flow working without browser SpeechRecognition.
-      const hasAudioWorklet = Boolean(context.audioWorklet?.addModule);
-      let workletReadyPromise: Promise<void> = Promise.resolve();
-      if (hasAudioWorklet) {
+      if (!voiceGeminiWorkletReadyRef.current) {
         const workletBlob = new Blob([pcmCaptureWorkletSource], { type: 'application/javascript' });
         const workletUrl = URL.createObjectURL(workletBlob);
-        workletReadyPromise = context.audioWorklet.addModule(workletUrl)
+        voiceGeminiWorkletReadyRef.current = context.audioWorklet.addModule(workletUrl)
           .finally(() => URL.revokeObjectURL(workletUrl));
       }
 
-      const [stream, { token, model }] = await Promise.all([
-        streamPromise,
-        tokenPromise,
-        workletReadyPromise,
-      ]);
+      const [stream, { token, model }] = await Promise.all([streamPromise, tokenPromise, voiceGeminiWorkletReadyRef.current]);
       if (attempt !== voiceStartRef.current || !voiceDictationWantedRef.current) {
         stream.getTracks().forEach(track => track.stop());
         return;
@@ -1279,21 +1239,9 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         if (attempt !== voiceStartRef.current || !voiceDictationWantedRef.current) return;
         try {
           const message = await decodeGeminiLiveMessage(event.data);
-          const serverContent = message?.serverContent;
-          const finalText = String(serverContent?.inputTranscription?.text || '');
-          const interimText = String(serverContent?.interimInputTranscription?.text || '');
+          const text = String(message?.serverContent?.inputTranscription?.text || '');
+          if (!text.trim()) return;
 
-          // Interim text is only a preview. The authoritative value used for
-          // the search box is inputTranscription, which Gemini emits when the
-          // speech turn is finalized.
-          if (interimText.trim() && !finalText.trim()) {
-            setVoiceLiveTranscript(interimText.trim());
-            setVoiceDraftVersion(version => version + 1);
-            return;
-          }
-          if (!finalText.trim()) return;
-
-          const text = finalText;
           voiceFinalTranscriptRef.current = `${voiceFinalTranscriptRef.current}${text}`
             .replace(/\s+/g, ' ')
             .trim();
@@ -1302,23 +1250,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           setVoiceLiveTranscript(voiceFinalTranscriptRef.current);
           setVoiceDraftVersion(version => version + 1);
           setVoiceSpeechDetected(true);
-
-          if (voiceTranscribingRef.current) {
-            // A transcription packet means Gemini has produced new text after
-            // Stop was pressed. Debounce the commit so the composer receives
-            // the complete final phrase instead of committing too early.
-            if (voiceTranscriptionSettleTimerRef.current !== null) {
-              window.clearTimeout(voiceTranscriptionSettleTimerRef.current);
-            }
-            voiceTranscriptionSettleTimerRef.current = window.setTimeout(() => {
-              voiceTranscriptionSettleTimerRef.current = null;
-              if (voiceTranscribingRef.current && !voiceCommitInProgressRef.current) {
-                void voiceCommitVoiceInputRef.current?.().finally(() => {
-                  stopGeminiDictationFallback();
-                });
-              }
-            }, 900);
-          }
 
           if (voiceSpeechTimerRef.current !== null) window.clearTimeout(voiceSpeechTimerRef.current);
           voiceSpeechTimerRef.current = window.setTimeout(() => {
@@ -1343,20 +1274,21 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       };
 
       const source = context.createMediaStreamSource(stream);
+      const processor = new AudioWorkletNode(context, 'twinkle-pcm-capture');
       const silentGain = context.createGain();
       silentGain.gain.value = 0;
-      const sendPcm = (buffer: ArrayBuffer) => {
+      source.connect(processor);
+      processor.connect(silentGain);
+      silentGain.connect(context.destination);
+
+      processor.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
         if (!voiceGeminiFallbackActiveRef.current || attempt !== voiceStartRef.current) return;
-        const data = pcm16ToBase64(buffer);
+        const data = pcm16ToBase64(event.data);
         const liveSocket = voiceGeminiSocketRef.current;
         if (liveSocket?.readyState === WebSocket.OPEN) {
-          try {
-            liveSocket.send(JSON.stringify({
-              realtimeInput: { audio: { data, mimeType: 'audio/pcm;rate=16000' } },
-            }));
-          } catch {
-            // Keep the capture alive; the socket close handler will clean up.
-          }
+          liveSocket.send(JSON.stringify({
+            realtimeInput: { audio: { data, mimeType: 'audio/pcm;rate=16000' } },
+          }));
         } else {
           const queue = voiceGeminiPendingPcmRef.current;
           queue.push(data);
@@ -1364,37 +1296,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         }
       };
 
-      let processor: AudioWorkletNode | ScriptProcessorNode;
-      if (hasAudioWorklet) {
-        processor = new AudioWorkletNode(context, 'twinkle-pcm-capture');
-        processor.port.onmessage = (event: MessageEvent<ArrayBuffer>) => sendPcm(event.data);
-      } else {
-        const scriptProcessor = context.createScriptProcessor(4096, 1, 1);
-        scriptProcessor.onaudioprocess = event => {
-          const inputData = event.inputBuffer.getChannelData(0);
-          const ratio = context.sampleRate / 16000;
-          const outputLength = Math.max(1, Math.round(inputData.length / ratio));
-          const pcm = new Int16Array(outputLength);
-          for (let i = 0; i < outputLength; i += 1) {
-            const position = i * ratio;
-            const left = Math.min(Math.floor(position), inputData.length - 1);
-            const right = Math.min(left + 1, inputData.length - 1);
-            const fraction = position - left;
-            const sample = inputData[left] * (1 - fraction) + inputData[right] * fraction;
-            const clamped = Math.max(-1, Math.min(1, sample));
-            pcm[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
-          }
-          sendPcm(pcm.buffer);
-        };
-        processor = scriptProcessor;
-      }
-
-      source.connect(processor);
-      processor.connect(silentGain);
-      silentGain.connect(context.destination);
-
       voiceGeminiSourceRef.current = source;
-      voiceGeminiProcessorRef.current = processor as AudioWorkletNode;
+      voiceGeminiProcessorRef.current = processor;
       voiceGeminiSilentGainRef.current = silentGain;
 
       const flushQueue = () => {
@@ -1421,7 +1324,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       voiceStartRef.current += 1;
       setVoiceInputActive(false);
     }
-  }, [stopGeminiDictationFallback, stopGeminiDictationCapture, voiceTranscribing]);
+  }, [stopGeminiDictationFallback]);
 
   const cleanupVoiceAudio = useCallback(() => {
     if (voiceSpeechTimerRef.current !== null) {
@@ -1457,8 +1360,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     setVoiceDraftVersion(version => version + 1);
     setVoiceInputActive(false);
     setVoiceCaptureStopped(false);
-    setVoiceTranscribing(false);
-    voiceTranscribingRef.current = false;
 
     window.setTimeout(() => inputRef.current?.focus(), 0);
   }, [cleanupVoiceAudio]);
@@ -1485,8 +1386,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       setVoiceDraftVersion(version => version + 1);
       setVoiceInputActive(false);
       setVoiceCaptureStopped(false);
-      setVoiceTranscribing(false);
-      voiceTranscribingRef.current = false;
     });
 
     // Stop recognition after the text has been committed. A late browser
@@ -1521,65 +1420,13 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     return combined;
   }, [input, voiceInputActive, stopGeminiDictationFallback]);
 
-  // The Gemini socket handler is created before commitVoiceInput in this
-  // component. Keep a ref to the current callback so a finalized transcript
-  // can commit immediately without a stale closure or a fixed timeout.
-  voiceCommitVoiceInputRef.current = commitVoiceInput;
-
   const stopVoiceCapture = useCallback(async () => {
-    if (!voiceInputActive || voiceCaptureStopped || voiceCommitInProgressRef.current || voiceTranscribing) return;
-
-    // Stop the microphone immediately, but deliberately keep the Gemini Live
-    // socket alive long enough to receive the final transcription event.
+    if (!voiceInputActive || voiceCaptureStopped || voiceCommitInProgressRef.current) return;
+    // Disable the button immediately so double-clicks cannot create duplicate
+    // commits.
     setVoiceCaptureStopped(true);
-    setVoiceTranscribing(true);
-    voiceTranscribingRef.current = true;
-    setVoiceSpeechDetected(false);
-
-    const socket = voiceGeminiSocketRef.current;
-    if (socket?.readyState === WebSocket.OPEN) {
-      try {
-        socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
-      } catch {}
-    }
-
-    stopGeminiDictationCapture();
-
-    if (voiceTranscriptionSettleTimerRef.current !== null) {
-      window.clearTimeout(voiceTranscriptionSettleTimerRef.current);
-    }
-    if (voiceTranscriptionMaxTimerRef.current !== null) {
-      window.clearTimeout(voiceTranscriptionMaxTimerRef.current);
-    }
-
-    const finalize = () => {
-      if (voiceTranscriptionSettleTimerRef.current !== null) {
-        window.clearTimeout(voiceTranscriptionSettleTimerRef.current);
-        voiceTranscriptionSettleTimerRef.current = null;
-      }
-      if (voiceTranscriptionMaxTimerRef.current !== null) {
-        window.clearTimeout(voiceTranscriptionMaxTimerRef.current);
-        voiceTranscriptionMaxTimerRef.current = null;
-      }
-      void commitVoiceInput().finally(() => {
-        // Only close the Gemini session after the final transcript has been
-        // committed to the composer.
-        stopGeminiDictationFallback();
-      });
-    };
-
-    // IMPORTANT: do not finalize after a short fixed delay. Gemini can return
-    // the finalized inputTranscription only when the turn completes, and that
-    // event can arrive later on slower connections/browsers. The 1.8s timer
-    // was the reason the search box was sometimes left empty.
-    //
-    // Wait long enough for the authoritative transcript event. If Gemini does
-    // return a transcript packet, the message handler settles it for 650ms and
-    // the existing settle timer commits it. This long timer is only a safety
-    // fallback for a broken/empty transcription session.
-    voiceTranscriptionSettleTimerRef.current = window.setTimeout(finalize, 10000);
-    voiceTranscriptionMaxTimerRef.current = window.setTimeout(finalize, 15000);
-  }, [commitVoiceInput, stopGeminiDictationCapture, voiceCaptureStopped, voiceInputActive, voiceTranscribing]);
+    await commitVoiceInput();
+  }, [commitVoiceInput, voiceCaptureStopped, voiceInputActive]);
 
   const startVoiceInput = useCallback(() => {
     if (
@@ -1589,22 +1436,22 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       isProcessingFiles ||
       voiceCommitInProgressRef.current
     ) return;
-
-    // Do not depend on the browser's SpeechRecognition implementation.
-    // Chrome/Edge/Brave/Safari can expose it, while Firefox may not, and
-    // Chromium privacy settings can make it fail with a `network` error.
-    // Capture microphone PCM directly and use the same Gemini Live
-    // input-transcription path across modern browsers instead.
-    if (!navigator.mediaDevices?.getUserMedia) {
-      window.alert('Microphone access is not supported by this browser. Please use a current browser with microphone access enabled.');
-      return;
-    }
-
     voiceStartInProgressRef.current = true;
     voiceDictationWantedRef.current = true;
 
+    const SpeechRecognitionCtor =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognitionCtor) {
+      voiceStartInProgressRef.current = false;
+      voiceDictationWantedRef.current = false;
+      window.alert('Voice dictation is not supported by this browser. Please use the latest Chrome or Edge.');
+      return;
+    }
+
     const attempt = ++voiceStartRef.current;
-    voiceBrowserStopRequestedRef.current = true;
+    voiceBrowserStopRequestedRef.current = false;
     voiceCommitInProgressRef.current = false;
     voiceBaseInputRef.current = input.trim();
     voiceDraftRef.current = '';
@@ -1612,19 +1459,153 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     voiceInterimTranscriptRef.current = '';
     setVoiceLiveTranscript('');
     setVoiceCaptureStopped(false);
-    setVoiceTranscribing(false);
-    voiceTranscribingRef.current = false;
     setVoiceSpeechDetected(false);
 
-    // Make the listening state immediate. The microphone/token/WebSocket
-    // startup continues in parallel so the UI never waits for the network.
+    const recognition = new SpeechRecognitionCtor();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+    recognition.lang = getSpeechRecognitionLanguage();
+
+    recognition.onstart = () => {
+      if (attempt !== voiceStartRef.current) return;
+      voiceStartInProgressRef.current = false;
+      voiceBrowserRecognitionActiveRef.current = true;
+      voiceBrowserRecognitionRef.current = recognition;
+      flushSync(() => {
+        setVoiceDraftVersion(version => version + 1);
+        setVoiceInputActive(true);
+      });
+    };
+
+    recognition.onresult = (event: any) => {
+      if (attempt !== voiceStartRef.current || voiceBrowserStopRequestedRef.current) return;
+
+      let finalText = voiceFinalTranscriptRef.current;
+      let interimText = '';
+
+      for (let i = event.resultIndex ?? 0; i < event.results.length; i += 1) {
+        const result = event.results[i];
+        const text = String(result?.[0]?.transcript || '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (!text) continue;
+
+        if (result?.isFinal) {
+          // Chrome can emit a final result immediately after an interim result.
+          // Only append genuinely new final text.
+          const normalized = text.toLowerCase();
+          if (!finalText.toLowerCase().endsWith(normalized)) {
+            finalText = `${finalText}${finalText ? ' ' : ''}${text}`
+              .replace(/\s+/g, ' ')
+              .trim();
+          }
+        } else {
+          interimText = `${interimText}${interimText ? ' ' : ''}${text}`
+            .replace(/\s+/g, ' ')
+            .trim();
+        }
+      }
+
+      voiceFinalTranscriptRef.current = finalText;
+      voiceInterimTranscriptRef.current = interimText;
+
+      const liveText = `${finalText}${finalText && interimText ? ' ' : ''}${interimText}`
+        .replace(/\s+/g, ' ')
+        .trim();
+      voiceDraftRef.current = liveText;
+
+      // This is the actual text shown in the listening composer while the user
+      // is speaking — no Gemini handshake is involved.
+      setVoiceLiveTranscript(liveText);
+      setVoiceDraftVersion(version => version + 1);
+      setVoiceSpeechDetected(true);
+
+      if (voiceSpeechTimerRef.current !== null) {
+        window.clearTimeout(voiceSpeechTimerRef.current);
+      }
+      voiceSpeechTimerRef.current = window.setTimeout(() => {
+        voiceSpeechTimerRef.current = null;
+        if (attempt === voiceStartRef.current && !voiceBrowserStopRequestedRef.current) {
+          setVoiceSpeechDetected(false);
+        }
+      }, 450);
+    };
+
+    recognition.onerror = (event: any) => {
+      if (attempt !== voiceStartRef.current) return;
+      const error = String(event?.error || '');
+
+      if (error === 'not-allowed' || error === 'service-not-allowed') {
+        voiceBrowserRecognitionActiveRef.current = false;
+        voiceBrowserRecognitionRef.current = null;
+        voiceStartInProgressRef.current = false;
+        voiceStartRef.current += 1;
+        setVoiceInputActive(false);
+        setVoiceCaptureStopped(false);
+        setVoiceLiveTranscript('');
+        window.alert('Microphone permission was denied. Allow microphone access for this site and try again.');
+        return;
+      }
+
+      // Brave and some Chromium builds can return `network` even though the
+      // microphone itself is working. Fall back to Gemini Live transcription
+      // so spoken words still become text instead of leaving the composer blank.
+      if (error === 'network') {
+        void startGeminiDictationFallback(attempt);
+        return;
+      }
+
+      // `no-speech` and `aborted` are handled by onend while the user is still
+      // in dictation mode.
+      console.warn('Twinkle voice recognition:', error || 'unknown error');
+    };
+
+    recognition.onend = () => {
+      if (attempt !== voiceStartRef.current) return;
+
+      voiceBrowserRecognitionActiveRef.current = false;
+
+      if (voiceBrowserStopRequestedRef.current || voiceGeminiFallbackActiveRef.current || !voiceDictationWantedRef.current) {
+        voiceBrowserRecognitionRef.current = null;
+        return;
+      }
+
+      // Chrome ends SpeechRecognition after periods of silence even when
+      // continuous=true. Restart it without clearing the accumulated text.
+      window.setTimeout(() => {
+        if (
+          attempt !== voiceStartRef.current ||
+          voiceBrowserStopRequestedRef.current ||
+          !voiceDictationWantedRef.current
+        ) return;
+
+        try {
+          recognition.start();
+        } catch {
+          // A start while Chrome is still closing is harmless; onend will retry.
+        }
+      }, 120);
+    };
+
+    voiceBrowserRecognitionRef.current = recognition;
+    // Make the listening state immediate; native SpeechRecognition can fire
+    // onstart slightly later even though the user has already pressed Mic.
     flushSync(() => {
       setVoiceDraftVersion(version => version + 1);
       setVoiceInputActive(true);
     });
-
-    void startGeminiDictationFallback(attempt);
-  }, [input, isProcessingFiles, isTyping, voiceInputActive, startGeminiDictationFallback]);
+    try {
+      recognition.start();
+    } catch (error) {
+      voiceStartInProgressRef.current = false;
+      voiceBrowserRecognitionRef.current = null;
+      voiceBrowserRecognitionActiveRef.current = false;
+      setVoiceInputActive(false);
+      const message = error instanceof Error ? error.message : 'Unable to start voice dictation.';
+      window.alert(message);
+    }
+  }, [getSpeechRecognitionLanguage, input, isProcessingFiles, isTyping, voiceInputActive, startGeminiDictationFallback]);
 
   useEffect(() => () => {
     voiceStartInProgressRef.current = false;
@@ -1638,15 +1619,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       window.clearTimeout(voiceSpeechTimerRef.current);
       voiceSpeechTimerRef.current = null;
     }
-    if (voiceTranscriptionSettleTimerRef.current !== null) {
-      window.clearTimeout(voiceTranscriptionSettleTimerRef.current);
-      voiceTranscriptionSettleTimerRef.current = null;
-    }
-    if (voiceTranscriptionMaxTimerRef.current !== null) {
-      window.clearTimeout(voiceTranscriptionMaxTimerRef.current);
-      voiceTranscriptionMaxTimerRef.current = null;
-    }
-    setVoiceTranscribing(false);
   }, [stopGeminiDictationFallback]);
 
 
@@ -3448,7 +3420,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
         {/* Input bar */}
         <div
-          className="fixed bottom-0 left-0 right-0 z-[9000] flex w-auto max-w-none justify-center overflow-visible bg-transparent px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-4 sm:pt-3 sm:pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-6 md:pt-4 md:pb-[calc(1rem+env(safe-area-inset-bottom))]"
+          className="fixed bottom-0 left-0 right-0 z-[9000] w-auto max-w-none overflow-visible bg-transparent px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-4 sm:pt-3 sm:pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-6 md:pt-4 md:pb-[calc(1rem+env(safe-area-inset-bottom))]"
           style={{ left: desktopSidebarExpanded ? `${desktopSidebarWidth}px` : undefined }}
         >
           <div className="mx-auto w-full max-w-[920px] min-w-0 relative">
@@ -3509,7 +3481,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
               )}
             </AnimatePresence>
 
-            <div className={`relative z-[60] flex w-full min-w-0 flex-col overflow-visible rounded-[28px] border border-zinc-200/90 bg-white shadow-[0_2px_18px_rgba(0,0,0,0.08)] transition-all dark:border-zinc-700/90 dark:bg-zinc-900 dark:shadow-black/20 ${justFinished ? 'animate-blink' : ''}`}>
+            <div className={`relative z-[60] flex w-full min-w-0 flex-col overflow-visible rounded-[24px] border border-zinc-200/90 bg-white shadow-[0_2px_18px_rgba(0,0,0,0.08)] transition-all dark:border-zinc-700/90 dark:bg-zinc-900 dark:shadow-black/20 ${justFinished ? 'animate-blink' : ''}`}>
               {/* File preview strip (kept for consistency but never shown without UI trigger) */}
               <AnimatePresence>
                 {filePreviews.length > 0 && (
@@ -3586,42 +3558,51 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                       <X className="h-[20px] w-[20px]" strokeWidth={2.05} />
                     </motion.button>
 
-                    {/* ChatGPT-style dictation state: waveform while listening,
-                        then an explicit Transcribing state after Stop. */}
+                    {/* Live transcript + sound-state indicator. */}
                     <div
-                      className="relative flex min-h-10 min-w-0 flex-1 items-center justify-center overflow-hidden px-3"
-                      aria-live="polite"
-                      aria-label={voiceTranscribing ? 'Transcribing' : 'Listening'}
+                      className="relative flex min-h-10 min-w-0 flex-1 items-center overflow-hidden px-2"
+                      aria-label={voiceSpeechDetected ? 'Listening and transcribing' : 'Listening'}
                     >
-                      {voiceTranscribing ? (
-                        <div className="flex items-center justify-center gap-2 text-sm font-medium text-zinc-500 dark:text-zinc-400 sm:text-[15px]">
-                          <span>Transcribing</span>
-                          <span className="inline-flex w-5 justify-start gap-0.5" aria-hidden="true">
-                            <motion.span animate={{ opacity: [0.25, 1, 0.25] }} transition={{ duration: 0.9, repeat: Infinity, delay: 0 }}>. </motion.span>
-                            <motion.span animate={{ opacity: [0.25, 1, 0.25] }} transition={{ duration: 0.9, repeat: Infinity, delay: 0.15 }}>.</motion.span>
-                            <motion.span animate={{ opacity: [0.25, 1, 0.25] }} transition={{ duration: 0.9, repeat: Infinity, delay: 0.3 }}>.</motion.span>
-                          </span>
+                      {voiceLiveTranscript.trim() ? (
+                        <div
+                          key={voiceDraftVersion}
+                          className="max-h-16 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words px-1 text-sm font-medium leading-6 text-zinc-800 dark:text-zinc-100 sm:text-[15px]"
+                        >
+                          {voiceLiveTranscript}
                         </div>
-                      ) : (
-                        <div className="flex h-8 w-full max-w-[340px] items-center justify-center gap-[3px]" aria-hidden="true">
-                          {[...Array(32)].map((_, index) => (
+                      ) : voiceSpeechDetected ? (
+                        <div className="flex h-full w-full items-center justify-center gap-[3px]" aria-hidden="true">
+                          {[...Array(28)].map((_, index) => (
                             <motion.span
                               key={index}
                               className="w-[3px] rounded-full bg-zinc-500 dark:bg-zinc-300"
                               animate={{
-                                height: voiceSpeechDetected
-                                  ? [5, 12 + ((index * 7) % 18), 7, 16 + ((index * 5) % 16), 5]
-                                  : [3, 6 + ((index * 3) % 7), 4],
-                                opacity: voiceSpeechDetected ? [0.5, 1, 0.7, 1, 0.5] : [0.35, 0.7, 0.35],
+                                height: [7, 16 + ((index * 7) % 24), 9, 22 + ((index * 5) % 18), 7],
+                                opacity: [0.55, 1, 0.7, 1, 0.55],
                               }}
                               transition={{
-                                duration: voiceSpeechDetected ? 0.55 : 1.05,
+                                duration: 0.65,
                                 repeat: Infinity,
-                                delay: index * 0.018,
+                                delay: index * 0.025,
                                 ease: 'easeInOut',
                               }}
                             />
                           ))}
+                        </div>
+                      ) : (
+                        <div className="relative h-6 w-full overflow-hidden" aria-hidden="true">
+                          <motion.div
+                            className="absolute left-1/2 top-1/2 flex w-max -translate-y-1/2 items-center gap-[7px]"
+                            animate={{ x: ['-50%', '0%'] }}
+                            transition={{ duration: 2.8, repeat: Infinity, ease: 'linear' }}
+                          >
+                            {[...Array(84)].map((_, index) => (
+                              <span
+                                key={index}
+                                className="h-[3px] w-[3px] shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500"
+                              />
+                            ))}
+                          </motion.div>
                         </div>
                       )}
                     </div>
@@ -3630,23 +3611,19 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                     <motion.button
                       type="button"
                       onClick={() => void stopVoiceCapture()}
-                      disabled={voiceCaptureStopped || voiceTranscribing}
-                      aria-label={voiceTranscribing ? 'Transcribing' : 'Stop dictation'}
-                      data-tooltip={voiceTranscribing ? 'Transcribing' : 'Stop'}
+                      disabled={voiceCaptureStopped}
+                      aria-label="Stop dictation"
+                      data-tooltip="Stop"
                       whileHover={{ scale: voiceCaptureStopped ? 1 : 1.04 }}
                       whileTap={{ scale: 0.9 }}
                       className="twinkle-tooltip-trigger relative z-[30] flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-transparent text-white shadow-sm transition-all duration-200 disabled:cursor-default disabled:opacity-60 sm:h-11 sm:w-11"
                       style={{ background: liveTalkColor.swatch, boxShadow: 'none' }}
                     >
-                      {voiceTranscribing ? (
-                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                      ) : (
-                        <span className="h-3.5 w-3.5 rounded-[3px] bg-white shadow-sm" />
-                      )}
+                      <span className="h-3.5 w-3.5 rounded-[3px] bg-white shadow-sm" />
                     </motion.button>
 
-                    {/* Send button is available only after transcription has finished. */}
-                    {!voiceTranscribing && <motion.button
+                    {/* Send button is the final control at the end of the composer. */}
+                    <motion.button
                       type="button"
                       onClick={async () => {
                         const text = await commitVoiceInput();
@@ -3664,7 +3641,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                       <svg viewBox="0 0 24 24" className="h-[20px] w-[20px]" aria-hidden="true">
                         <path d="M12 21V4M6.25 9.75 12 4l5.75 5.75" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
-                    </motion.button>}
+                    </motion.button>
                   </div>
 
                 ) : (
