@@ -933,24 +933,101 @@
 }
 
 .dark .twinkle-floating-thinking {
-  border-color: rgba(63, 63, 70, 0.95);
-  background: #18181b;
-  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.28);
-}
-
-.dark .twinkle-floating-thinking-away {
-  position: fixed;
-  left: 50%;
-  top: auto;
-  bottom: 112px;
-  transform: translateX(-50%);
-  z-index: 8995;
-}
-
-.twinkle-floating-thinking-dot {
-  background: #a1a1aa;
+  border-color: rgba(228, 228, 231, 0.95);
+  background: #ffffff;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.12);
 }
 
 .chat-messages-bottom-mask {
   display: none !important;
+}
+
+/* =========================================================
+   RESPONSE EQUATIONS / SYMBOLS
+   ========================================================= */
+.twinkle-response-content .katex-display {
+  display: block;
+  margin: 1rem 0;
+  padding: 0.75rem 0.9rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.92);
+  border: 1px solid rgba(228, 228, 231, 0.9);
+  text-align: center;
+}
+
+.twinkle-response-content .katex {
+  font-size: 1.08em;
+  line-height: 1.35;
+}
+
+.twinkle-response-content .katex-display > .katex {
+  font-size: 1.12em;
+}
+
+.twinkle-response-content .math-inline {
+  white-space: normal;
+}
+
+.dark .twinkle-response-content .katex-display {
+  background: rgba(39, 39, 42, 0.78);
+  border-color: rgba(82, 82, 91, 0.75);
+}
+
+@media (max-width: 767px) {
+  .twinkle-response-content .katex-display {
+    margin-left: -0.2rem;
+    margin-right: -0.2rem;
+    padding: 0.65rem;
+    text-align: left;
+  }
+}
+
+/* =========================================================
+   STREAMING DOTS -> HOVER TO SCROLL DOWN
+   ========================================================= */
+.twinkle-floating-thinking {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 0;
+  cursor: pointer;
+  color: #71717a;
+  transition: width 160ms ease, height 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.twinkle-floating-thinking:hover {
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.12);
+}
+
+.twinkle-floating-thinking-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.twinkle-floating-thinking-arrow {
+  display: none;
+  width: 22px;
+  height: 22px;
+  color: #18181b;
+  transition: transform 160ms ease;
+}
+
+.twinkle-floating-thinking:hover .twinkle-floating-thinking-dots {
+  display: none;
+}
+
+.twinkle-floating-thinking:hover .twinkle-floating-thinking-arrow {
+  display: block;
+}
+
+.twinkle-floating-thinking:hover .twinkle-floating-thinking-arrow {
+  transform: translateY(1px);
+}
+
+.dark .twinkle-floating-thinking-arrow {
+  color: #18181b;
 }
