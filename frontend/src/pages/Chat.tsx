@@ -958,6 +958,43 @@ const getSpeechLanguage = (): string => {
   }
 };
 
+const getDateTimeResponse = (message: string): string | null => {
+  const normalized = message
+    .trim()
+    .toLowerCase()
+    .replace(/[?!.,]+$/g, '')
+    .replace(/\s+/g, ' ');
+
+  const asksTime = /\b(what(?:'s| is) (?:the )?(?:current )?time|current time|time is it|time right now|what time is it|tell me the time|give me the time|what time do we have)\b/i.test(normalized);
+  const asksDate = /\b(what(?:'s| is) (?:(?:today'?s|the current|today'?s current) )?date(?: today)?|current date|today'?s date|today date|date today|what date is it(?: today)?|what day is it(?: today)?|which day is it(?: today)?|tell me (?:today'?s )?date|give me (?:today'?s )?date)\b/i.test(normalized);
+
+  if (!asksTime && !asksDate) return null;
+
+  const now = new Date();
+  const dateText = new Intl.DateTimeFormat(undefined, {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  }).format(now);
+  const timeText = new Intl.DateTimeFormat(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(now);
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  if (asksTime && asksDate) {
+    return `Today is **${dateText}** and the current time is **${timeText}** (${timeZone}).`;
+  }
+
+  if (asksTime) {
+    return `The current time is **${timeText}** (${timeZone}).`;
+  }
+
+  return `Today is **${dateText}**.`;
+};
+
 export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [typingSessionTitle, setTypingSessionTitle] = useState<{ id: number; title: string } | null>(null);
@@ -2379,6 +2416,33 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
     const text = typeof directMessage === 'string' ? directMessage : (input || '');
 
+    // Answer current date/time requests directly from the user's browser clock.
+    // This keeps the response accurate without changing the normal AI/API path
+    // for any other request.
+    const dateTimeResponse = getDateTimeResponse(text);
+    if (dateTimeResponse && !selectedFiles?.length) {
+      const now = new Date().toISOString();
+      const userMessage: Message = {
+        id: `local-user-${Date.now()}`,
+        sessionId: currentSessionId || 0,
+        role: 'user',
+        content: text.trim(),
+        timestamp: now,
+      };
+      const assistantMessage: Message = {
+        id: `local-date-time-${Date.now()}`,
+        sessionId: currentSessionId || 0,
+        role: 'assistant',
+        content: dateTimeResponse,
+        timestamp: now,
+      };
+
+      setInput('');
+      setMessages(prev => [...prev, userMessage, assistantMessage]);
+      setTimeout(() => inputRef.current?.focus(), 100);
+      return;
+    }
+
     // Defensive normalization prevents stale browser/HMR state from causing
     // "Cannot read properties of undefined (reading 'length')" during upload.
     const currentSelectedFiles = Array.isArray(selectedFiles)
@@ -3472,7 +3536,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                   <div className="min-w-0 flex-1" />
 
                   {/* Model selector */}
-                  <div className="twinkle-composer-model relative mr-2 shrink-0 sm:mr-3">
+                  <div
+                    ref={modelPickerRef}
+                    className="twinkle-composer-model relative mr-2 shrink-0 sm:mr-3"
+                  >
                     <motion.button
                       type="button"
                       onClick={() => setModelPickerOpen(prev => !prev)}
