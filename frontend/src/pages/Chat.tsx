@@ -1030,6 +1030,12 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     return () => window.clearInterval(interval);
   }, [typingSessionTitle]);
 
+  // Warm the reusable Live Talk token while the chat page is idle.
+  // This moves the backend token request off the microphone click path.
+  useEffect(() => {
+    void createLiveToken('Charon', 'auto').catch(() => undefined);
+  }, []);
+
   const sidebarSessions = sessions.map(session =>
     typingSessionTitle?.id === session.id
       ? { ...session, sessionName: typedSessionTitle }
@@ -1185,7 +1191,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     // Request the token immediately in parallel with microphone permission.
     // The composer is already painted synchronously, so the user sees the
     // recording state instantly while the realtime pipeline connects.
-    const liveTokenPromise = createLiveToken('Charon', 'auto', true);
+    const liveTokenPromise = createLiveToken('Charon', 'auto');
     liveTokenPromise.catch(() => undefined);
 
     try {
@@ -1244,7 +1250,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       // Start the microphone audio pipeline immediately after getUserMedia().
       // Do not wait for the token or WebSocket connection. Audio is buffered
       // until the socket becomes ready, so the first spoken words are preserved.
-      const processor = context.createScriptProcessor(2048, 1, 1);
+      const processor = context.createScriptProcessor(1024, 1, 1);
       const silentGain = context.createGain();
       silentGain.gain.value = 0;
 
@@ -1261,7 +1267,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
           // Keep a short rolling buffer while the token/WebSocket connects.
           voicePendingPcmRef.current.push(encodedPcm);
-          if (voicePendingPcmRef.current.length > 80) {
+          if (voicePendingPcmRef.current.length > 140) {
             voicePendingPcmRef.current.shift();
           }
           return;
@@ -3275,7 +3281,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
               )}
             </AnimatePresence>
 
-            <div className={`relative z-[60] flex w-full min-w-0 flex-col overflow-visible rounded-[24px] border border-zinc-200/90 bg-white shadow-[0_2px_18px_rgba(0,0,0,0.08)] transition-all dark:border-zinc-700/90 dark:bg-zinc-900 dark:shadow-black/20 ${justFinished ? 'animate-blink' : ''}`}>
+            <div className={`relative z-[60] flex w-full min-w-0 flex-col overflow-visible rounded-full border border-zinc-200/90 bg-white shadow-[0_2px_18px_rgba(0,0,0,0.08)] transition-all dark:border-zinc-700/90 dark:bg-zinc-900 dark:shadow-black/20 ${justFinished ? 'animate-blink' : ''}`}>
               {/* File preview strip (kept for consistency but never shown without UI trigger) */}
               <AnimatePresence>
                 {filePreviews.length > 0 && (
@@ -3449,12 +3455,12 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                     data-tooltip="Attach files"
                     whileHover={{ scale: 1.04 }}
                     whileTap={{ scale: 0.94 }}
-                    className="twinkle-tooltip-trigger twinkle-composer-plus group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                    className="twinkle-tooltip-trigger twinkle-composer-plus group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-800 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-900 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-zinc-800 dark:hover:text-white"
                   >
                     {isProcessingFiles ? (
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
                     ) : (
-                      <Plus className="h-[22px] w-[22px] stroke-[2.25]" />
+                      <Plus className="h-[22px] w-[22px] stroke-[2.7]" />
                     )}
                   </motion.button>
 
