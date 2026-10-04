@@ -146,6 +146,16 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
   // Buffer microphone PCM while the Gemini Live socket is connecting so
   // the user can start speaking immediately without losing the first words.
   const pendingPcmRef = useRef<string[]>([]);
+  // Client-side VAD: finalize a speech turn locally instead of waiting for
+  // Gemini's server-side silence timer. Gemini's automatic VAD remains enabled
+  // as a safety fallback.
+  const inputAnalyserRef = useRef<AnalyserNode | null>(null);
+  const vadFrameRef = useRef<number | null>(null);
+  const vadSpeechStartedRef = useRef(false);
+  const vadLastSpeechAtRef = useRef(0);
+  const vadTurnEndedRef = useRef(false);
+  const VAD_SILENCE_MS = 350;
+  const VAD_THRESHOLD = 0.018;
 
   const [connected, setConnected] = useState(false);
   const [listening, setListening] = useState(false);
@@ -349,11 +359,20 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     inputCompressorRef.current?.disconnect();
     inputGainRef.current?.disconnect();
     silentGainRef.current?.disconnect();
+    inputAnalyserRef.current?.disconnect();
     processorRef.current = null;
     sourceRef.current = null;
     inputCompressorRef.current = null;
     inputGainRef.current = null;
     silentGainRef.current = null;
+    inputAnalyserRef.current = null;
+    if (vadFrameRef.current != null) {
+      cancelAnimationFrame(vadFrameRef.current);
+      vadFrameRef.current = null;
+    }
+    vadSpeechStartedRef.current = false;
+    vadLastSpeechAtRef.current = 0;
+    vadTurnEndedRef.current = false;
     pendingPcmRef.current = [];
     audioWorkletReadyRef.current = null;
 
@@ -402,7 +421,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     source.buffer = buffer;
     source.connect(context.destination);
 
-    const startAt = Math.max(context.currentTime + 0.02, nextPlayTimeRef.current);
+    const startAt = Math.max(context.currentTime + 0.008, nextPlayTimeRef.current);
     nextPlayTimeRef.current = startAt + buffer.duration;
     audioSourcesRef.current.add(source);
     setSpeaking(true);
@@ -466,9 +485,53 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     inputCompressor.attack.value = 0.003;
     inputCompressor.release.value = 0.22;
 
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0.05;
+    const analyserData = new Float32Array(analyser.fftSize);
+
     const processor = new AudioWorkletNode(context, 'twinkle-pcm-capture');
     const silentGain = context.createGain();
     silentGain.gain.value = 0;
+
+    const runVad = () => {
+      if (endingRef.current || !processorRef.current) return;
+
+      analyser.getFloatTimeDomainData(analyserData);
+      let sum = 0;
+      for (let i = 0; i < analyserData.length; i += 1) {
+        const sample = analyserData[i];
+        sum += sample * sample;
+      }
+      const rms = Math.sqrt(sum / analyserData.length);
+      const now = performance.now();
+      const hasSpeech = rms >= VAD_THRESHOLD;
+
+      if (hasSpeech) {
+        vadSpeechStartedRef.current = true;
+        vadLastSpeechAtRef.current = now;
+        vadTurnEndedRef.current = false;
+      } else if (
+        vadSpeechStartedRef.current &&
+        !vadTurnEndedRef.current &&
+        socketRef.current?.readyState === WebSocket.OPEN &&
+        now - vadLastSpeechAtRef.current >= VAD_SILENCE_MS
+      ) {
+        // Hybrid VAD: tell Gemini the turn ended immediately. This avoids
+        // waiting for the server's longer silenceDurationMs fallback.
+        try {
+          socketRef.current.send(JSON.stringify({
+            realtimeInput: { audioStreamEnd: true },
+          }));
+          vadTurnEndedRef.current = true;
+          setStatus('Thinking…');
+        } catch {
+          // The socket may close between the readyState check and send().
+        }
+      }
+
+      vadFrameRef.current = requestAnimationFrame(runVad);
+    };
 
     processor.port.onmessage = event => {
       try {
@@ -480,7 +543,9 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
           // Keep a short startup buffer. This lets the user speak immediately
           // while the token/WebSocket/Live setup finishes.
           pendingPcmRef.current.push(encodedPcm);
-          if (pendingPcmRef.current.length > 150) pendingPcmRef.current.shift();
+          // Keep only a short startup window. A large backlog makes the model
+          // process stale speech after the socket becomes ready.
+          if (pendingPcmRef.current.length > 12) pendingPcmRef.current.shift();
           return;
         }
 
@@ -499,7 +564,8 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
 
     source.connect(inputGain);
     inputGain.connect(inputCompressor);
-    inputCompressor.connect(processor);
+    inputCompressor.connect(analyser);
+    analyser.connect(processor);
     processor.connect(silentGain);
     silentGain.connect(context.destination);
 
@@ -507,7 +573,13 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     sourceRef.current = source;
     inputGainRef.current = inputGain;
     inputCompressorRef.current = inputCompressor;
+    inputAnalyserRef.current = analyser;
     processorRef.current = processor;
+    vadSpeechStartedRef.current = false;
+    vadLastSpeechAtRef.current = performance.now();
+    vadTurnEndedRef.current = false;
+    if (vadFrameRef.current != null) cancelAnimationFrame(vadFrameRef.current);
+    vadFrameRef.current = requestAnimationFrame(runVad);
     silentGainRef.current = silentGain;
     void requestWakeLock();
     setListening(true);
@@ -635,8 +707,8 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
             realtimeInputConfig: {
               automaticActivityDetection: {
                 disabled: false,
-                prefixPaddingMs: 300,
-                silenceDurationMs: 700,
+                prefixPaddingMs: 150,
+                silenceDurationMs: 500,
               },
             },
           },
@@ -651,6 +723,9 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
           if (message.setupComplete) {
             setConnected(true);
             setStatus('Listening');
+            vadSpeechStartedRef.current = false;
+            vadLastSpeechAtRef.current = performance.now();
+            vadTurnEndedRef.current = false;
 
             // Send any speech captured while authentication/WebSocket setup
             // was in progress. This is what makes Live Talk feel as immediate
@@ -708,6 +783,9 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
           }
 
           if (serverContent.turnComplete) {
+            vadSpeechStartedRef.current = false;
+            vadLastSpeechAtRef.current = performance.now();
+            vadTurnEndedRef.current = false;
             setListening(true);
             if (audioSourcesRef.current.size === 0) setStatus('Listening');
             // Persist the completed turn without blocking Live Talk.
