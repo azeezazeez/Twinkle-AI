@@ -958,43 +958,6 @@ const getSpeechLanguage = (): string => {
   }
 };
 
-const getDateTimeResponse = (message: string): string | null => {
-  const normalized = message
-    .trim()
-    .toLowerCase()
-    .replace(/[?!.,]+$/g, '')
-    .replace(/\s+/g, ' ');
-
-  const asksTime = /\b(what(?:'s| is) (?:the )?(?:current )?time|current time|time is it|time right now|what time is it|tell me the time|give me the time|what time do we have)\b/i.test(normalized);
-  const asksDate = /\b(what(?:'s| is) (?:(?:today'?s|the current|today'?s current) )?date(?: today)?|current date|today'?s date|today date|date today|what date is it(?: today)?|what day is it(?: today)?|which day is it(?: today)?|tell me (?:today'?s )?date|give me (?:today'?s )?date)\b/i.test(normalized);
-
-  if (!asksTime && !asksDate) return null;
-
-  const now = new Date();
-  const dateText = new Intl.DateTimeFormat(undefined, {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  }).format(now);
-  const timeText = new Intl.DateTimeFormat(undefined, {
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit',
-  }).format(now);
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-
-  if (asksTime && asksDate) {
-    return `Today is **${dateText}** and the current time is **${timeText}** (${timeZone}).`;
-  }
-
-  if (asksTime) {
-    return `The current time is **${timeText}** (${timeZone}).`;
-  }
-
-  return `Today is **${dateText}**.`;
-};
-
 export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [typingSessionTitle, setTypingSessionTitle] = useState<{ id: number; title: string } | null>(null);
@@ -1067,12 +1030,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     return () => window.clearInterval(interval);
   }, [typingSessionTitle]);
 
-  // Warm the reusable Live Talk token while the chat page is idle.
-  // This moves the backend token request off the microphone click path.
-  useEffect(() => {
-    void createLiveToken('Charon', 'auto').catch(() => undefined);
-  }, []);
-
   const sidebarSessions = sessions.map(session =>
     typingSessionTitle?.id === session.id
       ? { ...session, sessionName: typedSessionTitle }
@@ -1091,12 +1048,16 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const voiceMeterFrameRef = useRef<number | null>(null);
   const voiceSpeechDetectedRef = useRef(false);
   const voicePendingPcmRef = useRef<string[]>([]);
-  const voiceProcessorRef = useRef<AudioWorkletNode | ScriptProcessorNode | null>(null);
+  const voiceProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const voiceSilentGainRef = useRef<GainNode | null>(null);
   const voiceStartRef = useRef(0);
-  const voiceTurnCompleteResolverRef = useRef<(() => void) | null>(null);
+  // Browser-native speech recognition starts immediately after the Mic click.
+  // Gemini remains as the fallback/transport, but the browser recognizer gives
+  // the composer near-zero-latency interim speech instead of waiting for the
+  // token + WebSocket handshake.
   const voiceBrowserRecognitionRef = useRef<any>(null);
   const voiceBrowserRecognitionActiveRef = useRef(false);
+  const voiceTurnCompleteResolverRef = useRef<(() => void) | null>(null);
   const [voiceDraftVersion, setVoiceDraftVersion] = useState(0);
   const [voiceSpeechDetected, setVoiceSpeechDetected] = useState(false);
 
@@ -1114,6 +1075,9 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     voiceAnalyserRef.current = null;
     voiceSilentGainRef.current = null;
     voicePendingPcmRef.current = [];
+    try { voiceBrowserRecognitionRef.current?.stop?.(); } catch {}
+    voiceBrowserRecognitionRef.current = null;
+    voiceBrowserRecognitionActiveRef.current = false;
     voiceSpeechDetectedRef.current = false;
     setVoiceSpeechDetected(false);
 
@@ -1127,9 +1091,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
   const cancelVoiceInput = useCallback(() => {
     voiceStartRef.current += 1;
-    try { voiceBrowserRecognitionRef.current?.stop?.(); } catch {}
-    voiceBrowserRecognitionRef.current = null;
-    voiceBrowserRecognitionActiveRef.current = false;
     try {
       const socket = voiceSocketRef.current;
       if (socket?.readyState === WebSocket.OPEN) socket.close(1000, 'cancelled');
@@ -1147,12 +1108,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     window.setTimeout(() => inputRef.current?.focus(), 0);
   }, [cleanupVoiceAudio]);
 
-  const commitVoiceInput = useCallback(async (): Promise<string> => {
-    try { voiceBrowserRecognitionRef.current?.stop?.(); } catch {}
-    // Keep the browser-recognition flag active until the short Gemini final
-    // transcription window completes, so both sources cannot duplicate text.
-
-    if (!voiceInputActive) return input.trim();
+  const commitVoiceInput = useCallback(async () => {
+    if (!voiceInputActive) return;
 
     // Stop capturing immediately, but give Gemini a short window to deliver
     // the final input-transcription chunk before we commit it to the composer.
@@ -1174,14 +1131,11 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
             }
             resolve();
           };
-          const timer = window.setTimeout(finish, 400);
+          const timer = window.setTimeout(finish, 550);
           voiceTurnCompleteResolverRef.current = finish;
         });
       }
     } catch {}
-
-    voiceBrowserRecognitionRef.current = null;
-    voiceBrowserRecognitionActiveRef.current = false;
 
     const base = voiceBaseInputRef.current.trim();
     const spoken = voiceDraftRef.current.trim();
@@ -1201,14 +1155,16 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     setVoiceInputActive(false);
     setVoiceCaptureStopped(false);
     window.setTimeout(() => inputRef.current?.focus(), 0);
-    return combined;
-  }, [cleanupVoiceAudio, input, voiceInputActive]);
+  }, [cleanupVoiceAudio, voiceInputActive]);
 
   const stopVoiceCapture = useCallback(async () => {
     if (!voiceInputActive || voiceCaptureStopped) return;
 
-    // Stop means: finish transcription and put the recognized text into the
-    // normal composer. It must NOT send the message.
+    // The Stop button is the end of the recording, so it must commit the
+    // recognized speech into the normal composer immediately. Do not merely
+    // stop the microphone and leave the draft hidden in voiceDraftRef.
+    // commitVoiceInput also waits briefly for the final Gemini transcription
+    // chunk, then calls setInput() with the complete spoken text.
     await commitVoiceInput();
   }, [commitVoiceInput, voiceCaptureStopped, voiceInputActive]);
 
@@ -1230,39 +1186,48 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     // Paint the listening composer immediately on the same click before
     // microphone permission/token/network work begins.
     flushSync(() => {
-      // The visual recorder is committed in the same click frame. Do not wait
-      // for microphone permission, token creation, or WebSocket setup.
       setVoiceDraftVersion(version => version + 1);
       setVoiceSpeechDetected(false);
       setVoiceInputActive(true);
     });
 
-    // Start browser-native recognition immediately. It is independent of the
-    // Gemini network path, so words can appear while Gemini is connecting.
+    // Start browser-native recognition immediately. Chrome/Edge can begin
+    // producing interim words before the Gemini Live connection is ready.
+    // This is intentionally independent of the network/token path.
     try {
-      const SpeechRecognitionCtor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      const SpeechRecognitionCtor =
+        (window as any).SpeechRecognition ||
+        (window as any).webkitSpeechRecognition;
+
       if (SpeechRecognitionCtor) {
         const recognition = new SpeechRecognitionCtor();
         recognition.continuous = true;
         recognition.interimResults = true;
-        recognition.maxAlternatives = 1;
         recognition.lang = navigator.language || 'en-US';
+        recognition.maxAlternatives = 1;
+
         recognition.onresult = (event: any) => {
           if (attempt !== voiceStartRef.current) return;
           let transcript = '';
-          for (let i = 0; i < event.results.length; i += 1) transcript += String(event.results[i]?.[0]?.transcript || '');
+          for (let i = 0; i < event.results.length; i += 1) {
+            transcript += String(event.results[i]?.[0]?.transcript || '');
+          }
           transcript = transcript.trim();
           if (transcript) {
             voiceDraftRef.current = transcript;
             setVoiceDraftVersion(version => version + 1);
           }
         };
+
         recognition.onerror = (event: any) => {
+          // If the browser recognizer is unavailable or rejected, Gemini
+          // transcription continues normally as the fallback.
           if (event?.error === 'not-allowed' || event?.error === 'service-not-allowed') {
             voiceBrowserRecognitionActiveRef.current = false;
             voiceBrowserRecognitionRef.current = null;
           }
         };
+
         recognition.onend = () => {
           if (attempt !== voiceStartRef.current || voiceBrowserRecognitionRef.current !== recognition) return;
           window.setTimeout(() => {
@@ -1270,6 +1235,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
             try { recognition.start(); } catch {}
           }, 0);
         };
+
         voiceBrowserRecognitionRef.current = recognition;
         voiceBrowserRecognitionActiveRef.current = true;
         try { recognition.start(); } catch {}
@@ -1279,8 +1245,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       voiceBrowserRecognitionActiveRef.current = false;
     }
 
-    // Request the token in parallel with microphone permission.
-    const liveTokenPromise = createLiveToken('Charon', 'auto');
+    // Start requesting the session token immediately, in parallel with the
+    // microphone permission request, so the actual listening pipeline starts
+    // as soon as the browser gives us the stream.
+    const liveTokenPromise = createLiveToken('Charon', 'auto', true);
     liveTokenPromise.catch(() => undefined);
 
     try {
@@ -1303,7 +1271,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       if (!AudioContextCtor) throw new Error('Web Audio is not supported in this browser.');
       const context = new AudioContextCtor();
       voiceAudioContextRef.current = context;
-      if (context.state === 'suspended') void context.resume().catch(() => undefined);
+      if (context.state === 'suspended') await context.resume();
 
       // Attach the local microphone meter immediately. This gives the UI a
       // real speech/no-speech signal without waiting for transcription.
@@ -1336,104 +1304,49 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       };
       voiceMeterFrameRef.current = requestAnimationFrame(updateVoiceMeter);
 
-      // Start the microphone audio pipeline immediately. Prefer AudioWorklet
-      // because ScriptProcessorNode is deprecated and adds avoidable main-thread
-      // scheduling latency. A ScriptProcessor fallback is retained for older
-      // browsers.
-      const workletSource = `
-        class TwinkleMicProcessor extends AudioWorkletProcessor {
-          constructor() {
-            super();
-            this.buffer = [];
-            this.target = Math.max(128, Math.round(sampleRate * 0.02));
-          }
-          process(inputs) {
-            const input = inputs[0] && inputs[0][0];
-            if (input && input.length) {
-              for (let i = 0; i < input.length; i++) this.buffer.push(input[i]);
-              while (this.buffer.length >= this.target) {
-                const chunk = new Float32Array(this.buffer.splice(0, this.target));
-                this.port.postMessage(chunk, [chunk.buffer]);
-              }
-            }
-            return true;
-          }
-        }
-        registerProcessor('twinkle-mic-processor', TwinkleMicProcessor);
-      `;
+      // Start the microphone audio pipeline immediately after getUserMedia().
+      // Do not wait for the token or WebSocket connection. Audio is buffered
+      // until the socket becomes ready, so the first spoken words are preserved.
+      const processor = context.createScriptProcessor(2048, 1, 1);
+      const silentGain = context.createGain();
+      silentGain.gain.value = 0;
 
-      let workletStarted = false;
-      if (context.audioWorklet) {
+      processor.onaudioprocess = audioEvent => {
+        if (attempt !== voiceStartRef.current) return;
+
+        const pcm = downsamplePcm16k(
+          audioEvent.inputBuffer.getChannelData(0),
+          context.sampleRate,
+        );
+        const encodedPcm = int16ToBase64(pcm);
+        const activeSocket = voiceSocketRef.current;
+
+        if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
+          // Keep a short rolling buffer while the token/WebSocket connects.
+          voicePendingPcmRef.current.push(encodedPcm);
+          if (voicePendingPcmRef.current.length > 80) {
+            voicePendingPcmRef.current.shift();
+          }
+          return;
+        }
+
         try {
-          const blob = new Blob([workletSource], { type: 'application/javascript' });
-          const workletUrl = URL.createObjectURL(blob);
-          await context.audioWorklet.addModule(workletUrl);
-          URL.revokeObjectURL(workletUrl);
+          activeSocket.send(JSON.stringify({
+            realtimeInput: {
+              audio: {
+                data: encodedPcm,
+                mimeType: 'audio/pcm;rate=16000',
+              },
+            },
+          }));
+        } catch {}
+      };
 
-          const processor = new AudioWorkletNode(context, 'twinkle-mic-processor');
-          processor.port.onmessage = (event: MessageEvent<Float32Array>) => {
-            if (attempt !== voiceStartRef.current) return;
-            const pcm = downsamplePcm16k(event.data, context.sampleRate);
-            const encodedPcm = int16ToBase64(pcm);
-            const activeSocket = voiceSocketRef.current;
-            if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
-              voicePendingPcmRef.current.push(encodedPcm);
-              if (voicePendingPcmRef.current.length > 140) voicePendingPcmRef.current.shift();
-              return;
-            }
-            try {
-              activeSocket.send(JSON.stringify({
-                realtimeInput: {
-                  audio: { data: encodedPcm, mimeType: 'audio/pcm;rate=16000' },
-                },
-              }));
-            } catch {}
-          };
-
-          source.connect(processor);
-          const silentGain = context.createGain();
-          silentGain.gain.value = 0;
-          processor.connect(silentGain);
-          silentGain.connect(context.destination);
-          voiceProcessorRef.current = processor;
-          voiceSilentGainRef.current = silentGain;
-          workletStarted = true;
-        } catch (workletError) {
-          console.warn('AudioWorklet microphone capture unavailable; using compatibility fallback.', workletError);
-        }
-      }
-
-      if (!workletStarted) {
-        const processor = context.createScriptProcessor(1024, 1, 1);
-        const silentGain = context.createGain();
-        silentGain.gain.value = 0;
-
-        processor.onaudioprocess = audioEvent => {
-          if (attempt !== voiceStartRef.current) return;
-          const pcm = downsamplePcm16k(
-            audioEvent.inputBuffer.getChannelData(0),
-            context.sampleRate,
-          );
-          const encodedPcm = int16ToBase64(pcm);
-          const activeSocket = voiceSocketRef.current;
-          if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
-            voicePendingPcmRef.current.push(encodedPcm);
-            if (voicePendingPcmRef.current.length > 140) voicePendingPcmRef.current.shift();
-            return;
-          }
-          try {
-            activeSocket.send(JSON.stringify({
-              realtimeInput: { audio: { data: encodedPcm, mimeType: 'audio/pcm;rate=16000' } },
-            }));
-          } catch {}
-        };
-
-        source.connect(processor);
-        processor.connect(silentGain);
-        silentGain.connect(context.destination);
-        voiceProcessorRef.current = processor;
-        voiceSilentGainRef.current = silentGain;
-      }
+      source.connect(processor);
+      processor.connect(silentGain);
+      silentGain.connect(context.destination);
+      voiceProcessorRef.current = processor;
+      voiceSilentGainRef.current = silentGain;
 
       const { token, model } = await liveTokenPromise;
       if (attempt !== voiceStartRef.current) return;
@@ -1488,6 +1401,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
           if (message?.error) throw new Error(message.error.message || 'Speech transcription service returned an error.');
 
+          // Prefer the browser recognizer when available because it provides
+          // interim speech almost immediately. Gemini remains the fallback.
           const text = String(message?.serverContent?.inputTranscription?.text || '');
           if (text && !voiceBrowserRecognitionActiveRef.current) {
             voiceDraftRef.current += text;
@@ -1539,9 +1454,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
   useEffect(() => () => {
     voiceStartRef.current += 1;
-    try { voiceBrowserRecognitionRef.current?.stop?.(); } catch {}
-    voiceBrowserRecognitionRef.current = null;
-    voiceBrowserRecognitionActiveRef.current = false;
     try { voiceSocketRef.current?.close(); } catch {}
     voiceSocketRef.current = null;
     cleanupVoiceAudio();
@@ -2333,18 +2245,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       if (requestGeneration !== requestGenerationRef.current) return;
       setIsTyping(false);
 
-      // For a streamed response, the SSE delta stream is the single source
-      // of truth for the visible assistant message. The backend's `done`
-      // event also contains the complete response, but using that text to
-      // rebuild the bubble can race with the already-rendered stream and
-      // make the same answer appear twice. Keep the streamed text and only
-      // use `done.response` as a fallback when no stream bubble was created.
-      const streamedContent = streamingAssistantIdRef.current
-        ? streamReceivedTextRef.current
-        : '';
-      const aiContent = streamedContent
-        ? streamedContent
-        : typeof response?.response === 'string'
+      const aiContent =
+        typeof response?.response === 'string'
           ? response.response
           : typeof response?.error === 'string'
             ? response.error
@@ -2526,33 +2428,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
     const text = typeof directMessage === 'string' ? directMessage : (input || '');
 
-    // Answer current date/time requests directly from the user's browser clock.
-    // This keeps the response accurate without changing the normal AI/API path
-    // for any other request.
-    const dateTimeResponse = getDateTimeResponse(text);
-    if (dateTimeResponse && !selectedFiles?.length) {
-      const now = new Date().toISOString();
-      const userMessage: Message = {
-        id: `local-user-${Date.now()}`,
-        sessionId: currentSessionId || 0,
-        role: 'user',
-        content: text.trim(),
-        timestamp: now,
-      };
-      const assistantMessage: Message = {
-        id: `local-date-time-${Date.now()}`,
-        sessionId: currentSessionId || 0,
-        role: 'assistant',
-        content: dateTimeResponse,
-        timestamp: now,
-      };
-
-      setInput('');
-      setMessages(prev => [...prev, userMessage, assistantMessage]);
-      setTimeout(() => inputRef.current?.focus(), 100);
-      return;
-    }
-
     // Defensive normalization prevents stale browser/HMR state from causing
     // "Cannot read properties of undefined (reading 'length')" during upload.
     const currentSelectedFiles = Array.isArray(selectedFiles)
@@ -2614,18 +2489,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   // Retry a user message using the conversation state before that message.
   // Persisted attachments are reconstructed so images and documents are
   // actually sent again instead of being reduced to placeholder text.
-  const sendVoiceInput = useCallback(async () => {
-    if (!voiceInputActive || isTyping) return;
-
-    // Commit the final transcription first, then immediately send exactly the
-    // text produced by this recording. Passing it directly avoids waiting for
-    // React's setInput() state update.
-    const committedText = await commitVoiceInput();
-    if (!committedText.trim()) return;
-
-    await handleSendMessage(undefined, committedText);
-  }, [commitVoiceInput, handleSendMessage, isTyping, voiceInputActive]);
-
   const handleRetryMessage = async (msg: Message) => {
     if (isTyping) return;
 
@@ -2708,11 +2571,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   };
 
   const createNewSession = () => {
-    // Keep the initial/empty New Chat completely stable. A new chat is only
-    // created after the current chat already contains a conversation. This
-    // prevents repeated clicks on New Chat from changing the greeting/prompt.
-    if (messages.length === 0) return;
-
     setChatGreeting(getRandomChatGreeting());
     setEmptyChatPrompt(current => getNextEmptyChatPrompt(current));
     setCurrentSessionId(null);
@@ -3402,7 +3260,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           className="fixed bottom-0 left-0 right-0 z-[9000] w-auto max-w-none overflow-visible bg-transparent px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-4 sm:pt-3 sm:pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-6 md:pt-4 md:pb-[calc(1rem+env(safe-area-inset-bottom))]"
           style={{ left: desktopSidebarExpanded ? `${desktopSidebarWidth}px` : undefined }}
         >
-          <div className={`mx-auto w-full max-w-[1160px] min-w-0 relative ${!desktopSidebarExpanded ? 'lg:translate-x-[28px]' : ''}`}>
+          <div className="mx-auto w-full max-w-[920px] min-w-0 relative">
             {isAtBottom && messages.length > 0 && !isTyping && (
               <div
                 className="twinkle-chat-disclaimer twinkle-chat-disclaimer-fixed"
@@ -3460,7 +3318,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
               )}
             </AnimatePresence>
 
-            <div className={`relative z-[60] flex w-full min-w-0 flex-col overflow-visible rounded-full border border-zinc-200/90 bg-white shadow-[0_2px_18px_rgba(0,0,0,0.08)] transition-all dark:border-zinc-700/90 dark:bg-zinc-900 dark:shadow-black/20 ${justFinished ? 'animate-blink' : ''}`}>
+            <div className={`relative z-[60] flex w-full min-w-0 flex-col overflow-visible rounded-[24px] border border-zinc-200/90 bg-white shadow-[0_2px_18px_rgba(0,0,0,0.08)] transition-all dark:border-zinc-700/90 dark:bg-zinc-900 dark:shadow-black/20 ${justFinished ? 'animate-blink' : ''}`}>
               {/* File preview strip (kept for consistency but never shown without UI trigger) */}
               <AnimatePresence>
                 {filePreviews.length > 0 && (
@@ -3520,7 +3378,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                 {/* Main prompt area — always above the action row */}
                 {voiceInputActive ? (
                   <div
-                    className="relative flex min-h-[58px] w-full min-w-0 items-center gap-2 px-2.5 py-2 sm:min-h-[64px] sm:gap-2.5 sm:px-3"
+                    className="relative flex min-h-[58px] w-full min-w-0 items-center gap-2 px-2 py-2 sm:min-h-[64px] sm:gap-2 sm:px-3"
                     aria-live="polite"
                     aria-label="Listening for voice input"
                   >
@@ -3537,30 +3395,23 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                       <X className="h-[20px] w-[20px]" strokeWidth={2.05} />
                     </motion.button>
 
-                    {/* Dictation waveform — compact dotted line like the reference UI. */}
+                    {/* Dictation waveform */}
                     <div className="relative flex h-10 min-w-0 flex-1 items-center overflow-hidden px-1" aria-hidden="true">
                       <motion.div
-                        className="flex w-full items-center justify-between gap-[4px]"
-                        animate={{ opacity: voiceCaptureStopped ? 0.42 : [0.72, 1, 0.72] }}
-                        transition={{ duration: 1.8, repeat: voiceCaptureStopped ? 0 : Infinity, ease: 'easeInOut' }}
+                        className="flex h-full w-full min-w-0 items-center justify-between gap-[3px]"
+                        animate={{ opacity: voiceCaptureStopped ? 0.45 : [0.82, 1, 0.82] }}
+                        transition={{ duration: 2.2, repeat: voiceCaptureStopped ? 0 : Infinity, ease: 'easeInOut' }}
                       >
-                        {[...Array(74)].map((_, index) => {
-                          const emphasis = index > 48 && index < 69;
+                        {[...Array(72)].map((_, index) => {
+                          const heights = [8, 13, 20, 11, 28, 16, 36, 22, 43, 30, 48, 34, 25, 44, 31, 50, 27, 40, 21, 46, 33, 42, 18, 37, 26, 47, 32, 22, 41, 28, 45, 19, 35, 25, 43, 30];
+                          const height = heights[index % heights.length];
                           return (
                             <motion.span
                               key={index}
-                              className={`h-[4px] w-[4px] shrink-0 rounded-full ${emphasis ? 'bg-zinc-400 dark:bg-zinc-500' : 'bg-zinc-300 dark:bg-zinc-600'}`}
-                              animate={
-                                voiceCaptureStopped
-                                  ? { scale: 0.9 }
-                                  : { scale: [0.82, emphasis ? 1.18 : 1, 0.82] }
-                              }
-                              transition={{
-                                duration: 1.25 + (index % 5) * 0.08,
-                                repeat: voiceCaptureStopped ? 0 : Infinity,
-                                delay: index * 0.018,
-                                ease: 'easeInOut',
-                              }}
+                              className="min-w-0 flex-1 max-w-[4px] shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600"
+                              style={{ height: `${Math.max(5, height * 0.62)}px`, transformOrigin: 'center' }}
+                              animate={voiceCaptureStopped ? { scaleY: 0.65 } : { scaleY: [0.55, 1, 0.55] }}
+                              transition={{ duration: 1.8, repeat: voiceCaptureStopped ? 0 : Infinity, delay: index * 0.035, ease: 'easeInOut' }}
                             />
                           );
                         })}
@@ -3581,16 +3432,15 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                       <span className="h-3.5 w-3.5 rounded-[3px] bg-black dark:bg-white" />
                     </motion.button>
 
-                    {/* Send dictation immediately */}
+                    {/* Accept dictation into the composer */}
                     <motion.button
                       type="button"
-                      onClick={() => void sendVoiceInput()}
-                      disabled={isTyping}
-                      aria-label="Send dictated message"
-                      data-tooltip="Send"
+                      onClick={() => void commitVoiceInput()}
+                      aria-label="Use dictation"
+                      data-tooltip="Use dictation"
                       whileHover={{ scale: 1.05, y: -1 }}
                       whileTap={{ scale: 0.92 }}
-                      className="twinkle-tooltip-trigger flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 sm:h-11 sm:w-11"
+                      className="twinkle-tooltip-trigger flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition sm:h-11 sm:w-11"
                       style={{ background: liveTalkColor.background, boxShadow: `0 8px 20px ${liveTalkColor.glow}` }}
                     >
                       <svg viewBox="0 0 24 24" className="h-[20px] w-[20px]" aria-hidden="true">
@@ -3623,7 +3473,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                 )}
 
                 {/* Bottom action row: plus → model → mic → send/live talk */}
-                {!voiceInputActive && (
                 <div className="twinkle-composer-actions flex shrink-0 items-center gap-0 px-1 pb-1 pt-1 sm:px-1.5 sm:pb-1.5">
                   {/* + attachment button */}
                   <motion.button
@@ -3634,22 +3483,19 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                     data-tooltip="Attach files"
                     whileHover={{ scale: 1.04 }}
                     whileTap={{ scale: 0.94 }}
-                    className="twinkle-tooltip-trigger twinkle-composer-plus group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-800 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-900 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-zinc-800 dark:hover:text-white"
+                    className="twinkle-tooltip-trigger twinkle-composer-plus group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
                   >
                     {isProcessingFiles ? (
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
                     ) : (
-                      <Plus className="h-[24px] w-[24px] stroke-[1.8]" />
+                      <Plus className="h-[22px] w-[22px] stroke-[2.25]" />
                     )}
                   </motion.button>
 
                   <div className="min-w-0 flex-1" />
 
                   {/* Model selector */}
-                  <div
-                    ref={modelPickerRef}
-                    className="twinkle-composer-model relative mr-2 shrink-0 sm:mr-3"
-                  >
+                  <div className="twinkle-composer-model relative mr-2 shrink-0 sm:mr-3">
                     <motion.button
                       type="button"
                       onClick={() => setModelPickerOpen(prev => !prev)}
@@ -3793,7 +3639,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                     )}
                   
                 </div>
-                )}
               </div>
 
             </div>
