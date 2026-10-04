@@ -405,14 +405,29 @@ function cleanMessageContent(content: unknown): string {
 
 
 const dedupeMessages = (items: Message[]): Message[] => {
-  const seen = new Set<string>();
+  const seenAssistant = new Set<string>();
+  const seenUser = new Set<string>();
   const result: Message[] = [];
 
   for (const message of items) {
     const content = cleanMessageContent(message.content);
-    const key = `${message.role}\u0000${content}`;
-    if (message.role === 'assistant' && content.trim() && seen.has(key)) continue;
-    if (message.role === 'assistant' && content.trim()) seen.add(key);
+    const normalized = content.replace(/\s+/g, ' ').trim();
+
+    if (message.role === 'assistant' && normalized) {
+      const key = normalized.toLowerCase();
+      if (seenAssistant.has(key)) continue;
+      seenAssistant.add(key);
+    }
+
+    // Do not collapse legitimate repeated user questions. Only assistant
+    // messages are deduplicated because a provider/session race can return
+    // the same generated answer more than once.
+    if (message.role === 'user' && !normalized) {
+      const key = `${message.id}`;
+      if (seenUser.has(key)) continue;
+      seenUser.add(key);
+    }
+
     result.push(message);
   }
 
@@ -2033,9 +2048,15 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           selectedModel,
           {
             onStatus: (status) => {
+              if (requestGeneration !== requestGenerationRef.current) return;
               if (status === 'thinking') setResponsePhase('thinking');
             },
             onDelta: (chunk) => {
+              // A stopped/invalidated request can still have one buffered SSE
+              // event arrive after AbortController.abort(). Never create a new
+              // assistant bubble from that late event.
+              if (requestGeneration !== requestGenerationRef.current) return;
+              if (!isSendingRef.current) return;
               if (!chunk) return;
 
               const streamId = streamingAssistantIdRef.current || `stream-ai-${Date.now()}`;
@@ -2921,18 +2942,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                                       );
                                     },
                                     p({ children, ...props }: any) {
-                                      const plain = React.Children.toArray(children)
-                                        .map((child) => (typeof child === 'string' || typeof child === 'number' ? String(child) : ''))
-                                        .join('');
-                                      const equation = isEquationLikeText(plain);
-                                      return equation ? (
-                                        <div className="twinkle-equation-block" role="math" {...props}>
-                                          <span className="twinkle-equation-symbol" aria-hidden="true">∑</span>
-                                          <span className="twinkle-equation-value">{children}</span>
-                                        </div>
-                                      ) : (
-                                        <p {...props}>{children}</p>
-                                      );
+                                      return <p {...props}>{children}</p>;
                                     },
                                     table({ children, ...props }: any) {
                                       return (
@@ -3124,6 +3134,15 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                 })}
 
 
+                <div
+                  className="twinkle-chat-disclaimer"
+                  aria-live="polite"
+                >
+                  <p className="text-center text-[10px] leading-relaxed font-medium text-zinc-500/70 dark:text-zinc-400/70 sm:text-[11px]">
+                    <strong className="font-semibold">Twinkle is AI and can make mistakes.</strong>{' '}
+                    Please double-check responses.
+                  </p>
+                </div>
                 <div ref={messagesEndRef} />
               </div>
             )}
@@ -3142,18 +3161,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           style={{ left: desktopSidebarExpanded ? `${desktopSidebarWidth}px` : undefined }}
         >
           <div className="mx-auto w-full max-w-[920px] min-w-0 relative">
-            <div
-              aria-live="polite"
-              className="twinkle-disclaimer pointer-events-none mb-2.5 flex h-[18px] items-center justify-center px-2"
-            >
-              <p
-                className="text-center text-[10px] leading-relaxed font-medium text-zinc-500/70 dark:text-zinc-400/70 sm:text-[11px]"
-              >
-                <strong className="font-semibold">Twinkle is AI and can make mistakes.</strong>{' '}
-                Please double-check responses.
-              </p>
-            </div>
-
             {isTyping && showScrollBottom && !isAtBottom && (
               <button
                 type="button"
