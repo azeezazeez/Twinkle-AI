@@ -63,7 +63,7 @@ const getGroupLabel = (session: Session): string => {
 // ─── Exact sidebar Pin icon ───────────────────────────────────────────────────
 // This is the actual supplied reference image, cropped and made transparent.
 // It is intentionally used everywhere a Pin icon appears in this sidebar.
-const EXACT_PIN_ICON_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACEAAABDCAYAAAAS2Gw+AAAB10lEQVR42u2awa3CMAyG3SeurFCp5w7BOWwAC+TAAF0gHBiABdJFeoA1gtRF/E6p3EKSOo147+BIviDF+Wo7f1oHQET4ljnnsG1bVEoh/b1CRPjr8QP/YAiEQAiEQAiEQAiEQAiEQAiEQAiEQAiEQAgEAOxKOuv7HsdxhOfzCXVdQ9d10DRNlZxYqilmjMH9fj+ztm3RGIOpuUUArLWzhbXWLJAibUG/IG0N+nbhGpDNEEqpCSLUt0yBFKuDYRgw1kCNgWQDDMMwAWitcU0nNwSSDUELj9NS9nOcc5gNQZ3F0pAqYhoN1r5fmrUWcwuZ7qSPink8HvHxeAQFrq5ruN/vcDgcKq6qjuM4+QjKdt/3E8D5fIbT6fTmKGfx1+uFl8tlgpj5XYbLq93yTmKL0Z20rIePNeGLbo3m55wpq3TiU+FsueWhWzm0k6KHUW40qI81fpIh5ILQ/MeePgnhnMNcEJ8CTjqjOeWC0ChwlDRZXBwQCsFJYfRFt2maiirb7XaD6/Va/g6TIzKpiORGYjWAtTaZGro1N0MsAXyRpWok9qrHgggBhIpVa43GmJk6crWFBRACoZYj92yAJbTWevrWyJX5tyOcKzQlbPZUSqmvA8j/J+j4BQJ8OVLIfAmwAAAAAElFTkSuQmCC';
+const EXACT_PIN_ICON_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACEAAAAhCAYAAABX5MJvAAAAQ0lEQVR42u3OsREAIAzDwMA6mST791lFtExAKKQ7N64+gHi17iYzqSrufwEx3Y4PEiFChAgRIkSIECFChAgRIkRMdQDJVWPWEa+44AAAAABJRU5ErkJggg==';
 
 function SidebarPinIcon({ className = '' }: { className?: string }) {
   return (
@@ -1412,7 +1412,7 @@ export default function Sidebar({
                 aria-expanded={pinnedPopupOpen}
                 className={`flex h-10 w-10 items-center justify-center rounded-xl text-zinc-900 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 transition-none ${pinnedPopupOpen ? 'bg-zinc-100 dark:bg-zinc-800' : ''}`}
               >
-                <SidebarPinIcon className="h-[25px] w-[25px]" />
+                <SidebarPinIcon className="h-[24px] w-[24px]" />
               </button>
             </IconTooltip>
 
