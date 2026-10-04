@@ -1085,6 +1085,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   // token + WebSocket handshake.
   const voiceBrowserRecognitionRef = useRef<any>(null);
   const voiceBrowserRecognitionActiveRef = useRef(false);
+  const voiceBrowserStopRequestedRef = useRef(false);
+  const voiceBrowserStopResolverRef = useRef<(() => void) | null>(null);
   // Keep Gemini's transcription separately so Stop can fall back to it if
   // browser SpeechRecognition has not produced a result yet.
   const voiceGeminiDraftRef = useRef('');
@@ -1114,6 +1116,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     try { voiceBrowserRecognitionRef.current?.stop?.(); } catch {}
     voiceBrowserRecognitionRef.current = null;
     voiceBrowserRecognitionActiveRef.current = false;
+    voiceBrowserStopRequestedRef.current = false;
+    voiceBrowserStopResolverRef.current = null;
     voiceSpeechDetectedRef.current = false;
     setVoiceSpeechDetected(false);
 
@@ -1146,23 +1150,32 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   }, [cleanupVoiceAudio]);
 
   const commitVoiceInput = useCallback(async () => {
-    if (!voiceInputActive) return;
+    if (!voiceInputActive) return '';
 
-    // Stop the browser recognizer immediately so its final interim result is
-    // committed before the UI leaves listening mode. Clearing the ref first
-    // also prevents the recognizer's onend handler from restarting it.
+    // Stop recognition, but wait for the browser's final `onresult`/`onend`
+    // cycle. Calling stop() does not synchronously deliver the final words.
     const recognition = voiceBrowserRecognitionRef.current;
-    const browserRecognitionWasActive = Boolean(recognition && voiceBrowserRecognitionActiveRef.current);
-    voiceBrowserRecognitionRef.current = null;
-    // Keep the browser recognizer marked active until its final onresult has
-    // had a chance to arrive, so Gemini does not append duplicate fallback
-    // text during this short commit window.
-    voiceBrowserRecognitionActiveRef.current = browserRecognitionWasActive;
-    try { recognition?.stop?.(); } catch {}
+    const browserWasActive = Boolean(recognition && voiceBrowserRecognitionActiveRef.current);
+    if (recognition && browserWasActive) {
+      voiceBrowserStopRequestedRef.current = true;
+      await new Promise<void>(resolve => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timer);
+          if (voiceBrowserStopResolverRef.current === finish) {
+            voiceBrowserStopResolverRef.current = null;
+          }
+          resolve();
+        };
+        const timer = window.setTimeout(finish, 1200);
+        voiceBrowserStopResolverRef.current = finish;
+        try { recognition.stop(); } catch { finish(); }
+      });
+    }
 
-    // Tell Gemini that audio capture has ended, but never block the UI on a
-    // WebSocket turn-complete event. A bounded window prevents the composer
-    // from getting stuck if the network/model does not send that event.
+    // Give Gemini a bounded opportunity to deliver the final input transcript.
     try {
       const socket = voiceSocketRef.current;
       if (socket?.readyState === WebSocket.OPEN) {
@@ -1177,46 +1190,45 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
             }
             resolve();
           };
-          const timer = window.setTimeout(finish, 400);
+          const timer = window.setTimeout(finish, 700);
           voiceTurnCompleteResolverRef.current = finish;
           try {
             socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
-          } catch {
-            finish();
-          }
+          } catch { finish(); }
         });
       }
     } catch {}
 
     const base = voiceBaseInputRef.current.trim();
-    // Browser recognition is preferred because it provides the fastest interim
-    // text, but Gemini is the authoritative fallback when the browser service
-    // has not emitted its final result yet.
     const browserSpoken = voiceDraftRef.current.trim();
     const geminiSpoken = voiceGeminiDraftRef.current.trim();
     const spoken = browserSpoken || geminiSpoken;
     const combined = `${base}${base && spoken ? ' ' : ''}${spoken}`.trim();
 
-    // Invalidate all late recognition/socket callbacks before changing the UI.
+    // Invalidate every late callback before changing the composer state.
     voiceStartRef.current += 1;
     try { voiceSocketRef.current?.close(1000, 'committed'); } catch {}
     voiceSocketRef.current = null;
     voiceTurnCompleteResolverRef.current?.();
     voiceTurnCompleteResolverRef.current = null;
+    voiceBrowserStopResolverRef.current?.();
+    voiceBrowserStopResolverRef.current = null;
     cleanupVoiceAudio();
 
-    // Flush both the recognized text and the listening-state transition in the
-    // same render. This guarantees the normal composer immediately replaces
-    // the listening pill after Stop and contains the recognized speech.
+    // The normal textarea is the source of truth. Flush the value and the
+    // listening-state transition together so React cannot leave the listening
+    // UI mounted while the recognized text is already available.
     flushSync(() => {
       setInput(combined);
       setVoiceDraftVersion(version => version + 1);
       setVoiceInputActive(false);
       setVoiceCaptureStopped(false);
     });
+
     voiceDraftRef.current = '';
     voiceGeminiDraftRef.current = '';
     voiceBaseInputRef.current = '';
+    voiceBrowserStopRequestedRef.current = false;
     window.setTimeout(() => inputRef.current?.focus(), 0);
     return combined;
   }, [cleanupVoiceAudio, voiceInputActive]);
@@ -1298,9 +1310,16 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         };
 
         recognition.onend = () => {
+          if (voiceBrowserStopRequestedRef.current) {
+            voiceBrowserRecognitionActiveRef.current = false;
+            voiceBrowserRecognitionRef.current = null;
+            voiceBrowserStopResolverRef.current?.();
+            voiceBrowserStopResolverRef.current = null;
+            return;
+          }
           if (attempt !== voiceStartRef.current || voiceBrowserRecognitionRef.current !== recognition) return;
           window.setTimeout(() => {
-            if (attempt !== voiceStartRef.current || voiceBrowserRecognitionRef.current !== recognition) return;
+            if (attempt !== voiceStartRef.current || voiceBrowserRecognitionRef.current !== recognition || voiceBrowserStopRequestedRef.current) return;
             try { recognition.start(); } catch {}
           }, 0);
         };
@@ -3478,11 +3497,11 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                 {/* Main prompt area — always above the action row */}
                 {voiceInputActive ? (
                   <div
-                    className="relative flex min-h-[58px] w-full min-w-0 items-center gap-3 px-2 py-2 sm:min-h-[64px] sm:gap-3 sm:px-3"
+                    className="relative flex min-h-[58px] w-full min-w-0 items-center gap-2 px-2 py-2 sm:min-h-[64px] sm:px-3"
                     aria-live="polite"
                     aria-label="Listening for voice input"
                   >
-                    {/* Cancel dictation */}
+                    {/* Cancel */}
                     <motion.button
                       type="button"
                       onClick={cancelVoiceInput}
@@ -3495,44 +3514,11 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                       <X className="h-[20px] w-[20px]" strokeWidth={2.05} />
                     </motion.button>
 
-                    {/* Reference-style listening waveform */}
-                    <div className="relative flex h-10 min-w-0 flex-1 items-center overflow-hidden px-3" aria-hidden="true">
-                      <div
-                        className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2"
-                        style={{
-                          borderTop: '5px dotted rgba(161,161,170,0.42)',
-                        }}
-                      />
-                      <motion.div
-                        className="relative z-10 mx-auto flex h-10 w-[76px] items-center justify-center gap-[3px]"
-                        animate={{
-                          opacity: voiceCaptureStopped ? 0.45 : 1,
-                        }}
-                      >
-                        {[...Array(14)].map((_, index) => (
-                          <motion.span
-                            key={index}
-                            className="w-[3px] rounded-full bg-zinc-500 dark:bg-zinc-300"
-                            style={{ transformOrigin: 'center' }}
-                            animate={
-                              voiceCaptureStopped
-                                ? { height: 6, scaleY: 0.7 }
-                                : voiceSpeechDetected
-                                  ? { height: [8, 15 + ((index * 7) % 19), 8], scaleY: [0.7, 1, 0.7] }
-                                  : { height: [5, 7, 5], scaleY: [0.8, 1, 0.8] }
-                            }
-                            transition={{
-                              duration: voiceSpeechDetected ? 0.42 : 1.2,
-                              repeat: voiceCaptureStopped ? 0 : Infinity,
-                              delay: index * 0.018,
-                              ease: 'easeInOut',
-                            }}
-                          />
-                        ))}
-                      </motion.div>
-                    </div>
+                    {/* Deliberately empty: the listening state has no waveform,
+                        text, model picker, mic button, or other controls. */}
+                    <div className="min-w-0 flex-1" aria-hidden="true" />
 
-                    {/* Stop recording */}
+                    {/* Same stop control used while a response is streaming. */}
                     <motion.button
                       type="button"
                       onClick={() => void stopVoiceCapture()}
@@ -3541,27 +3527,34 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                       data-tooltip="Stop"
                       whileHover={{ scale: voiceCaptureStopped ? 1 : 1.04 }}
                       whileTap={{ scale: 0.9 }}
-                      className="twinkle-tooltip-trigger flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-900 shadow-sm transition hover:bg-zinc-50 disabled:cursor-default disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800 sm:h-11 sm:w-11"
+                      className="twinkle-tooltip-trigger relative z-[30] flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-transparent text-white shadow-sm transition-all duration-200 disabled:cursor-default disabled:opacity-60 sm:h-11 sm:w-11"
+                      style={{ background: liveTalkColor.swatch, boxShadow: 'none' }}
                     >
-                      <span className="h-3.5 w-3.5 rounded-[3px] bg-black dark:bg-white" />
+                      <span className="h-3.5 w-3.5 rounded-[3px] bg-white shadow-sm" />
                     </motion.button>
 
-                    {/* Accept dictation into the composer */}
+                    {/* Send button is the final control at the end of the composer. */}
                     <motion.button
                       type="button"
-                      onClick={() => void commitVoiceInput()}
-                      aria-label="Use dictation"
-                      data-tooltip="Use dictation"
+                      onClick={async () => {
+                        const text = await commitVoiceInput();
+                        if (text.trim()) {
+                          await handleSendMessage(undefined, text);
+                        }
+                      }}
+                      aria-label="Send message"
+                      data-tooltip="Send message"
                       whileHover={{ scale: 1.05, y: -1 }}
                       whileTap={{ scale: 0.92 }}
-                      className="twinkle-tooltip-trigger flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition sm:h-11 sm:w-11"
-                      style={{ background: liveTalkColor.background, boxShadow: `0 8px 20px ${liveTalkColor.glow}` }}
+                      className="twinkle-tooltip-trigger relative z-[30] flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-transparent text-white shadow-sm transition-all duration-200 sm:h-11 sm:w-11"
+                      style={{ background: liveTalkColor.swatch, boxShadow: 'none' }}
                     >
                       <svg viewBox="0 0 24 24" className="h-[20px] w-[20px]" aria-hidden="true">
-                        <path d="M12 20V4M6.5 9.5 12 4l5.5 5.5" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M12 21V4M6.25 9.75 12 4l5.75 5.75" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                     </motion.button>
                   </div>
+
                 ) : (
                   <div className="twinkle-composer-prompt relative flex min-h-[58px] min-w-0 flex-1 items-center px-2 py-2 sm:min-h-[64px] sm:px-3">
                     <textarea
@@ -3587,7 +3580,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                 )}
 
                 {/* Bottom action row: plus → model → mic → send/live talk */}
-                <div className="twinkle-composer-actions flex shrink-0 items-center gap-0 px-1 pb-1 pt-1 sm:px-1.5 sm:pb-1.5">
+                {!voiceInputActive && (
+                  <div className="twinkle-composer-actions flex shrink-0 items-center gap-0 px-1 pb-1 pt-1 sm:px-1.5 sm:pb-1.5">
                   {/* + attachment button */}
                   <motion.button
                     type="button"
@@ -3751,8 +3745,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                         )}
                       </motion.button>
                     )}
-                  
-                </div>
+                  </div>
+                )}
               </div>
 
             </div>
