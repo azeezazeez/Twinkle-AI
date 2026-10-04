@@ -1091,7 +1091,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const voiceMeterFrameRef = useRef<number | null>(null);
   const voiceSpeechDetectedRef = useRef(false);
   const voicePendingPcmRef = useRef<string[]>([]);
-  const voiceProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const voiceProcessorRef = useRef<AudioWorkletNode | ScriptProcessorNode | null>(null);
   const voiceSilentGainRef = useRef<GainNode | null>(null);
   const voiceStartRef = useRef(0);
   const voiceTurnCompleteResolverRef = useRef<(() => void) | null>(null);
@@ -1127,15 +1127,15 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
   const cancelVoiceInput = useCallback(() => {
     voiceStartRef.current += 1;
+    try { voiceBrowserRecognitionRef.current?.stop?.(); } catch {}
+    voiceBrowserRecognitionRef.current = null;
+    voiceBrowserRecognitionActiveRef.current = false;
     try {
       const socket = voiceSocketRef.current;
       if (socket?.readyState === WebSocket.OPEN) socket.close(1000, 'cancelled');
       else socket?.close();
     } catch {}
     voiceSocketRef.current = null;
-    try { voiceBrowserRecognitionRef.current?.stop?.(); } catch {}
-    voiceBrowserRecognitionRef.current = null;
-    voiceBrowserRecognitionActiveRef.current = false;
     voiceTurnCompleteResolverRef.current?.();
     voiceTurnCompleteResolverRef.current = null;
     cleanupVoiceAudio();
@@ -1148,6 +1148,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   }, [cleanupVoiceAudio]);
 
   const commitVoiceInput = useCallback(async (): Promise<string> => {
+    try { voiceBrowserRecognitionRef.current?.stop?.(); } catch {}
+    // Keep the browser-recognition flag active until the short Gemini final
+    // transcription window completes, so both sources cannot duplicate text.
+
     if (!voiceInputActive) return input.trim();
 
     // Stop capturing immediately, but give Gemini a short window to deliver
@@ -1176,10 +1180,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       }
     } catch {}
 
-    // Stop the browser recognizer before committing so no late result can
-    // mutate the composer after the voice capture has ended.
-    voiceStartRef.current += 1;
-    try { voiceBrowserRecognitionRef.current?.stop?.(); } catch {}
     voiceBrowserRecognitionRef.current = null;
     voiceBrowserRecognitionActiveRef.current = false;
 
@@ -1187,6 +1187,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     const spoken = voiceDraftRef.current.trim();
     const combined = `${base}${base && spoken ? ' ' : ''}${spoken}`.trim();
 
+    voiceStartRef.current += 1;
     try { voiceSocketRef.current?.close(1000, 'committed'); } catch {}
     voiceSocketRef.current = null;
     voiceTurnCompleteResolverRef.current?.();
@@ -1236,43 +1237,32 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       setVoiceInputActive(true);
     });
 
-    // Start browser-native speech recognition immediately. Chrome/Edge can
-    // produce words while Gemini Live is still acquiring the token and
-    // opening the WebSocket, removing the noticeable startup delay. Gemini
-    // remains the audio/AI pipeline and fallback when SpeechRecognition is
-    // unavailable.
+    // Start browser-native recognition immediately. It is independent of the
+    // Gemini network path, so words can appear while Gemini is connecting.
     try {
-      const SpeechRecognitionCtor =
-        (window as any).SpeechRecognition ||
-        (window as any).webkitSpeechRecognition;
-
+      const SpeechRecognitionCtor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRecognitionCtor) {
         const recognition = new SpeechRecognitionCtor();
         recognition.continuous = true;
         recognition.interimResults = true;
-        recognition.lang = navigator.language || 'en-US';
         recognition.maxAlternatives = 1;
-
+        recognition.lang = navigator.language || 'en-US';
         recognition.onresult = (event: any) => {
           if (attempt !== voiceStartRef.current) return;
           let transcript = '';
-          for (let i = 0; i < event.results.length; i += 1) {
-            transcript += String(event.results[i]?.[0]?.transcript || '');
-          }
+          for (let i = 0; i < event.results.length; i += 1) transcript += String(event.results[i]?.[0]?.transcript || '');
           transcript = transcript.trim();
           if (transcript) {
             voiceDraftRef.current = transcript;
             setVoiceDraftVersion(version => version + 1);
           }
         };
-
         recognition.onerror = (event: any) => {
           if (event?.error === 'not-allowed' || event?.error === 'service-not-allowed') {
             voiceBrowserRecognitionActiveRef.current = false;
             voiceBrowserRecognitionRef.current = null;
           }
         };
-
         recognition.onend = () => {
           if (attempt !== voiceStartRef.current || voiceBrowserRecognitionRef.current !== recognition) return;
           window.setTimeout(() => {
@@ -1280,7 +1270,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
             try { recognition.start(); } catch {}
           }, 0);
         };
-
         voiceBrowserRecognitionRef.current = recognition;
         voiceBrowserRecognitionActiveRef.current = true;
         try { recognition.start(); } catch {}
@@ -1290,9 +1279,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       voiceBrowserRecognitionActiveRef.current = false;
     }
 
-    // Request the token immediately in parallel with microphone permission.
-    // The composer is already painted synchronously, so the user sees the
-    // recording state instantly while the realtime pipeline connects.
+    // Request the token in parallel with microphone permission.
     const liveTokenPromise = createLiveToken('Charon', 'auto');
     liveTokenPromise.catch(() => undefined);
 
@@ -1316,7 +1303,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       if (!AudioContextCtor) throw new Error('Web Audio is not supported in this browser.');
       const context = new AudioContextCtor();
       voiceAudioContextRef.current = context;
-      if (context.state === 'suspended') await context.resume();
+      if (context.state === 'suspended') void context.resume().catch(() => undefined);
 
       // Attach the local microphone meter immediately. This gives the UI a
       // real speech/no-speech signal without waiting for transcription.
@@ -1349,49 +1336,104 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       };
       voiceMeterFrameRef.current = requestAnimationFrame(updateVoiceMeter);
 
-      // Start the microphone audio pipeline immediately after getUserMedia().
-      // Do not wait for the token or WebSocket connection. Audio is buffered
-      // until the socket becomes ready, so the first spoken words are preserved.
-      const processor = context.createScriptProcessor(1024, 1, 1);
-      const silentGain = context.createGain();
-      silentGain.gain.value = 0;
-
-      processor.onaudioprocess = audioEvent => {
-        if (attempt !== voiceStartRef.current) return;
-
-        const pcm = downsamplePcm16k(
-          audioEvent.inputBuffer.getChannelData(0),
-          context.sampleRate,
-        );
-        const encodedPcm = int16ToBase64(pcm);
-        const activeSocket = voiceSocketRef.current;
-
-        if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
-          // Keep a short rolling buffer while the token/WebSocket connects.
-          voicePendingPcmRef.current.push(encodedPcm);
-          if (voicePendingPcmRef.current.length > 140) {
-            voicePendingPcmRef.current.shift();
+      // Start the microphone audio pipeline immediately. Prefer AudioWorklet
+      // because ScriptProcessorNode is deprecated and adds avoidable main-thread
+      // scheduling latency. A ScriptProcessor fallback is retained for older
+      // browsers.
+      const workletSource = `
+        class TwinkleMicProcessor extends AudioWorkletProcessor {
+          constructor() {
+            super();
+            this.buffer = [];
+            this.target = Math.max(128, Math.round(sampleRate * 0.02));
           }
-          return;
+          process(inputs) {
+            const input = inputs[0] && inputs[0][0];
+            if (input && input.length) {
+              for (let i = 0; i < input.length; i++) this.buffer.push(input[i]);
+              while (this.buffer.length >= this.target) {
+                const chunk = new Float32Array(this.buffer.splice(0, this.target));
+                this.port.postMessage(chunk, [chunk.buffer]);
+              }
+            }
+            return true;
+          }
         }
+        registerProcessor('twinkle-mic-processor', TwinkleMicProcessor);
+      `;
 
+      let workletStarted = false;
+      if (context.audioWorklet) {
         try {
-          activeSocket.send(JSON.stringify({
-            realtimeInput: {
-              audio: {
-                data: encodedPcm,
-                mimeType: 'audio/pcm;rate=16000',
-              },
-            },
-          }));
-        } catch {}
-      };
+          const blob = new Blob([workletSource], { type: 'application/javascript' });
+          const workletUrl = URL.createObjectURL(blob);
+          await context.audioWorklet.addModule(workletUrl);
+          URL.revokeObjectURL(workletUrl);
 
-      source.connect(processor);
-      processor.connect(silentGain);
-      silentGain.connect(context.destination);
-      voiceProcessorRef.current = processor;
-      voiceSilentGainRef.current = silentGain;
+          const processor = new AudioWorkletNode(context, 'twinkle-mic-processor');
+          processor.port.onmessage = (event: MessageEvent<Float32Array>) => {
+            if (attempt !== voiceStartRef.current) return;
+            const pcm = downsamplePcm16k(event.data, context.sampleRate);
+            const encodedPcm = int16ToBase64(pcm);
+            const activeSocket = voiceSocketRef.current;
+            if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
+              voicePendingPcmRef.current.push(encodedPcm);
+              if (voicePendingPcmRef.current.length > 140) voicePendingPcmRef.current.shift();
+              return;
+            }
+            try {
+              activeSocket.send(JSON.stringify({
+                realtimeInput: {
+                  audio: { data: encodedPcm, mimeType: 'audio/pcm;rate=16000' },
+                },
+              }));
+            } catch {}
+          };
+
+          source.connect(processor);
+          const silentGain = context.createGain();
+          silentGain.gain.value = 0;
+          processor.connect(silentGain);
+          silentGain.connect(context.destination);
+          voiceProcessorRef.current = processor;
+          voiceSilentGainRef.current = silentGain;
+          workletStarted = true;
+        } catch (workletError) {
+          console.warn('AudioWorklet microphone capture unavailable; using compatibility fallback.', workletError);
+        }
+      }
+
+      if (!workletStarted) {
+        const processor = context.createScriptProcessor(1024, 1, 1);
+        const silentGain = context.createGain();
+        silentGain.gain.value = 0;
+
+        processor.onaudioprocess = audioEvent => {
+          if (attempt !== voiceStartRef.current) return;
+          const pcm = downsamplePcm16k(
+            audioEvent.inputBuffer.getChannelData(0),
+            context.sampleRate,
+          );
+          const encodedPcm = int16ToBase64(pcm);
+          const activeSocket = voiceSocketRef.current;
+          if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
+            voicePendingPcmRef.current.push(encodedPcm);
+            if (voicePendingPcmRef.current.length > 140) voicePendingPcmRef.current.shift();
+            return;
+          }
+          try {
+            activeSocket.send(JSON.stringify({
+              realtimeInput: { audio: { data: encodedPcm, mimeType: 'audio/pcm;rate=16000' } },
+            }));
+          } catch {}
+        };
+
+        source.connect(processor);
+        processor.connect(silentGain);
+        silentGain.connect(context.destination);
+        voiceProcessorRef.current = processor;
+        voiceSilentGainRef.current = silentGain;
+      }
 
       const { token, model } = await liveTokenPromise;
       if (attempt !== voiceStartRef.current) return;
@@ -1447,9 +1489,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           if (message?.error) throw new Error(message.error.message || 'Speech transcription service returned an error.');
 
           const text = String(message?.serverContent?.inputTranscription?.text || '');
-          // Browser recognition supplies immediate transcription. Use Gemini
-          // transcription only when browser recognition is unavailable,
-          // otherwise the two streams would duplicate the user's words.
           if (text && !voiceBrowserRecognitionActiveRef.current) {
             voiceDraftRef.current += text;
             setVoiceDraftVersion(version => version + 1);
@@ -1500,6 +1539,9 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
   useEffect(() => () => {
     voiceStartRef.current += 1;
+    try { voiceBrowserRecognitionRef.current?.stop?.(); } catch {}
+    voiceBrowserRecognitionRef.current = null;
+    voiceBrowserRecognitionActiveRef.current = false;
     try { voiceSocketRef.current?.close(); } catch {}
     voiceSocketRef.current = null;
     cleanupVoiceAudio();
