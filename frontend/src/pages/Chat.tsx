@@ -1085,6 +1085,9 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   // token + WebSocket handshake.
   const voiceBrowserRecognitionRef = useRef<any>(null);
   const voiceBrowserRecognitionActiveRef = useRef(false);
+  // Keep Gemini's transcription separately so Stop can fall back to it if
+  // browser SpeechRecognition has not produced a result yet.
+  const voiceGeminiDraftRef = useRef('');
   const voiceTurnCompleteResolverRef = useRef<(() => void) | null>(null);
   const [voiceDraftVersion, setVoiceDraftVersion] = useState(0);
   const [voiceSpeechDetected, setVoiceSpeechDetected] = useState(false);
@@ -1107,6 +1110,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     voiceInputCompressorRef.current = null;
     voiceSilentGainRef.current = null;
     voicePendingPcmRef.current = [];
+    voiceGeminiDraftRef.current = '';
     try { voiceBrowserRecognitionRef.current?.stop?.(); } catch {}
     voiceBrowserRecognitionRef.current = null;
     voiceBrowserRecognitionActiveRef.current = false;
@@ -1133,6 +1137,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     voiceTurnCompleteResolverRef.current = null;
     cleanupVoiceAudio();
     voiceDraftRef.current = '';
+    voiceGeminiDraftRef.current = '';
     voiceBaseInputRef.current = '';
     setVoiceDraftVersion(version => version + 1);
     setVoiceInputActive(false);
@@ -1184,7 +1189,12 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     } catch {}
 
     const base = voiceBaseInputRef.current.trim();
-    const spoken = voiceDraftRef.current.trim();
+    // Browser recognition is preferred because it provides the fastest interim
+    // text, but Gemini is the authoritative fallback when the browser service
+    // has not emitted its final result yet.
+    const browserSpoken = voiceDraftRef.current.trim();
+    const geminiSpoken = voiceGeminiDraftRef.current.trim();
+    const spoken = browserSpoken || geminiSpoken;
     const combined = `${base}${base && spoken ? ' ' : ''}${spoken}`.trim();
 
     // Invalidate all late recognition/socket callbacks before changing the UI.
@@ -1195,15 +1205,20 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     voiceTurnCompleteResolverRef.current = null;
     cleanupVoiceAudio();
 
-    // Stop/Use-dictation both return to the normal composer and preserve the
-    // recognized text. Do not leave the listening pill mounted after Stop.
-    setInput(combined);
+    // Flush both the recognized text and the listening-state transition in the
+    // same render. This guarantees the normal composer immediately replaces
+    // the listening pill after Stop and contains the recognized speech.
+    flushSync(() => {
+      setInput(combined);
+      setVoiceDraftVersion(version => version + 1);
+      setVoiceInputActive(false);
+      setVoiceCaptureStopped(false);
+    });
     voiceDraftRef.current = '';
+    voiceGeminiDraftRef.current = '';
     voiceBaseInputRef.current = '';
-    setVoiceDraftVersion(version => version + 1);
-    setVoiceInputActive(false);
-    setVoiceCaptureStopped(false);
     window.setTimeout(() => inputRef.current?.focus(), 0);
+    return combined;
   }, [cleanupVoiceAudio, voiceInputActive]);
 
   const stopVoiceCapture = useCallback(async () => {
@@ -1226,6 +1241,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     const attempt = ++voiceStartRef.current;
     voiceBaseInputRef.current = input.trim();
     voiceDraftRef.current = '';
+    voiceGeminiDraftRef.current = '';
     voicePendingPcmRef.current = [];
     voiceSpeechDetectedRef.current = false;
 
@@ -1483,9 +1499,14 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           // Prefer the browser recognizer when available because it provides
           // interim speech almost immediately. Gemini remains the fallback.
           const text = String(message?.serverContent?.inputTranscription?.text || '');
-          if (text && !voiceBrowserRecognitionActiveRef.current) {
-            voiceDraftRef.current += text;
-            setVoiceDraftVersion(version => version + 1);
+          if (text) {
+            voiceGeminiDraftRef.current += text;
+            // Only render Gemini text directly when browser recognition is not
+            // active. We still retain it as a fallback for Stop/commit.
+            if (!voiceBrowserRecognitionActiveRef.current) {
+              voiceDraftRef.current = voiceGeminiDraftRef.current;
+              setVoiceDraftVersion(version => version + 1);
+            }
           }
 
           if (message?.serverContent?.turnComplete) {
@@ -3457,7 +3478,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                 {/* Main prompt area — always above the action row */}
                 {voiceInputActive ? (
                   <div
-                    className="relative flex min-h-[58px] w-full min-w-0 items-center gap-2 px-2 py-2 sm:min-h-[64px] sm:gap-2 sm:px-3"
+                    className="relative flex min-h-[58px] w-full min-w-0 items-center gap-3 px-2 py-2 sm:min-h-[64px] sm:gap-3 sm:px-3"
                     aria-live="polite"
                     aria-label="Listening for voice input"
                   >
@@ -3475,7 +3496,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                     </motion.button>
 
                     {/* Reference-style listening waveform */}
-                    <div className="relative flex h-10 min-w-0 flex-1 items-center overflow-hidden px-1" aria-hidden="true">
+                    <div className="relative flex h-10 min-w-0 flex-1 items-center overflow-hidden px-3" aria-hidden="true">
                       <div
                         className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2"
                         style={{
