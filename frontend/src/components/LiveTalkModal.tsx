@@ -131,6 +131,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
   const nextPlayTimeRef = useRef(0);
   const connectAttemptRef = useRef(0);
   const startInputRef = useRef<(() => Promise<void>) | null>(null);
+  const audioWorkletReadyRef = useRef<Promise<void> | null>(null);
   const liveSessionIdRef = useRef<number | null>(null);
   const liveSessionPromiseRef = useRef<Promise<number> | null>(null);
   const liveSavePromiseRef = useRef<Promise<void> | null>(null);
@@ -348,6 +349,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     sourceRef.current = null;
     silentGainRef.current = null;
     pendingPcmRef.current = [];
+    audioWorkletReadyRef.current = null;
 
     streamRef.current?.getTracks().forEach(track => track.stop());
     streamRef.current = null;
@@ -429,20 +431,19 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     audioContextRef.current = context;
     if (context.state === 'suspended') await context.resume();
 
-    // Load the TypeScript worklet source as raw text and create a Blob with
-    // an explicit JavaScript MIME type. This avoids Vite/Vercel serving the
-    // .ts asset as video/mp2t (the error shown in Chrome).
-    const workletBlob = new Blob(
-      [pcmCaptureWorkletSource],
-      { type: 'application/javascript' },
-    );
-    const workletUrl = URL.createObjectURL(workletBlob);
-
-    try {
-      await context.audioWorklet.addModule(workletUrl);
-    } finally {
-      URL.revokeObjectURL(workletUrl);
+    // The worklet is prepared independently from the Gemini WebSocket.
+    // connect() starts this promise in parallel with microphone permission
+    // and token acquisition, so worklet compilation never blocks the socket.
+    if (!audioWorkletReadyRef.current) {
+      const workletBlob = new Blob(
+        [pcmCaptureWorkletSource],
+        { type: 'application/javascript' },
+      );
+      const workletUrl = URL.createObjectURL(workletBlob);
+      audioWorkletReadyRef.current = context.audioWorklet.addModule(workletUrl)
+        .finally(() => URL.revokeObjectURL(workletUrl));
     }
+    await audioWorkletReadyRef.current;
 
     const source = context.createMediaStreamSource(stream);
     const processor = new AudioWorkletNode(context, 'twinkle-pcm-capture');
@@ -511,8 +512,10 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
         throw new Error('Microphone access is not supported in this browser.');
       }
 
-      // Start the token request at the exact same time as microphone
-      // permission. Neither operation waits for the other.
+      // Start every independent startup operation together. The microphone,
+      // reusable token and AudioWorklet all race in parallel. None of them
+      // waits for the others, and the WebSocket is opened as soon as the token
+      // is available.
       const tokenPromise = createLiveToken(voiceName, appLanguage);
       tokenPromise.catch(() => undefined);
 
@@ -525,6 +528,24 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
         },
       });
 
+      const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextCtor) throw new Error('Web Audio is not supported in this browser.');
+      const context = audioContextRef.current ?? new AudioContextCtor();
+      audioContextRef.current = context;
+
+      // Prepare the AudioWorklet immediately, in parallel with getUserMedia()
+      // and token acquisition. Do not await it on the WebSocket path.
+      if (!audioWorkletReadyRef.current) {
+        const workletBlob = new Blob(
+          [pcmCaptureWorkletSource],
+          { type: 'application/javascript' },
+        );
+        const workletUrl = URL.createObjectURL(workletBlob);
+        audioWorkletReadyRef.current = context.audioWorklet.addModule(workletUrl)
+          .finally(() => URL.revokeObjectURL(workletUrl));
+      }
+      const workletPromise = audioWorkletReadyRef.current;
+
       const stream = await streamPromise;
       if (attempt !== connectAttemptRef.current || endingRef.current) {
         stream.getTracks().forEach(track => track.stop());
@@ -532,15 +553,24 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
       }
       streamRef.current = stream;
 
-      const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContextCtor) throw new Error('Web Audio is not supported in this browser.');
-      const context = new AudioContextCtor();
-      audioContextRef.current = context;
-      if (context.state === 'suspended') await context.resume();
+      if (context.state === 'suspended') {
+        void context.resume().catch(() => undefined);
+      }
 
-      // Build the microphone pipeline while the token request is still in
-      // flight. Audio is buffered until Gemini's setup is complete.
-      await startInputRef.current?.();
+      // Start the microphone pipeline without awaiting it. It buffers PCM
+      // while the token/WebSocket/setup is still completing.
+      void Promise.resolve(workletPromise)
+        .then(() => {
+          if (attempt === connectAttemptRef.current && !endingRef.current) {
+            return startInputRef.current?.();
+          }
+          return undefined;
+        })
+        .catch(error => {
+          if (attempt === connectAttemptRef.current && !endingRef.current) {
+            console.error('Live Talk audio pipeline failed to start:', error);
+          }
+        });
 
       const { token, model } = await tokenPromise;
       if (endingRef.current || attempt !== connectAttemptRef.current) return;
@@ -617,7 +647,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
 
             // The microphone pipeline is normally already active. Keep this
             // call as a safe no-op fallback for reconnect/setup races.
-            await startInputRef.current?.();
+            void startInputRef.current?.().catch(() => undefined);
             return;
           }
 
@@ -836,7 +866,6 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
               <button
                 type="button"
                 onClick={listening ? stopInput : () => void startInput()}
-                disabled={!connected}
                 className="inline-flex min-w-[170px] items-center justify-center gap-2 rounded-full border border-zinc-200 bg-white px-5 py-3 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-45 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800"
               >
                 {listening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
