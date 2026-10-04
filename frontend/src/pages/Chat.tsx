@@ -2174,6 +2174,23 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   };
 
   const handleStopResponse = () => {
+    const streamId = streamingAssistantIdRef.current;
+    const streamedText = streamReceivedTextRef.current;
+
+    // Keep the response already received on screen when the user stops it.
+    // `streamReceivedTextRef` already includes text that is waiting in the
+    // render queue, so it is the complete partial response at this moment.
+    if (streamId && streamedText) {
+      const completedText = streamedText;
+      setMessages(prev =>
+        prev.map(message =>
+          message.id === streamId
+            ? { ...message, content: completedText }
+            : message
+        )
+      );
+    }
+
     abortControllerRef.current?.abort();
     cancelStreamRenderer();
     setIsTyping(false);
@@ -2955,11 +2972,23 @@ function cleanMessageContent(content: unknown): string {
               </p>
             </div>
 
-            {isTyping && (
+            {isTyping && isAtBottom && (
               <div
                 className="twinkle-floating-thinking"
                 aria-live="polite"
                 aria-label="Twinkle is thinking"
+              >
+                <span className="twinkle-floating-thinking-dot" />
+                <span className="twinkle-floating-thinking-dot" />
+                <span className="twinkle-floating-thinking-dot" />
+              </div>
+            )}
+
+            {isTyping && !isAtBottom && (
+              <div
+                className="twinkle-floating-thinking twinkle-floating-thinking-away"
+                aria-live="polite"
+                aria-label="Twinkle is generating a response below"
               >
                 <span className="twinkle-floating-thinking-dot" />
                 <span className="twinkle-floating-thinking-dot" />
