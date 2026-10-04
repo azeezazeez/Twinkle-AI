@@ -304,14 +304,9 @@ const getInitialTheme = (): boolean => {
   return window.matchMedia('(prefers-color-scheme: dark)').matches;
 };
 
-// Message sanitizers are function declarations so they are available to history/loading callbacks
-// regardless of module evaluation order.
 function normalizeTwinkleIdentity(content: string): string {
   const normalized = content.trim();
 
-  // Replace the old default identity response with a clearer Twinkle AI
-  // introduction. Keep this narrowly scoped so documents mentioning Twinkle
-  // are not rewritten accidentally.
   if (
     /^I['’]m\s+Twinkle\s+AI,\s+a\s+helpful\s+assistant\s+designed\s+to\s+help\s+you\s+with\s+information,\s+analysis,\s+and\s+more\.?$/i.test(normalized)
   ) {
@@ -1605,26 +1600,37 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   // immediately instead of forcing another GET /chat/sessions request.
   useEffect(() => {
     const handleLiveSessionUpdate = (event: Event) => {
-      const detail = (event as CustomEvent<{ id: number; sessionName?: string }>).detail;
-      if (!detail?.id) return;
+      const detail = (event as CustomEvent<{
+        id?: number;
+        sessionId?: number;
+        sessionName?: string;
+      }>).detail;
+
+      const liveSessionId = Number(detail?.id ?? detail?.sessionId);
+      if (!Number.isFinite(liveSessionId) || liveSessionId <= 0) return;
+
+      const liveSessionName =
+        typeof detail?.sessionName === 'string' && detail.sessionName.trim()
+          ? detail.sessionName.trim()
+          : 'Live Talk';
 
       const now = new Date().toISOString();
       setSessions(prev => {
-        const existing = prev.find(session => session.id === detail.id);
+        const existing = prev.find(session => session.id === liveSessionId);
         if (existing) {
           const updated = {
             ...existing,
-            sessionName: detail.sessionName || existing.sessionName,
+            sessionName: liveSessionName || existing.sessionName,
             updatedAt: now,
           };
-          return [updated, ...prev.filter(session => session.id !== detail.id)];
+          return [updated, ...prev.filter(session => session.id !== liveSessionId)];
         }
 
         return [
           {
-            id: detail.id,
+            id: liveSessionId,
             userId: user.id,
-            sessionName: detail.sessionName || 'Live Talk',
+            sessionName: liveSessionName,
             createdAt: now,
             updatedAt: now,
           },
@@ -2680,27 +2686,81 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
    * Make that saved Live Talk session the active chat immediately so the
    * normal chat area displays the complete transcript without a refresh.
    */
-  const handleLiveSessionComplete = useCallback((sessionId: number) => {
+  const handleLiveSessionComplete = useCallback(async (
+    sessionId: number,
+    savedSessionName?: string,
+  ) => {
     if (!Number.isFinite(sessionId)) return;
+
+    // Live Talk's save endpoint is the source of truth for its title. The
+    // modal now passes that exact persisted name back here, so the sidebar
+    // never has to guess with a generic "Live Talk" label.
+    const normalizedName =
+      typeof savedSessionName === 'string' && savedSessionName.trim()
+        ? savedSessionName.trim()
+        : '';
+
+    const now = new Date().toISOString();
 
     setSessions(prev => {
       const existing = prev.find(session => session.id === sessionId);
-      if (existing) {
-        return [existing, ...prev.filter(session => session.id !== sessionId)];
-      }
+      const updatedSession = existing
+        ? {
+            ...existing,
+            sessionName: normalizedName || existing.sessionName || 'Live Talk',
+            updatedAt: now,
+          }
+        : {
+            id: sessionId,
+            userId: user.id,
+            sessionName: normalizedName || 'Live Talk',
+            createdAt: now,
+            updatedAt: now,
+          };
 
-      const now = new Date().toISOString();
       return [
-        {
-          id: sessionId,
-          userId: user.id,
-          sessionName: 'Live Talk',
-          createdAt: now,
-          updatedAt: now,
-        },
-        ...prev,
+        updatedSession,
+        ...prev.filter(session => session.id !== sessionId),
       ];
     });
+
+    // If the callback did not receive the persisted name, reconcile once with
+    // the backend. This also fixes the name after a refresh/reconnect race.
+    if (!normalizedName) {
+      try {
+        const response = await chatApi.getSessions() as any;
+        const rawSessions = Array.isArray(response?.sessions) ? response.sessions : [];
+        const serverSession = rawSessions.find(
+          (session: any) => Number(session?.id ?? session?.sessionId) === sessionId
+        );
+
+        if (serverSession) {
+          const serverName =
+            typeof serverSession.sessionName === 'string' && serverSession.sessionName.trim()
+              ? serverSession.sessionName.trim()
+              : 'Live Talk';
+
+          setSessions(prev => [
+            {
+              ...(prev.find(session => session.id === sessionId) || {
+                id: sessionId,
+                userId: user.id,
+                createdAt: now,
+                updatedAt: now,
+              }),
+              ...serverSession,
+              id: sessionId,
+              userId: serverSession.userId ?? user.id,
+              sessionName: serverName,
+              updatedAt: serverSession.updatedAt ?? now,
+            },
+            ...prev.filter(session => session.id !== sessionId),
+          ]);
+        }
+      } catch (error) {
+        console.error('Failed to reconcile the Live Talk sidebar title:', error);
+      }
+    }
 
     setCurrentSessionId(sessionId);
     persistSessionId(sessionId);
@@ -3402,7 +3462,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                     </motion.button>
                   </div>
                 ) : (
-                  <div className="twinkle-composer-prompt relative flex min-h-[58px] min-w-0 flex-1 items-center px-2 py-2 sm:min-h-[64px] sm:px-3">
+                  <div className="twinkle-composer-prompt relative flex min-h-[58px] min-w-0 flex-1 items-center px-6 py-0 sm:min-h-[64px] sm:px-6">
                     <textarea
                       ref={inputRef}
                       value={input}
@@ -3413,9 +3473,9 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                           handleSendMessage();
                         }
                       }}
-                      placeholder="Ask Twinkle"
+                      placeholder="Ask Anything..."
                       rows={1}
-                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent p-0 text-[17px] font-medium leading-[1.35] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:text-[18px] sm:min-h-[46px]"
+                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent p-0 text-[18px] font-normal leading-[1.35] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:text-[18px] sm:min-h-[46px]"
                       onInput={(e) => {
                         const t = e.target as HTMLTextAreaElement;
                         t.style.height = 'auto';
