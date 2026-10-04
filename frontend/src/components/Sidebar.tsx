@@ -597,22 +597,26 @@ function SessionList({
                             >
                               <MoreHorizontal className="w-[16px] h-[16px]" strokeWidth={1.8} />
                             </button>
-                            <button
-                              type="button"
-                              onClick={e => {
-                                e.stopPropagation();
-                                togglePin(session.id);
-                              }}
-                              aria-label={isPinned ? 'Unpin chat' : 'Pin chat'}
-                              title={isPinned ? 'Unpin' : 'Pin'}
-                              className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200/70 dark:hover:bg-zinc-700/70 transition-colors"
-                            >
-                              {isPinned ? (
-                                <PinOff className="w-[17px] h-[17px]" strokeWidth={1.8} />
-                              ) : (
-                                <SidebarPinIcon className="w-[18px] h-[18px]" />
-                              )}
-                            </button>
+                            <div className="relative group/pin-tooltip flex items-center justify-center">
+                              <button
+                                type="button"
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  togglePin(session.id);
+                                }}
+                                aria-label={isPinned ? 'Unpin chat' : 'Pin chat'}
+                                className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200/70 dark:hover:bg-zinc-700/70 transition-colors"
+                              >
+                                {isPinned ? (
+                                  <PinOff className="w-[17px] h-[17px]" strokeWidth={1.8} />
+                                ) : (
+                                  <SidebarPinIcon className="w-[18px] h-[18px]" />
+                                )}
+                              </button>
+                              <div className="absolute right-0 bottom-full mb-2 flex items-center px-3.5 py-2 bg-[#111111] text-white text-[14px] font-bold rounded-full whitespace-nowrap pointer-events-none z-[2147483647] shadow-[0_12px_32px_rgba(0,0,0,0.18)] opacity-0 group-hover/pin-tooltip:opacity-100 transition-opacity duration-150">
+                                <span>{isPinned ? 'Unpin' : 'Pin'}</span>
+                              </div>
+                            </div>
 
                           </div>
                         )}
