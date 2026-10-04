@@ -1399,7 +1399,7 @@ export default function Sidebar({
               </button>
             </IconTooltip>
 
-            <IconTooltip label="Pinned">
+            <div className="relative group/pinned flex w-full items-center justify-center">
               <button
                 onClick={event => {
                   const rect = event.currentTarget.getBoundingClientRect();
@@ -1414,7 +1414,10 @@ export default function Sidebar({
               >
                 <SidebarPinIcon className="h-[24px] w-[24px]" />
               </button>
-            </IconTooltip>
+              <div className="absolute left-full ml-2.5 flex items-center px-3.5 py-2 bg-[#111111] text-white text-[14px] font-bold rounded-full whitespace-nowrap pointer-events-none z-[300] shadow-[0_12px_32px_rgba(0,0,0,0.18)] opacity-0 group-hover/pinned:opacity-100 transition-opacity duration-150">
+                <span>Pinned</span>
+              </div>
+            </div>
 
             <IconTooltip label="Recents">
               <button
