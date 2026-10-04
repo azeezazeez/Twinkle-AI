@@ -1095,6 +1095,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const voiceTurnCompleteResolverRef = useRef<(() => void) | null>(null);
   const voiceCommitInProgressRef = useRef(false);
   const [voiceDraftVersion, setVoiceDraftVersion] = useState(0);
+  const [voiceLiveTranscript, setVoiceLiveTranscript] = useState('');
   const [voiceSpeechDetected, setVoiceSpeechDetected] = useState(false);
 
   // SpeechRecognition needs a BCP-47 locale. Keep it aligned with Twinkle's
@@ -1164,6 +1165,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     voiceTurnCompleteResolverRef.current = null;
     cleanupVoiceAudio();
     voiceDraftRef.current = '';
+    setVoiceLiveTranscript('');
     voiceFinalTranscriptRef.current = '';
     voiceInterimTranscriptRef.current = '';
     voiceGeminiDraftRef.current = '';
@@ -1228,6 +1230,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     cleanupVoiceAudio();
 
     voiceDraftRef.current = '';
+    setVoiceLiveTranscript('');
     voiceFinalTranscriptRef.current = '';
     voiceInterimTranscriptRef.current = '';
     voiceGeminiDraftRef.current = '';
@@ -1259,6 +1262,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     setVoiceCaptureStopped(false);
     voiceBaseInputRef.current = input.trim();
     voiceDraftRef.current = '';
+    setVoiceLiveTranscript('');
     voiceFinalTranscriptRef.current = '';
     voiceInterimTranscriptRef.current = '';
     voiceGeminiDraftRef.current = '';
@@ -1355,10 +1359,11 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
             voiceFinalTranscriptRef.current = finalText;
             voiceInterimTranscriptRef.current = interimText;
-            voiceDraftRef.current =
-              `${finalText}${finalText && interimText ? ' ' : ''}${interimText}`
-                .replace(/\s+/g, ' ')
-                .trim();
+            const liveText = `${finalText}${finalText && interimText ? ' ' : ''}${interimText}`
+              .replace(/\s+/g, ' ')
+              .trim();
+            voiceDraftRef.current = liveText;
+            setVoiceLiveTranscript(liveText);
 
             // The recognized words are rendered live in the listening composer.
             setVoiceDraftVersion(version => version + 1);
@@ -1579,15 +1584,22 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
           if (message?.error) throw new Error(message.error.message || 'Speech transcription service returned an error.');
 
-          // Prefer the browser recognizer when available because it provides
-          // interim speech almost immediately. Gemini remains the fallback.
+          // Gemini transcription is a real fallback, not merely a network
+          // fallback. Some Chromium builds (especially privacy-focused
+          // browsers) expose SpeechRecognition but do not reliably emit
+          // onresult events. Therefore never hide Gemini text just because
+          // SpeechRecognition reports itself as active.
           const text = String(message?.serverContent?.inputTranscription?.text || '');
           if (text) {
-            voiceGeminiDraftRef.current += text;
-            // Only render Gemini text directly when browser recognition is not
-            // active. We still retain it as a fallback for Stop/commit.
-            if (!voiceBrowserRecognitionActiveRef.current) {
+            voiceGeminiDraftRef.current = `${voiceGeminiDraftRef.current}${text}`
+              .replace(/\s+/g, ' ')
+              .trim();
+
+            // Browser recognition wins once it has actually produced text.
+            // Until then, show Gemini's transcription live.
+            if (!voiceFinalTranscriptRef.current.trim() && !voiceInterimTranscriptRef.current.trim()) {
               voiceDraftRef.current = voiceGeminiDraftRef.current;
+              setVoiceLiveTranscript(voiceGeminiDraftRef.current);
               setVoiceDraftVersion(version => version + 1);
             }
           }
@@ -3583,12 +3595,12 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                       className="relative flex min-h-10 min-w-0 flex-1 items-center overflow-hidden px-2"
                       aria-label={voiceSpeechDetected ? 'Listening and transcribing' : 'Listening'}
                     >
-                      {voiceDraftRef.current.trim() ? (
+                      {voiceLiveTranscript.trim() ? (
                         <div
                           key={voiceDraftVersion}
                           className="max-h-16 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words px-1 text-sm font-medium leading-6 text-zinc-800 dark:text-zinc-100 sm:text-[15px]"
                         >
-                          {voiceDraftRef.current}
+                          {voiceLiveTranscript}
                         </div>
                       ) : voiceSpeechDetected ? (
                         <div className="flex h-full w-full items-center justify-center gap-[3px]" aria-hidden="true">
