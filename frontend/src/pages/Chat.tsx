@@ -1475,6 +1475,9 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamingAssistantIdRef = useRef<string | null>(null);
   const streamReceivedTextRef = useRef('');
+  // Prevent a background history refresh from replacing the local response
+  // while that response is still being generated.
+  const activeResponseSessionRef = useRef<number | null>(null);
 
   // The backend already provides real SSE deltas. Do not simulate a
   // typewriter effect. We only coalesce deltas that arrive during the same
@@ -1631,6 +1634,13 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   }, [user.id]);
 
   const loadMessages = useCallback(async (sid: number) => {
+    // The streaming request owns the local message state while it is active.
+    // Do not hydrate the same session from history during that window; doing
+    // so can insert the persisted first answer and then the final SSE answer.
+    if (isSendingRef.current && activeResponseSessionRef.current === sid) {
+      return;
+    }
+
     try {
       const response = await chatApi.getMessages(sid) as any;
       const rawMessages = Array.isArray(response?.messages) ? response.messages : [];
@@ -1982,6 +1992,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
     isSendingRef.current = true;
     const requestGeneration = ++requestGenerationRef.current;
+    activeResponseSessionRef.current = currentSessionId;
     setIsTyping(true);
     setResponsePhase('connecting');
     streamingAssistantIdRef.current = null;
@@ -2121,6 +2132,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         // message-load effect skips ONLY this specific session's fetch.
         // Switching to any other session will still trigger a full load.
         skipMessageLoadRef.current = activeSessionId;
+        activeResponseSessionRef.current = activeSessionId;
         setCurrentSessionId(activeSessionId);
         persistSessionId(activeSessionId);
 
@@ -2188,20 +2200,42 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
       setMessages(prev => {
         const streamId = streamingAssistantIdRef.current;
-        let next = prev;
 
+        // Replace the streamed bubble with the final server message instead
+        // of appending another assistant bubble.
         if (streamId) {
           const streamIndex = prev.findIndex(m => m.id === streamId);
           if (streamIndex >= 0) {
-            next = prev.map((message, index) =>
-              index === streamIndex ? { ...aiMsg, id: message.id } : message
+            return dedupeMessages(
+              prev.map((message, index) =>
+                index === streamIndex ? { ...aiMsg, id: message.id } : message
+              )
             );
           }
-        } else if (!prev.some(m => m.id === aiMsg.id)) {
-          next = [...prev, aiMsg];
         }
 
-        return dedupeMessages(next);
+        // A history request can finish at exactly the same time as the final
+        // SSE event. If the exact answer is already present, keep it and do
+        // not append a second copy.
+        const normalizedFinal = cleanedAiContent
+          .replace(/\s+/g, ' ')
+          .trim()
+          .toLowerCase();
+
+        if (normalizedFinal) {
+          const alreadyPresent = prev.some(
+            message =>
+              message.role === 'assistant' &&
+              cleanMessageContent(message.content)
+                .replace(/\s+/g, ' ')
+                .trim()
+                .toLowerCase() === normalizedFinal
+          );
+          if (alreadyPresent) return dedupeMessages(prev);
+        }
+
+        if (prev.some(m => m.id === aiMsg.id)) return dedupeMessages(prev);
+        return dedupeMessages([...prev, aiMsg]);
       });
       streamingAssistantIdRef.current = null;
       streamReceivedTextRef.current = '';
@@ -2308,6 +2342,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     } finally {
       isSendingRef.current = false;
       abortControllerRef.current = null;
+      activeResponseSessionRef.current = null;
       setIsTyping(false);
       setResponsePhase('idle');
       streamingAssistantIdRef.current = null;
@@ -2432,6 +2467,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     // closes the race where the SSE `done` event arrives at the same time as
     // the user presses Stop and the full response gets committed again.
     requestGenerationRef.current += 1;
+    activeResponseSessionRef.current = null;
     const streamId = streamingAssistantIdRef.current;
     const streamedText = streamReceivedTextRef.current;
 
@@ -2736,7 +2772,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         </header>
         {/* Messages */}
         <div
-          className="twinkle-message-scroll-area relative min-h-0 min-w-0 flex-1 w-full max-w-full overflow-x-hidden overflow-y-auto overscroll-contain scroll-hide pb-32 pt-0 md:pb-36"
+          className="twinkle-message-scroll-area relative min-h-0 min-w-0 flex-1 w-full max-w-full overflow-x-hidden overflow-y-auto overscroll-contain scroll-hide pb-40 pt-0 md:pb-44"
           ref={messagesContainerRef}
           onScroll={handleScroll}
         >
@@ -2914,7 +2950,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                                     h1({ children, ...props }: any) {
                                       return (
                                         <h1
-                                          className="mt-5 mb-3 pb-2 border-b border-zinc-300 dark:border-zinc-700 text-2xl md:text-3xl font-black tracking-tight text-zinc-950 dark:text-zinc-50"
+                                          className="mt-5 mb-3 text-2xl md:text-3xl font-black tracking-tight text-zinc-950 dark:text-zinc-50"
                                           {...props}
                                         >
                                           {children}
@@ -2924,7 +2960,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                                     h2({ children, ...props }: any) {
                                       return (
                                         <h2
-                                          className="mt-5 mb-3 pb-2 border-b border-zinc-300 dark:border-zinc-700 text-xl md:text-2xl font-black tracking-tight text-zinc-950 dark:text-zinc-50"
+                                          className="mt-5 mb-3 text-xl md:text-2xl font-black tracking-tight text-zinc-950 dark:text-zinc-50"
                                           {...props}
                                         >
                                           {children}
@@ -2934,7 +2970,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                                     h3({ children, ...props }: any) {
                                       return (
                                         <h3
-                                          className="mt-4 mb-2 pb-2 border-b border-zinc-300 dark:border-zinc-700 text-lg md:text-xl font-black tracking-tight text-zinc-950 dark:text-zinc-50"
+                                          className="mt-4 mb-2 text-lg md:text-xl font-black tracking-tight text-zinc-950 dark:text-zinc-50"
                                           {...props}
                                         >
                                           {children}
@@ -3134,15 +3170,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                 })}
 
 
-                <div
-                  className="twinkle-chat-disclaimer"
-                  aria-live="polite"
-                >
-                  <p className="text-center text-[10px] leading-relaxed font-medium text-zinc-500/70 dark:text-zinc-400/70 sm:text-[11px]">
-                    <strong className="font-semibold">Twinkle is AI and can make mistakes.</strong>{' '}
-                    Please double-check responses.
-                  </p>
-                </div>
                 <div ref={messagesEndRef} />
               </div>
             )}
@@ -3161,6 +3188,18 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           style={{ left: desktopSidebarExpanded ? `${desktopSidebarWidth}px` : undefined }}
         >
           <div className="mx-auto w-full max-w-[920px] min-w-0 relative">
+            {isAtBottom && messages.length > 0 && !isTyping && (
+              <div
+                className="twinkle-chat-disclaimer twinkle-chat-disclaimer-fixed"
+                aria-live="polite"
+              >
+                <p className="text-center text-[10px] leading-relaxed font-medium text-zinc-500/70 dark:text-zinc-400/70 sm:text-[11px]">
+                  <strong className="font-semibold">Twinkle is AI and can make mistakes.</strong>{' '}
+                  Please double-check responses.
+                </p>
+              </div>
+            )}
+
             {isTyping && showScrollBottom && !isAtBottom && (
               <button
                 type="button"
