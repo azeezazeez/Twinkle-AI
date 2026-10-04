@@ -1149,13 +1149,18 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     window.setTimeout(() => inputRef.current?.focus(), 0);
   }, [cleanupVoiceAudio]);
 
-  const commitVoiceInput = useCallback(async () => {
-    if (!voiceInputActive) return '';
+  const commitVoiceInput = useCallback(async (): Promise<string> => {
+    if (!voiceInputActive) return input.trim();
 
-    // Stop recognition, but wait for the browser's final `onresult`/`onend`
-    // cycle. Calling stop() does not synchronously deliver the final words.
+    // Snapshot everything BEFORE stopping/cleaning the audio graph. This is
+    // important because cleanup clears the refs used by the recognizers.
+    const base = voiceBaseInputRef.current.trim();
     const recognition = voiceBrowserRecognitionRef.current;
     const browserWasActive = Boolean(recognition && voiceBrowserRecognitionActiveRef.current);
+
+    // Ask the browser recognizer for its final result. `stop()` is asynchronous;
+    // the final onresult can arrive after the click, so wait for onend but only
+    // for a bounded amount of time.
     if (recognition && browserWasActive) {
       voiceBrowserStopRequestedRef.current = true;
       await new Promise<void>(resolve => {
@@ -1169,43 +1174,52 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           }
           resolve();
         };
-        const timer = window.setTimeout(finish, 1200);
+        const timer = window.setTimeout(finish, 900);
         voiceBrowserStopResolverRef.current = finish;
-        try { recognition.stop(); } catch { finish(); }
+        try {
+          recognition.stop();
+        } catch {
+          finish();
+        }
       });
     }
 
-    // Give Gemini a bounded opportunity to deliver the final input transcript.
-    try {
-      const socket = voiceSocketRef.current;
-      if (socket?.readyState === WebSocket.OPEN) {
-        await new Promise<void>(resolve => {
-          let settled = false;
-          const finish = () => {
-            if (settled) return;
-            settled = true;
-            window.clearTimeout(timer);
-            if (voiceTurnCompleteResolverRef.current === finish) {
-              voiceTurnCompleteResolverRef.current = null;
-            }
-            resolve();
-          };
-          const timer = window.setTimeout(finish, 700);
-          voiceTurnCompleteResolverRef.current = finish;
-          try {
-            socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
-          } catch { finish(); }
-        });
-      }
-    } catch {}
+    // The browser transcript is authoritative when available. Gemini is a
+    // fallback only when the browser recognizer produced nothing.
+    let spoken = voiceDraftRef.current.trim();
 
-    const base = voiceBaseInputRef.current.trim();
-    const browserSpoken = voiceDraftRef.current.trim();
-    const geminiSpoken = voiceGeminiDraftRef.current.trim();
-    const spoken = browserSpoken || geminiSpoken;
+    // If browser STT produced nothing, give Gemini one short bounded window.
+    if (!spoken) {
+      try {
+        const socket = voiceSocketRef.current;
+        if (socket?.readyState === WebSocket.OPEN) {
+          await new Promise<void>(resolve => {
+            let settled = false;
+            const finish = () => {
+              if (settled) return;
+              settled = true;
+              window.clearTimeout(timer);
+              if (voiceTurnCompleteResolverRef.current === finish) {
+                voiceTurnCompleteResolverRef.current = null;
+              }
+              resolve();
+            };
+            const timer = window.setTimeout(finish, 800);
+            voiceTurnCompleteResolverRef.current = finish;
+            try {
+              socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
+            } catch {
+              finish();
+            }
+          });
+        }
+      } catch {}
+      spoken = voiceGeminiDraftRef.current.trim();
+    }
+
     const combined = `${base}${base && spoken ? ' ' : ''}${spoken}`.trim();
 
-    // Invalidate every late callback before changing the composer state.
+    // Invalidate every late callback before changing the UI.
     voiceStartRef.current += 1;
     try { voiceSocketRef.current?.close(1000, 'committed'); } catch {}
     voiceSocketRef.current = null;
@@ -1215,9 +1229,9 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     voiceBrowserStopResolverRef.current = null;
     cleanupVoiceAudio();
 
-    // The normal textarea is the source of truth. Flush the value and the
-    // listening-state transition together so React cannot leave the listening
-    // UI mounted while the recognized text is already available.
+    // The textarea is the source of truth. Flush both states together so the
+    // listening UI disappears and the recognized text becomes visible in the
+    // normal search bar in the same React commit.
     flushSync(() => {
       setInput(combined);
       setVoiceDraftVersion(version => version + 1);
@@ -1229,15 +1243,16 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     voiceGeminiDraftRef.current = '';
     voiceBaseInputRef.current = '';
     voiceBrowserStopRequestedRef.current = false;
-    window.setTimeout(() => inputRef.current?.focus(), 0);
+    window.setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(combined.length, combined.length);
+    }, 0);
+
     return combined;
-  }, [cleanupVoiceAudio, voiceInputActive]);
+  }, [cleanupVoiceAudio, input, voiceInputActive]);
 
   const stopVoiceCapture = useCallback(async () => {
     if (!voiceInputActive || voiceCaptureStopped) return;
-
-    // The square Stop button means “finish listening and put the text in the
-    // composer”. It must not leave the recorder in a frozen/stopped state.
     await commitVoiceInput();
   }, [commitVoiceInput, voiceCaptureStopped, voiceInputActive]);
 
@@ -1309,8 +1324,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
             for (let i = 0; i < event.results.length; i += 1) {
               transcript += String(event.results[i]?.[0]?.transcript || '');
             }
-            transcript = transcript.trim();
+            transcript = transcript.replace(/\s+/g, ' ').trim();
             if (transcript) {
+              // Keep the complete latest browser transcript in a ref. This is
+              // what Stop commits, so React render timing cannot lose it.
               voiceDraftRef.current = transcript;
               setVoiceDraftVersion(version => version + 1);
             }
@@ -3535,15 +3552,18 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                         </div>
                       ) : (
                         <div className="flex w-full items-center justify-center gap-[7px]" aria-hidden="true">
-                          {[...Array(34)].map((_, index) => (
+                          {[...Array(42)].map((_, index) => (
                             <motion.span
                               key={index}
                               className="h-[3px] w-[3px] shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500"
-                              animate={{ x: [0, 8, 0], opacity: [0.35, 1, 0.35] }}
+                              animate={{
+                                opacity: [0.28, 0.95, 0.28],
+                                scale: [0.8, 1.15, 0.8],
+                              }}
                               transition={{
-                                duration: 1.15,
+                                duration: 1.05,
                                 repeat: Infinity,
-                                delay: index * 0.035,
+                                delay: index * 0.025,
                                 ease: 'linear',
                               }}
                             />
