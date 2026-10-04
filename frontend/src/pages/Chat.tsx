@@ -304,9 +304,14 @@ const getInitialTheme = (): boolean => {
   return window.matchMedia('(prefers-color-scheme: dark)').matches;
 };
 
+// Message sanitizers are function declarations so they are available to history/loading callbacks
+// regardless of module evaluation order.
 function normalizeTwinkleIdentity(content: string): string {
   const normalized = content.trim();
 
+  // Replace the old default identity response with a clearer Twinkle AI
+  // introduction. Keep this narrowly scoped so documents mentioning Twinkle
+  // are not rewritten accidentally.
   if (
     /^I['’]m\s+Twinkle\s+AI,\s+a\s+helpful\s+assistant\s+designed\s+to\s+help\s+you\s+with\s+information,\s+analysis,\s+and\s+more\.?$/i.test(normalized)
   ) {
@@ -1094,8 +1099,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     window.setTimeout(() => inputRef.current?.focus(), 0);
   }, [cleanupVoiceAudio]);
 
-  const commitVoiceInput = useCallback(async () => {
-    if (!voiceInputActive) return;
+  const commitVoiceInput = useCallback(async (): Promise<string> => {
+    if (!voiceInputActive) return input.trim();
 
     // Stop capturing immediately, but give Gemini a short window to deliver
     // the final input-transcription chunk before we commit it to the composer.
@@ -1117,7 +1122,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
             }
             resolve();
           };
-          const timer = window.setTimeout(finish, 550);
+          const timer = window.setTimeout(finish, 400);
           voiceTurnCompleteResolverRef.current = finish;
         });
       }
@@ -1141,26 +1146,16 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     setVoiceInputActive(false);
     setVoiceCaptureStopped(false);
     window.setTimeout(() => inputRef.current?.focus(), 0);
-  }, [cleanupVoiceAudio, voiceInputActive]);
+    return combined;
+  }, [cleanupVoiceAudio, input, voiceInputActive]);
 
   const stopVoiceCapture = useCallback(async () => {
     if (!voiceInputActive || voiceCaptureStopped) return;
 
-    try {
-      const socket = voiceSocketRef.current;
-      if (socket?.readyState === WebSocket.OPEN) {
-        try {
-          socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
-        } catch {}
-        await new Promise(resolve => window.setTimeout(resolve, 120));
-      }
-    } catch {}
-
-    try { voiceSocketRef.current?.close(1000, 'capture-stopped'); } catch {}
-    voiceSocketRef.current = null;
-    cleanupVoiceAudio();
-    setVoiceCaptureStopped(true);
-  }, [cleanupVoiceAudio, voiceCaptureStopped, voiceInputActive]);
+    // Stop means: finish transcription and put the recognized text into the
+    // normal composer. It must NOT send the message.
+    await commitVoiceInput();
+  }, [commitVoiceInput, voiceCaptureStopped, voiceInputActive]);
 
   const startVoiceInput = useCallback(async () => {
     if (voiceInputActive || isTyping || isProcessingFiles) return;
@@ -1180,14 +1175,16 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     // Paint the listening composer immediately on the same click before
     // microphone permission/token/network work begins.
     flushSync(() => {
+      // The visual recorder is committed in the same click frame. Do not wait
+      // for microphone permission, token creation, or WebSocket setup.
       setVoiceDraftVersion(version => version + 1);
       setVoiceSpeechDetected(false);
       setVoiceInputActive(true);
     });
 
-    // Start requesting the session token immediately, in parallel with the
-    // microphone permission request, so the actual listening pipeline starts
-    // as soon as the browser gives us the stream.
+    // Request the token immediately in parallel with microphone permission.
+    // The composer is already painted synchronously, so the user sees the
+    // recording state instantly while the realtime pipeline connects.
     const liveTokenPromise = createLiveToken('Charon', 'auto', true);
     liveTokenPromise.catch(() => undefined);
 
@@ -1600,37 +1597,26 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   // immediately instead of forcing another GET /chat/sessions request.
   useEffect(() => {
     const handleLiveSessionUpdate = (event: Event) => {
-      const detail = (event as CustomEvent<{
-        id?: number;
-        sessionId?: number;
-        sessionName?: string;
-      }>).detail;
-
-      const liveSessionId = Number(detail?.id ?? detail?.sessionId);
-      if (!Number.isFinite(liveSessionId) || liveSessionId <= 0) return;
-
-      const liveSessionName =
-        typeof detail?.sessionName === 'string' && detail.sessionName.trim()
-          ? detail.sessionName.trim()
-          : 'Live Talk';
+      const detail = (event as CustomEvent<{ id: number; sessionName?: string }>).detail;
+      if (!detail?.id) return;
 
       const now = new Date().toISOString();
       setSessions(prev => {
-        const existing = prev.find(session => session.id === liveSessionId);
+        const existing = prev.find(session => session.id === detail.id);
         if (existing) {
           const updated = {
             ...existing,
-            sessionName: liveSessionName || existing.sessionName,
+            sessionName: detail.sessionName || existing.sessionName,
             updatedAt: now,
           };
-          return [updated, ...prev.filter(session => session.id !== liveSessionId)];
+          return [updated, ...prev.filter(session => session.id !== detail.id)];
         }
 
         return [
           {
-            id: liveSessionId,
+            id: detail.id,
             userId: user.id,
-            sessionName: liveSessionName,
+            sessionName: detail.sessionName || 'Live Talk',
             createdAt: now,
             updatedAt: now,
           },
@@ -2448,6 +2434,18 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   // Retry a user message using the conversation state before that message.
   // Persisted attachments are reconstructed so images and documents are
   // actually sent again instead of being reduced to placeholder text.
+  const sendVoiceInput = useCallback(async () => {
+    if (!voiceInputActive || isTyping) return;
+
+    // Commit the final transcription first, then immediately send exactly the
+    // text produced by this recording. Passing it directly avoids waiting for
+    // React's setInput() state update.
+    const committedText = await commitVoiceInput();
+    if (!committedText.trim()) return;
+
+    await handleSendMessage(undefined, committedText);
+  }, [commitVoiceInput, handleSendMessage, isTyping, voiceInputActive]);
+
   const handleRetryMessage = async (msg: Message) => {
     if (isTyping) return;
 
@@ -2686,81 +2684,27 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
    * Make that saved Live Talk session the active chat immediately so the
    * normal chat area displays the complete transcript without a refresh.
    */
-  const handleLiveSessionComplete = useCallback(async (
-    sessionId: number,
-    savedSessionName?: string,
-  ) => {
+  const handleLiveSessionComplete = useCallback((sessionId: number) => {
     if (!Number.isFinite(sessionId)) return;
-
-    // Live Talk's save endpoint is the source of truth for its title. The
-    // modal now passes that exact persisted name back here, so the sidebar
-    // never has to guess with a generic "Live Talk" label.
-    const normalizedName =
-      typeof savedSessionName === 'string' && savedSessionName.trim()
-        ? savedSessionName.trim()
-        : '';
-
-    const now = new Date().toISOString();
 
     setSessions(prev => {
       const existing = prev.find(session => session.id === sessionId);
-      const updatedSession = existing
-        ? {
-            ...existing,
-            sessionName: normalizedName || existing.sessionName || 'Live Talk',
-            updatedAt: now,
-          }
-        : {
-            id: sessionId,
-            userId: user.id,
-            sessionName: normalizedName || 'Live Talk',
-            createdAt: now,
-            updatedAt: now,
-          };
+      if (existing) {
+        return [existing, ...prev.filter(session => session.id !== sessionId)];
+      }
 
+      const now = new Date().toISOString();
       return [
-        updatedSession,
-        ...prev.filter(session => session.id !== sessionId),
+        {
+          id: sessionId,
+          userId: user.id,
+          sessionName: 'Live Talk',
+          createdAt: now,
+          updatedAt: now,
+        },
+        ...prev,
       ];
     });
-
-    // If the callback did not receive the persisted name, reconcile once with
-    // the backend. This also fixes the name after a refresh/reconnect race.
-    if (!normalizedName) {
-      try {
-        const response = await chatApi.getSessions() as any;
-        const rawSessions = Array.isArray(response?.sessions) ? response.sessions : [];
-        const serverSession = rawSessions.find(
-          (session: any) => Number(session?.id ?? session?.sessionId) === sessionId
-        );
-
-        if (serverSession) {
-          const serverName =
-            typeof serverSession.sessionName === 'string' && serverSession.sessionName.trim()
-              ? serverSession.sessionName.trim()
-              : 'Live Talk';
-
-          setSessions(prev => [
-            {
-              ...(prev.find(session => session.id === sessionId) || {
-                id: sessionId,
-                userId: user.id,
-                createdAt: now,
-                updatedAt: now,
-              }),
-              ...serverSession,
-              id: sessionId,
-              userId: serverSession.userId ?? user.id,
-              sessionName: serverName,
-              updatedAt: serverSession.updatedAt ?? now,
-            },
-            ...prev.filter(session => session.id !== sessionId),
-          ]);
-        }
-      } catch (error) {
-        console.error('Failed to reconcile the Live Talk sidebar title:', error);
-      }
-    }
 
     setCurrentSessionId(sessionId);
     persistSessionId(sessionId);
@@ -3391,7 +3335,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                 {/* Main prompt area — always above the action row */}
                 {voiceInputActive ? (
                   <div
-                    className="relative flex min-h-[58px] w-full min-w-0 items-center gap-2 px-2 py-2 sm:min-h-[64px] sm:gap-2 sm:px-3"
+                    className="relative flex min-h-[58px] w-full min-w-0 items-center gap-2 px-2.5 py-2 sm:min-h-[64px] sm:gap-2.5 sm:px-3"
                     aria-live="polite"
                     aria-label="Listening for voice input"
                   >
@@ -3408,23 +3352,30 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                       <X className="h-[20px] w-[20px]" strokeWidth={2.05} />
                     </motion.button>
 
-                    {/* Dictation waveform */}
+                    {/* Dictation waveform — compact dotted line like the reference UI. */}
                     <div className="relative flex h-10 min-w-0 flex-1 items-center overflow-hidden px-1" aria-hidden="true">
                       <motion.div
-                        className="flex h-full w-full min-w-0 items-center justify-between gap-[3px]"
-                        animate={{ opacity: voiceCaptureStopped ? 0.45 : [0.82, 1, 0.82] }}
-                        transition={{ duration: 2.2, repeat: voiceCaptureStopped ? 0 : Infinity, ease: 'easeInOut' }}
+                        className="flex w-full items-center justify-between gap-[4px]"
+                        animate={{ opacity: voiceCaptureStopped ? 0.42 : [0.72, 1, 0.72] }}
+                        transition={{ duration: 1.8, repeat: voiceCaptureStopped ? 0 : Infinity, ease: 'easeInOut' }}
                       >
-                        {[...Array(72)].map((_, index) => {
-                          const heights = [8, 13, 20, 11, 28, 16, 36, 22, 43, 30, 48, 34, 25, 44, 31, 50, 27, 40, 21, 46, 33, 42, 18, 37, 26, 47, 32, 22, 41, 28, 45, 19, 35, 25, 43, 30];
-                          const height = heights[index % heights.length];
+                        {[...Array(74)].map((_, index) => {
+                          const emphasis = index > 48 && index < 69;
                           return (
                             <motion.span
                               key={index}
-                              className="min-w-0 flex-1 max-w-[4px] shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600"
-                              style={{ height: `${Math.max(5, height * 0.62)}px`, transformOrigin: 'center' }}
-                              animate={voiceCaptureStopped ? { scaleY: 0.65 } : { scaleY: [0.55, 1, 0.55] }}
-                              transition={{ duration: 1.8, repeat: voiceCaptureStopped ? 0 : Infinity, delay: index * 0.035, ease: 'easeInOut' }}
+                              className={`h-[4px] w-[4px] shrink-0 rounded-full ${emphasis ? 'bg-zinc-400 dark:bg-zinc-500' : 'bg-zinc-300 dark:bg-zinc-600'}`}
+                              animate={
+                                voiceCaptureStopped
+                                  ? { scale: 0.9 }
+                                  : { scale: [0.82, emphasis ? 1.18 : 1, 0.82] }
+                              }
+                              transition={{
+                                duration: 1.25 + (index % 5) * 0.08,
+                                repeat: voiceCaptureStopped ? 0 : Infinity,
+                                delay: index * 0.018,
+                                ease: 'easeInOut',
+                              }}
                             />
                           );
                         })}
@@ -3445,15 +3396,16 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                       <span className="h-3.5 w-3.5 rounded-[3px] bg-black dark:bg-white" />
                     </motion.button>
 
-                    {/* Accept dictation into the composer */}
+                    {/* Send dictation immediately */}
                     <motion.button
                       type="button"
-                      onClick={() => void commitVoiceInput()}
-                      aria-label="Use dictation"
-                      data-tooltip="Use dictation"
+                      onClick={() => void sendVoiceInput()}
+                      disabled={isTyping}
+                      aria-label="Send dictated message"
+                      data-tooltip="Send"
                       whileHover={{ scale: 1.05, y: -1 }}
                       whileTap={{ scale: 0.92 }}
-                      className="twinkle-tooltip-trigger flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition sm:h-11 sm:w-11"
+                      className="twinkle-tooltip-trigger flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 sm:h-11 sm:w-11"
                       style={{ background: liveTalkColor.background, boxShadow: `0 8px 20px ${liveTalkColor.glow}` }}
                     >
                       <svg viewBox="0 0 24 24" className="h-[20px] w-[20px]" aria-hidden="true">
@@ -3462,7 +3414,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                     </motion.button>
                   </div>
                 ) : (
-                  <div className="twinkle-composer-prompt relative flex min-h-[58px] min-w-0 flex-1 items-center px-6 py-0 sm:min-h-[64px] sm:px-6">
+                  <div className="twinkle-composer-prompt relative flex min-h-[58px] min-w-0 flex-1 items-center px-2 py-2 sm:min-h-[64px] sm:px-3">
                     <textarea
                       ref={inputRef}
                       value={input}
@@ -3473,9 +3425,9 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                           handleSendMessage();
                         }
                       }}
-                      placeholder="Ask Anything..."
+                      placeholder="Ask Twinkle"
                       rows={1}
-                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent p-0 text-[18px] font-normal leading-[1.35] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:text-[18px] sm:min-h-[46px]"
+                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent p-0 text-[17px] font-medium leading-[1.35] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:text-[18px] sm:min-h-[46px]"
                       onInput={(e) => {
                         const t = e.target as HTMLTextAreaElement;
                         t.style.height = 'auto';
@@ -3486,6 +3438,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                 )}
 
                 {/* Bottom action row: plus → model → mic → send/live talk */}
+                {!voiceInputActive && (
                 <div className="twinkle-composer-actions flex shrink-0 items-center gap-0 px-1 pb-1 pt-1 sm:px-1.5 sm:pb-1.5">
                   {/* + attachment button */}
                   <motion.button
@@ -3652,6 +3605,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                     )}
                   
                 </div>
+                )}
               </div>
 
             </div>
