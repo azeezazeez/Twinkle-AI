@@ -1093,8 +1093,28 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   // browser SpeechRecognition has not produced a result yet.
   const voiceGeminiDraftRef = useRef('');
   const voiceTurnCompleteResolverRef = useRef<(() => void) | null>(null);
+  const voiceCommitInProgressRef = useRef(false);
   const [voiceDraftVersion, setVoiceDraftVersion] = useState(0);
   const [voiceSpeechDetected, setVoiceSpeechDetected] = useState(false);
+
+  // SpeechRecognition needs a BCP-47 locale. Keep it aligned with Twinkle's
+  // selected app language instead of always using navigator.language.
+  const getSpeechRecognitionLanguage = useCallback((): string => {
+    try {
+      const code = localStorage.getItem('twinkle_app_language') || 'auto';
+      const map: Record<string, string> = {
+        en: 'en-US', hi: 'hi-IN', te: 'te-IN', ta: 'ta-IN', kn: 'kn-IN',
+        ml: 'ml-IN', bn: 'bn-IN', mr: 'mr-IN', gu: 'gu-IN', pa: 'pa-IN',
+        ur: 'ur-PK', ar: 'ar-SA', es: 'es-ES', fr: 'fr-FR', de: 'de-DE',
+        it: 'it-IT', pt: 'pt-PT', ru: 'ru-RU', ja: 'ja-JP', ko: 'ko-KR',
+        zh: 'zh-CN', tr: 'tr-TR', vi: 'vi-VN', id: 'id-ID', th: 'th-TH',
+        fil: 'fil-PH',
+      };
+      return code === 'auto' ? (navigator.language || 'en-US') : (map[code] || code);
+    } catch {
+      return navigator.language || 'en-US';
+    }
+  }, []);
 
   const cleanupVoiceAudio = useCallback(() => {
     if (voiceMeterFrameRef.current !== null) {
@@ -1258,12 +1278,19 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   }, [cleanupVoiceAudio, input, voiceInputActive]);
 
   const stopVoiceCapture = useCallback(async () => {
-    if (!voiceInputActive || voiceCaptureStopped) return;
-    await commitVoiceInput();
+    if (!voiceInputActive || voiceCaptureStopped || voiceCommitInProgressRef.current) return;
+    voiceCommitInProgressRef.current = true;
+    setVoiceCaptureStopped(true);
+    try {
+      await commitVoiceInput();
+    } finally {
+      voiceCommitInProgressRef.current = false;
+    }
   }, [commitVoiceInput, voiceCaptureStopped, voiceInputActive]);
 
   const startVoiceInput = useCallback(async () => {
-    if (voiceInputActive || isTyping || isProcessingFiles) return;
+    if (voiceInputActive || isTyping || isProcessingFiles || voiceCommitInProgressRef.current) return;
+    voiceCommitInProgressRef.current = false;
     setVoiceCaptureStopped(false);
 
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -1323,56 +1350,98 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           const recognition = new SpeechRecognitionCtor();
           recognition.continuous = true;
           recognition.interimResults = true;
-          recognition.lang = navigator.language || 'en-US';
+          recognition.lang = getSpeechRecognitionLanguage();
           recognition.maxAlternatives = 1;
+
+          recognition.onstart = () => {
+            if (attempt !== voiceStartRef.current) return;
+            voiceBrowserRecognitionActiveRef.current = true;
+            voiceBrowserRecognitionRef.current = recognition;
+            setVoiceDraftVersion(version => version + 1);
+          };
 
           recognition.onresult = (event: any) => {
             if (attempt !== voiceStartRef.current) return;
 
-            // SpeechRecognition exposes a mixture of final and interim
-            // results. Never rebuild the transcript from the entire results
-            // array: Chrome can replace interim entries, which caused the
-            // previous implementation to lose the final words on Stop.
+            // Final text is accumulated; interim text is replaced on each
+            // recognition update. This prevents stale interim words from being
+            // duplicated when the browser replaces an interim result.
             let finalText = voiceFinalTranscriptRef.current;
             let interimText = '';
 
             for (let i = event.resultIndex ?? 0; i < event.results.length; i += 1) {
               const result = event.results[i];
-              const text = String(result?.[0]?.transcript || '').replace(/\s+/g, ' ').trim();
+              const text = String(result?.[0]?.transcript || '')
+                .replace(/\s+/g, ' ')
+                .trim();
               if (!text) continue;
+
               if (result?.isFinal) {
-                finalText = `${finalText}${finalText ? ' ' : ''}${text}`.replace(/\s+/g, ' ').trim();
+                const normalized = text.toLowerCase();
+                if (!finalText.toLowerCase().endsWith(normalized)) {
+                  finalText = `${finalText}${finalText ? ' ' : ''}${text}`
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                }
               } else {
-                interimText = `${interimText}${interimText ? ' ' : ''}${text}`.replace(/\s+/g, ' ').trim();
+                interimText = `${interimText}${interimText ? ' ' : ''}${text}`
+                  .replace(/\s+/g, ' ')
+                  .trim();
               }
             }
 
             voiceFinalTranscriptRef.current = finalText;
             voiceInterimTranscriptRef.current = interimText;
-            voiceDraftRef.current = `${finalText}${finalText && interimText ? ' ' : ''}${interimText}`.replace(/\s+/g, ' ').trim();
+            voiceDraftRef.current =
+              `${finalText}${finalText && interimText ? ' ' : ''}${interimText}`
+                .replace(/\s+/g, ' ')
+                .trim();
+
+            // The recognized words are rendered live in the listening composer.
             setVoiceDraftVersion(version => version + 1);
           };
 
           recognition.onerror = (event: any) => {
-            if (event?.error === 'not-allowed' || event?.error === 'service-not-allowed') {
+            const error = String(event?.error || '');
+
+            // Permission failures are terminal. Other errors are usually
+            // transient; onend below will restart recognition automatically.
+            if (error === 'not-allowed' || error === 'service-not-allowed') {
               voiceBrowserRecognitionActiveRef.current = false;
-              voiceBrowserRecognitionRef.current = null;
+              if (voiceBrowserRecognitionRef.current === recognition) {
+                voiceBrowserRecognitionRef.current = null;
+              }
             }
           };
 
           recognition.onend = () => {
             if (voiceBrowserStopRequestedRef.current) {
               voiceBrowserRecognitionActiveRef.current = false;
-              voiceBrowserRecognitionRef.current = null;
+              if (voiceBrowserRecognitionRef.current === recognition) {
+                voiceBrowserRecognitionRef.current = null;
+              }
               voiceBrowserStopResolverRef.current?.();
               voiceBrowserStopResolverRef.current = null;
               return;
             }
-            if (attempt !== voiceStartRef.current || voiceBrowserRecognitionRef.current !== recognition) return;
+
+            if (
+              attempt !== voiceStartRef.current ||
+              voiceBrowserRecognitionRef.current !== recognition
+            ) return;
+
+            // Chrome can end continuous recognition after silence. Restart it
+            // while the user is still in listening mode without losing text.
+            voiceBrowserRecognitionActiveRef.current = false;
             window.setTimeout(() => {
-              if (attempt !== voiceStartRef.current || voiceBrowserRecognitionRef.current !== recognition || voiceBrowserStopRequestedRef.current) return;
+              if (
+                attempt !== voiceStartRef.current ||
+                voiceBrowserRecognitionRef.current !== recognition ||
+                voiceBrowserStopRequestedRef.current
+              ) return;
+
               try { recognition.start(); } catch {}
-            }, 0);
+            }, 120);
           };
 
           voiceBrowserRecognitionRef.current = recognition;
@@ -1601,7 +1670,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         window.alert(`Speech-to-text could not start. ${message}`);
       }
     }
-  }, [cancelVoiceInput, input, isProcessingFiles, isTyping, voiceInputActive]);
+  }, [cancelVoiceInput, getSpeechRecognitionLanguage, input, isProcessingFiles, isTyping, voiceInputActive]);
 
   useEffect(() => () => {
     voiceStartRef.current += 1;
@@ -3546,12 +3615,19 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                       <X className="h-[20px] w-[20px]" strokeWidth={2.05} />
                     </motion.button>
 
-                    {/* Sound-state flow: quiet microphone = flowing dots; speech = vertical bars. */}
+                    {/* Live transcript + sound-state indicator. */}
                     <div
-                      className="relative flex h-10 min-w-0 flex-1 items-center overflow-hidden px-2"
-                      aria-label={voiceSpeechDetected ? 'Sound detected' : 'Listening'}
+                      className="relative flex min-h-10 min-w-0 flex-1 items-center overflow-hidden px-2"
+                      aria-label={voiceSpeechDetected ? 'Listening and transcribing' : 'Listening'}
                     >
-                      {voiceSpeechDetected ? (
+                      {voiceDraftRef.current.trim() ? (
+                        <div
+                          key={voiceDraftVersion}
+                          className="max-h-16 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words px-1 text-sm font-medium leading-6 text-zinc-800 dark:text-zinc-100 sm:text-[15px]"
+                        >
+                          {voiceDraftRef.current}
+                        </div>
+                      ) : voiceSpeechDetected ? (
                         <div className="flex h-full w-full items-center justify-center gap-[3px]" aria-hidden="true">
                           {[...Array(28)].map((_, index) => (
                             <motion.span
