@@ -30,116 +30,98 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
  * untouched so source code containing backslashes is never interpreted as math.
  */
 const normalizeMathDelimiters = (value: string): string => {
-  // Keep math rendering dependency-free so Vite/Vercel does not require
-  // remark-math, rehype-katex, or KaTeX packages just to render a response.
-  // Convert the most common LaTeX emitted by chat models into readable
-  // Unicode mathematics before ReactMarkdown parses the message.
   const renderExpression = (expression: string): string => {
     let result = expression.trim();
 
     const replacements: Array<[RegExp, string]> = [
-      [/\\hbar/g, 'ℏ'],
-      [/\\hslash/g, 'ℏ'],
-      [/\\partial/g, '∂'],
-      [/\\nabla/g, '∇'],
-      [/\\Delta/g, 'Δ'],
-      [/\\delta/g, 'δ'],
-      [/\\alpha/g, 'α'],
-      [/\\beta/g, 'β'],
-      [/\\gamma/g, 'γ'],
-      [/\\Gamma/g, 'Γ'],
-      [/\\lambda/g, 'λ'],
-      [/\\Lambda/g, 'Λ'],
-      [/\\mu/g, 'μ'],
-      [/\\pi/g, 'π'],
-      [/\\Pi/g, 'Π'],
-      [/\\sigma/g, 'σ'],
-      [/\\Sigma/g, 'Σ'],
-      [/\\phi/g, 'φ'],
-      [/\\Phi/g, 'Φ'],
-      [/\\psi/g, 'ψ'],
-      [/\\Psi/g, 'Ψ'],
-      [/\\omega/g, 'ω'],
-      [/\\Omega/g, 'Ω'],
-      [/\\theta/g, 'θ'],
-      [/\\Theta/g, 'Θ'],
-      [/\\rho/g, 'ρ'],
-      [/\\tau/g, 'τ'],
-      [/\\chi/g, 'χ'],
-      [/\\xi/g, 'ξ'],
-      [/\\Xi/g, 'Ξ'],
-      [/\\zeta/g, 'ζ'],
-      [/\\eta/g, 'η'],
-      [/\\kappa/g, 'κ'],
-      [/\\nu/g, 'ν'],
-      [/\\varphi/g, 'φ'],
-      [/\\hat\{([^{}]+)\}/g, 'ˆ$1'],
-      [/\\mathbf\{([^{}]+)\}/g, '$1'],
-      [/\\mathrm\{([^{}]+)\}/g, '$1'],
-      [/\\text\{([^{}]+)\}/g, '$1'],
-      [/\\operatorname\{([^{}]+)\}/g, '$1'],
+      [/\\hbar/g, 'ℏ'], [/\\hslash/g, 'ℏ'], [/\\partial/g, '∂'], [/\\nabla/g, '∇'],
+      [/\\infty/g, '∞'], [/\\alpha/g, 'α'], [/\\beta/g, 'β'], [/\\gamma/g, 'γ'],
+      [/\\Gamma/g, 'Γ'], [/\\delta/g, 'δ'], [/\\Delta/g, 'Δ'], [/\\epsilon/g, 'ε'],
+      [/\\varepsilon/g, 'ϵ'], [/\\zeta/g, 'ζ'], [/\\eta/g, 'η'], [/\\theta/g, 'θ'],
+      [/\\Theta/g, 'Θ'], [/\\iota/g, 'ι'], [/\\kappa/g, 'κ'], [/\\lambda/g, 'λ'],
+      [/\\Lambda/g, 'Λ'], [/\\mu/g, 'μ'], [/\\nu/g, 'ν'], [/\\xi/g, 'ξ'], [/\\Xi/g, 'Ξ'],
+      [/\\pi/g, 'π'], [/\\Pi/g, 'Π'], [/\\rho/g, 'ρ'], [/\\sigma/g, 'σ'], [/\\Sigma/g, 'Σ'],
+      [/\\tau/g, 'τ'], [/\\upsilon/g, 'υ'], [/\\phi/g, 'φ'], [/\\varphi/g, 'ϕ'],
+      [/\\Phi/g, 'Φ'], [/\\chi/g, 'χ'], [/\\psi/g, 'ψ'], [/\\Psi/g, 'Ψ'],
+      [/\\omega/g, 'ω'], [/\\Omega/g, 'Ω'],
+      [/\\pm/g, '±'], [/\\mp/g, '∓'], [/\\times/g, '×'], [/\\cdot/g, '·'],
+      [/\\leq/g, '≤'], [/\\geq/g, '≥'], [/\\neq/g, '≠'], [/\\approx/g, '≈'],
+      [/\\equiv/g, '≡'], [/\\propto/g, '∝'], [/\\sim/g, '∼'], [/\\to/g, '→'],
+      [/\\rightarrow/g, '→'], [/\\leftarrow/g, '←'], [/\\Rightarrow/g, '⇒'],
+      [/\\Leftrightarrow/g, '⇔'], [/\\in/g, '∈'], [/\\notin/g, '∉'], [/\\subset/g, '⊂'],
+      [/\\subseteq/g, '⊆'], [/\\cup/g, '∪'], [/\\cap/g, '∩'], [/\\forall/g, '∀'],
+      [/\\exists/g, '∃'], [/\\nexists/g, '∄'], [/\\emptyset/g, '∅'],
+      [/\\sum/g, 'Σ'], [/\\prod/g, 'Π'], [/\\int/g, '∫'], [/\\oint/g, '∮'],
       [/\\sqrt\{([^{}]+)\}/g, '√($1)'],
-      [/\\int/g, '∫'],
-      [/\\sum/g, 'Σ'],
-      [/\\prod/g, 'Π'],
-      [/\\infty/g, '∞'],
-      [/\\in/g, '∈'],
-      [/\\notin/g, '∉'],
-      [/\\to/g, '→'],
-      [/\\rightarrow/g, '→'],
-      [/\\leftarrow/g, '←'],
-      [/\\Rightarrow/g, '⇒'],
-      [/\\Leftrightarrow/g, '⇔'],
-      [/\\times/g, '×'],
-      [/\\cdot/g, '·'],
-      [/\\pm/g, '±'],
-      [/\\leq/g, '≤'],
-      [/\\geq/g, '≥'],
-      [/\\neq/g, '≠'],
-      [/\\approx/g, '≈'],
-      [/\\propto/g, '∝'],
-      [/\\equiv/g, '≡'],
+      [/\\mathbf\{([^{}]+)\}/g, '$1'], [/\\mathrm\{([^{}]+)\}/g, '$1'],
+      [/\\mathbb\{([^{}]+)\}/g, '$1'], [/\\mathcal\{([^{}]+)\}/g, '$1'],
+      [/\\mathsf\{([^{}]+)\}/g, '$1'], [/\\operatorname\{([^{}]+)\}/g, '$1'],
+      [/\\text\{([^{}]+)\}/g, '$1'], [/\\hat\{([^{}]+)\}/g, 'ˆ$1'],
+      [/\\bar\{([^{}]+)\}/g, '¯$1'], [/\\vec\{([^{}]+)\}/g, '⃗$1'],
+      [/\\langle/g, '⟨'], [/\\rangle/g, '⟩'], [/\\ket\{([^{}]+)\}/g, '|$1⟩'],
+      [/\\bra\{([^{}]+)\}/g, '⟨$1|'],
     ];
 
     replacements.forEach(([pattern, replacement]) => {
       result = result.replace(pattern, replacement);
     });
 
-    // Simple fractions: \frac{a}{b} -> (a)/(b). This is intentionally
-    // conservative and leaves complex nested LaTeX untouched.
-    result = result.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)');
-    result = result.replace(/\\dfrac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)');
-    result = result.replace(/\\tfrac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)');
+    // Handle fractions from both delimited and raw model output.
+    for (let i = 0; i < 3; i += 1) {
+      result = result.replace(/\\(?:dfrac|tfrac|frac)\{([^{}]+)\}\{([^{}]+)\}/g, '($1)⁄($2)');
+    }
+
+    // Improve common powers/subscripts instead of leaving TeX braces on screen.
+    const superscripts: Record<string, string> = { '0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','+':'⁺','-':'⁻','=':'⁼','(':'⁽',')':'⁾','n':'ⁿ','i':'ⁱ' };
+    const subscripts: Record<string, string> = { '0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉','+':'₊','-':'₋','=':'₌','(':'₍',')':'₎','n':'ₙ','i':'ᵢ' };
+    const toSup = (v: string) => [...v].map(ch => superscripts[ch] ?? ch).join('');
+    const toSub = (v: string) => [...v].map(ch => subscripts[ch] ?? ch).join('');
 
     result = result
-      .replace(/\^\{([^{}]+)\}/g, '^$1')
-      .replace(/_\{([^{}]+)\}/g, '_$1')
-      .replace(/\\([{}])/g, '$1')
+      .replace(/\^\{([^{}]+)\}/g, (_, v) => toSup(v))
+      .replace(/_\{([^{}]+)\}/g, (_, v) => toSub(v))
+      .replace(/\^([0-9n+-])/g, (_, v) => toSup(v))
+      .replace(/_([0-9n+-])/g, (_, v) => toSub(v))
+      .replace(/\\left/g, '')
+      .replace(/\\right/g, '')
       .replace(/\\,/g, ' ')
       .replace(/\\;/g, ' ')
       .replace(/\\!/g, '')
       .replace(/\\quad/g, '  ')
       .replace(/\\qquad/g, '    ')
+      .replace(/\\\\/g, '\\n')
+      .replace(/\\([{}])/g, '$1')
       .replace(/[{}]/g, '')
-      .replace(/\s+/g, ' ')
+      .replace(/[ \t]+/g, ' ')
       .trim();
 
     return result;
   };
 
-  // Protect fenced code blocks so backslashes inside source code are never
-  // interpreted as mathematics.
+  // Protect fenced code blocks so source code is never interpreted as math.
   const parts = value.split(/(```[\s\S]*?```)/g);
   return parts.map((part, index) => {
     if (index % 2 === 1) return part;
 
+    // Delimited equations first, then raw TeX commands. The latter matters
+    // because many models emit equations without $...$ delimiters.
     return part
       .replace(/\\\[([\s\S]*?)\\\]/g, (_, expression) => renderExpression(expression))
       .replace(/\\\(([\s\S]*?)\\\)/g, (_, expression) => renderExpression(expression))
       .replace(/\$\$([\s\S]*?)\$\$/g, (_, expression) => renderExpression(expression))
-      .replace(/\$([^$\n]+)\$/g, (_, expression) => renderExpression(expression));
+      .replace(/\$([^$\n]+)\$/g, (_, expression) => renderExpression(expression))
+      .replace(/\\(?:frac|dfrac|tfrac|sqrt|mathbf|mathrm|mathbb|mathcal|operatorname|text|hat|bar|vec|ket|bra|left|right|partial|nabla|hbar|hslash|infty|alpha|beta|gamma|delta|Delta|lambda|mu|pi|sigma|phi|psi|omega|theta|sum|prod|int|oint|times|cdot|pm|leq|geq|neq|approx|propto|equiv|to|rightarrow|leftarrow|Rightarrow|Leftrightarrow|langle|rangle)\b[^\n]*/g, match => renderExpression(match));
   }).join('');
 };
+
+const isEquationLikeText = (value: string): boolean => {
+  const text = value.trim();
+  if (!text) return false;
+  const mathSignals = /[=≈≠≤≥→⇒∂∇ℏ∞∫∑ΣΠ√ψΨφΦλμσΩαβγθΔ]/;
+  const operatorSignals = /\b(?:Schrödinger equation|Hamiltonian|eigenvalue|wavefunction|probability density|expectation value|momentum|energy|operator)\b/i;
+  return (mathSignals.test(text) && /[A-Za-z0-9]/.test(text) && text.length <= 420) || (operatorSignals.test(text) && /[=()]/.test(text));
+};
+
 
 const PDFJS_MODULE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs';
 const PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
@@ -1512,6 +1494,16 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       );
     });
 
+    // A pending drain must always resolve after the final queued delta has
+    // been committed. Without this, sendMessage can wait forever at
+    // drainStreamRenderer(), leaving the Stop/loading state active even though
+    // the model has already finished.
+    const resolve = streamDrainResolverRef.current;
+    if (resolve) {
+      streamDrainResolverRef.current = null;
+      resolve();
+    }
+
     if (autoFollowScrollRef.current) {
       requestAnimationFrame(() => {
         const container = messagesContainerRef.current;
@@ -2861,7 +2853,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                                 : 'w-full rounded-2xl border border-zinc-200/80 dark:border-zinc-700/80 bg-white/70 dark:bg-zinc-900/40 px-4 py-3.5 md:px-5 md:py-4 shadow-sm text-zinc-900 dark:text-zinc-100'
                             }`}
                           >
-                            <div className="text-sm md:text-base leading-relaxed markdown-body max-w-none min-w-0 w-full break-words [overflow-wrap:anywhere]">
+                            <div className="text-sm md:text-base leading-relaxed markdown-body twinkle-response-content max-w-none min-w-0 w-full break-words [overflow-wrap:anywhere]">
                               {isEditing ? (
                                 <div className="flex flex-col gap-3 w-full min-w-0 p-1">
                                   <textarea
@@ -2926,6 +2918,50 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                                         >
                                           {children}
                                         </h3>
+                                      );
+                                    },
+                                    p({ children, ...props }: any) {
+                                      const plain = React.Children.toArray(children)
+                                        .map((child) => (typeof child === 'string' || typeof child === 'number' ? String(child) : ''))
+                                        .join('');
+                                      const equation = isEquationLikeText(plain);
+                                      return equation ? (
+                                        <div className="twinkle-equation-block" role="math" {...props}>
+                                          <span className="twinkle-equation-symbol" aria-hidden="true">∑</span>
+                                          <span className="twinkle-equation-value">{children}</span>
+                                        </div>
+                                      ) : (
+                                        <p {...props}>{children}</p>
+                                      );
+                                    },
+                                    table({ children, ...props }: any) {
+                                      return (
+                                        <div className="twinkle-table-wrap">
+                                          <table className="twinkle-response-table" {...props}>{children}</table>
+                                        </div>
+                                      );
+                                    },
+                                    thead({ children, ...props }: any) {
+                                      return <thead {...props}>{children}</thead>;
+                                    },
+                                    th({ children, ...props }: any) {
+                                      return <th className="twinkle-response-th" {...props}>{children}</th>;
+                                    },
+                                    td({ children, ...props }: any) {
+                                      return <td className="twinkle-response-td" {...props}>{children}</td>;
+                                    },
+                                    img({ src, alt, ...props }: any) {
+                                      return (
+                                        <figure className="twinkle-response-image">
+                                          <img
+                                            src={src}
+                                            alt={alt || 'Response image'}
+                                            loading="lazy"
+                                            decoding="async"
+                                            {...props}
+                                          />
+                                          {alt && <figcaption>{alt}</figcaption>}
+                                        </figure>
                                       );
                                     },
                                     strong({ children, ...props }: any) {
@@ -3108,12 +3144,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           <div className="mx-auto w-full max-w-[920px] min-w-0 relative">
             <div
               aria-live="polite"
-              className="pointer-events-none mb-2.5 flex h-[18px] items-center justify-center px-2"
+              className="twinkle-disclaimer pointer-events-none mb-2.5 flex h-[18px] items-center justify-center px-2"
             >
               <p
-                className={`text-center text-[10px] leading-relaxed font-medium text-zinc-500/70 transition-opacity duration-150 dark:text-zinc-400/70 sm:text-[11px] ${
-                  isAtBottom ? 'opacity-100' : 'opacity-0'
-                }`}
+                className="text-center text-[10px] leading-relaxed font-medium text-zinc-500/70 dark:text-zinc-400/70 sm:text-[11px]"
               >
                 <strong className="font-semibold">Twinkle is AI and can make mistakes.</strong>{' '}
                 Please double-check responses.
