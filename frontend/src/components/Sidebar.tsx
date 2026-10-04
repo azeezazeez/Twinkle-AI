@@ -73,10 +73,10 @@ function IconTooltip({
   return (
     <div className="relative group/tip flex items-center justify-center w-full">
       {children}
-      <div className="absolute left-full ml-2.5 flex items-center gap-2 px-3.5 py-2 bg-[#111111] text-white text-[14px] font-semibold rounded-full whitespace-nowrap pointer-events-none z-[300] shadow-[0_12px_32px_rgba(0,0,0,0.18)] opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150">
+      <div className="absolute left-full ml-2.5 flex items-center gap-2 px-3.5 py-2 bg-[#111111] text-white text-[14px] font-bold rounded-full whitespace-nowrap pointer-events-none z-[300] shadow-[0_12px_32px_rgba(0,0,0,0.18)] opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150">
         <span>{label}</span>
         {shortcut && (
-          <kbd className="rounded-full bg-zinc-600 px-2 py-0.5 text-[13px] font-semibold leading-5 text-zinc-100 shadow-inner">
+          <kbd className="rounded-full bg-zinc-600 px-2.5 py-0.5 text-[13px] font-bold leading-5 text-white shadow-inner">
             {shortcut}
           </kbd>
         )}
@@ -289,7 +289,7 @@ function CollapsedPinnedPopup({
                     : 'text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800/80'
                 }`}
               >
-                <Pin className="h-[17px] w-[17px] shrink-0 text-zinc-400" strokeWidth={1.8} />
+                <Pin className="h-[18px] w-[18px] shrink-0 text-zinc-400" strokeWidth={2.15} />
                 <span className="min-w-0 flex-1 truncate">{title}</span>
               </button>
             );
@@ -593,7 +593,7 @@ function SessionList({
                               {isPinned ? (
                                 <PinOff className="w-[17px] h-[17px]" strokeWidth={1.8} />
                               ) : (
-                                <Pin className="w-[17px] h-[17px]" strokeWidth={1.8} />
+                                <Pin className="w-[18px] h-[18px]" strokeWidth={2.15} />
                               )}
                             </button>
 
@@ -629,7 +629,7 @@ function SessionList({
                               {isPinned ? (
                                 <PinOff className="w-[20px] h-[20px] text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
                               ) : (
-                                <Pin className="w-[20px] h-[20px] text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
+                                <Pin className="w-[20px] h-[20px] text-zinc-800 dark:text-zinc-200" strokeWidth={2.15} />
                               )}
                               <span>{isPinned ? 'Unpin' : 'Pin'}</span>
                             </button>
@@ -990,7 +990,7 @@ function ChatSearchModal({
         initial={{ opacity: 0, scale: 0.985, y: -6 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.985, y: -6 }}
-        className="relative z-10 flex h-[min(620px,76vh)] w-full max-w-[970px] flex-col overflow-hidden rounded-[24px] border border-zinc-200 bg-white shadow-[0_24px_70px_rgba(0,0,0,0.16)] dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-[0_24px_70px_rgba(0,0,0,0.45)]"
+        className="relative z-10 flex h-[min(620px,76vh)] w-full max-w-[720px] flex-col overflow-hidden rounded-[24px] border border-zinc-200 bg-white shadow-[0_24px_70px_rgba(0,0,0,0.16)] dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-[0_24px_70px_rgba(0,0,0,0.45)]"
       >
         <div className="flex shrink-0 items-center border-b border-zinc-100 px-7 py-5 dark:border-zinc-800">
           <Search className="mr-4 h-[21px] w-[21px] text-zinc-400" strokeWidth={1.8} />
@@ -1080,9 +1080,9 @@ export default function Sidebar({
   const [desktopWidth, setDesktopWidth] = useState<number>(() => {
     try {
       const stored = Number(localStorage.getItem('Twinkle_sidebar_width'));
-      return Number.isFinite(stored) ? Math.min(440, Math.max(280, stored)) : 360;
+      return Number.isFinite(stored) ? Math.min(380, Math.max(260, stored)) : 300;
     } catch {
-      return 360;
+      return 300;
     }
   });
   const [searchModalOpen, setSearchModalOpen] = useState(false);
@@ -1118,7 +1118,7 @@ export default function Sidebar({
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
       if (!resizingRef.current) return;
-      const nextWidth = Math.min(440, Math.max(280, startWidth + (moveEvent.clientX - startX)));
+      const nextWidth = Math.min(380, Math.max(260, startWidth + (moveEvent.clientX - startX)));
       setDesktopWidth(nextWidth);
       localStorage.setItem('Twinkle_sidebar_width', String(Math.round(nextWidth)));
     };
@@ -1395,7 +1395,7 @@ export default function Sidebar({
                 aria-expanded={pinnedPopupOpen}
                 className={`flex h-10 w-10 items-center justify-center rounded-xl text-zinc-900 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 transition-none ${pinnedPopupOpen ? 'bg-zinc-100 dark:bg-zinc-800' : ''}`}
               >
-                <Pin className="h-[25px] w-[25px]" strokeWidth={1.9} />
+                <Pin className="h-[25px] w-[25px]" strokeWidth={2.15} />
               </button>
             </IconTooltip>
 
