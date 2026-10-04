@@ -1092,6 +1092,7 @@ export const chatApi = {
     let buffer = '';
     let finalData: any = {};
     let streamedResponse = '';
+    let doneEventSeen = false;
 
     const handleEvent = (rawEvent: string) => {
       const lines = rawEvent.split(/\r?\n/);
@@ -1121,7 +1122,14 @@ export const chatApi = {
           handlers.onDelta?.(text);
         }
       } else if (eventName === 'done') {
+        // `done` is the authoritative end-of-generation signal. Some
+        // deployments keep the HTTP connection open briefly after emitting
+        // this event, so do not wait for the network connection to close.
         finalData = data || {};
+        if (typeof finalData.response !== 'string' && streamedResponse) {
+          finalData = { ...finalData, response: streamedResponse };
+        }
+        doneEventSeen = true;
       } else if (eventName === 'error') {
         const error = new Error(
           typeof data?.error === 'string' && data.error.trim()
@@ -1143,13 +1151,17 @@ export const chatApi = {
           buffer = buffer.slice(boundaryIndex + 2);
           handleEvent(event);
           boundaryIndex = buffer.indexOf('\n\n');
+          if (doneEventSeen) break;
         }
 
-        if (done) break;
+        if (doneEventSeen || done) break;
       }
 
-      if (buffer.trim()) handleEvent(buffer);
+      if (!doneEventSeen && buffer.trim()) handleEvent(buffer);
     } finally {
+      if (doneEventSeen) {
+        try { await reader.cancel(); } catch {}
+      }
       reader.releaseLock();
     }
 
