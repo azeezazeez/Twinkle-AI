@@ -1140,6 +1140,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     voiceBrowserRecognitionActiveRef.current = false;
     voiceBrowserStopRequestedRef.current = false;
     voiceBrowserStopResolverRef.current = null;
+    voiceCommitInProgressRef.current = false;
     voiceSpeechDetectedRef.current = false;
     setVoiceSpeechDetected(false);
 
@@ -1174,88 +1175,25 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   }, [cleanupVoiceAudio]);
 
   const commitVoiceInput = useCallback(async (): Promise<string> => {
-    if (!voiceInputActive) return input.trim();
+    if (!voiceInputActive || voiceCommitInProgressRef.current) return input.trim();
 
-    // Snapshot everything BEFORE stopping/cleaning the audio graph. This is
-    // important because cleanup clears the refs used by the recognizers.
+    voiceCommitInProgressRef.current = true;
+
+    // STOP must feel instantaneous. Do not wait for SpeechRecognition.onend,
+    // WebSocket turnComplete, or any network operation before updating the
+    // composer. The current final+interim transcript is good enough to commit
+    // immediately; late browser results are intentionally ignored after this
+    // point.
     const base = voiceBaseInputRef.current.trim();
-    const recognition = voiceBrowserRecognitionRef.current;
-    const browserWasActive = Boolean(recognition && voiceBrowserRecognitionActiveRef.current);
+    const spoken = `${voiceFinalTranscriptRef.current}${voiceFinalTranscriptRef.current && voiceInterimTranscriptRef.current ? ' ' : ''}${voiceInterimTranscriptRef.current}`
+      .replace(/\s+/g, ' ')
+      .trim();
+    const fallbackSpoken = spoken || voiceGeminiDraftRef.current.trim();
+    const combined = `${base}${base && fallbackSpoken ? ' ' : ''}${fallbackSpoken}`.trim();
 
-    // Ask the browser recognizer for its final result. `stop()` is asynchronous;
-    // the final onresult can arrive after the click, so wait for onend but only
-    // for a bounded amount of time.
-    if (recognition && browserWasActive) {
-      voiceBrowserStopRequestedRef.current = true;
-      await new Promise<void>(resolve => {
-        let settled = false;
-        const finish = () => {
-          if (settled) return;
-          settled = true;
-          window.clearTimeout(timer);
-          if (voiceBrowserStopResolverRef.current === finish) {
-            voiceBrowserStopResolverRef.current = null;
-          }
-          resolve();
-        };
-        const timer = window.setTimeout(finish, 1500);
-        voiceBrowserStopResolverRef.current = finish;
-        try {
-          recognition.stop();
-        } catch {
-          finish();
-        }
-      });
-    }
-
-    // The browser transcript is authoritative when available. Gemini is a
-    // fallback only when the browser recognizer produced nothing.
-    let spoken = `${voiceFinalTranscriptRef.current}${voiceFinalTranscriptRef.current && voiceInterimTranscriptRef.current ? ' ' : ''}${voiceInterimTranscriptRef.current}`.replace(/\s+/g, ' ').trim();
-
-    // If browser STT produced nothing, give Gemini one short bounded window.
-    if (!spoken) {
-      try {
-        const socket = voiceSocketRef.current;
-        if (socket?.readyState === WebSocket.OPEN) {
-          await new Promise<void>(resolve => {
-            let settled = false;
-            const finish = () => {
-              if (settled) return;
-              settled = true;
-              window.clearTimeout(timer);
-              if (voiceTurnCompleteResolverRef.current === finish) {
-                voiceTurnCompleteResolverRef.current = null;
-              }
-              resolve();
-            };
-            const timer = window.setTimeout(finish, 800);
-            voiceTurnCompleteResolverRef.current = finish;
-            try {
-              socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
-            } catch {
-              finish();
-            }
-          });
-        }
-      } catch {}
-      spoken = voiceGeminiDraftRef.current.trim();
-    }
-
-    const combined = `${base}${base && spoken ? ' ' : ''}${spoken}`.trim();
-
-    // Invalidate every late callback before changing the UI.
-    voiceStartRef.current += 1;
-    try { voiceSocketRef.current?.close(1000, 'committed'); } catch {}
-    voiceSocketRef.current = null;
-    voiceTurnCompleteResolverRef.current?.();
-    voiceTurnCompleteResolverRef.current = null;
-    voiceBrowserStopResolverRef.current?.();
-    voiceBrowserStopResolverRef.current = null;
-    cleanupVoiceAudio();
-
-    // The textarea is the source of truth. Flush both states together so the
-    // listening UI disappears and the recognized text becomes visible in the
-    // normal search bar in the same React commit.
+    // Make the recognized text visible in the normal Search bar immediately.
+    // flushSync guarantees the listening composer and search bar switch in the
+    // same React commit instead of waiting for an async recognizer callback.
     flushSync(() => {
       setInput(combined);
       setVoiceDraftVersion(version => version + 1);
@@ -1263,12 +1201,40 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       setVoiceCaptureStopped(false);
     });
 
+    // Invalidate late recognition/network callbacks immediately after the
+    // transcript has been committed to the composer.
+    voiceStartRef.current += 1;
+    voiceBrowserStopRequestedRef.current = true;
+
+    const recognition = voiceBrowserRecognitionRef.current;
+    try { recognition?.stop?.(); } catch {}
+
+    const socket = voiceSocketRef.current;
+    if (socket?.readyState === WebSocket.OPEN) {
+      try {
+        socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
+      } catch {}
+      try { socket.close(1000, 'committed'); } catch {}
+    }
+    voiceSocketRef.current = null;
+
+    voiceTurnCompleteResolverRef.current?.();
+    voiceTurnCompleteResolverRef.current = null;
+    voiceBrowserStopResolverRef.current?.();
+    voiceBrowserStopResolverRef.current = null;
+
+    // Stop the physical microphone immediately. This is deliberately done
+    // after the transcript has been copied into React state.
+    cleanupVoiceAudio();
+
     voiceDraftRef.current = '';
     voiceFinalTranscriptRef.current = '';
     voiceInterimTranscriptRef.current = '';
     voiceGeminiDraftRef.current = '';
     voiceBaseInputRef.current = '';
     voiceBrowserStopRequestedRef.current = false;
+    voiceCommitInProgressRef.current = false;
+
     window.setTimeout(() => {
       inputRef.current?.focus();
       inputRef.current?.setSelectionRange(combined.length, combined.length);
@@ -1279,13 +1245,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
   const stopVoiceCapture = useCallback(async () => {
     if (!voiceInputActive || voiceCaptureStopped || voiceCommitInProgressRef.current) return;
-    voiceCommitInProgressRef.current = true;
     setVoiceCaptureStopped(true);
-    try {
-      await commitVoiceInput();
-    } finally {
-      voiceCommitInProgressRef.current = false;
-    }
+    await commitVoiceInput();
   }, [commitVoiceInput, voiceCaptureStopped, voiceInputActive]);
 
   const startVoiceInput = useCallback(async () => {
