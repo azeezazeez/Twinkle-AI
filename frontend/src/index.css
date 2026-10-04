@@ -862,29 +862,32 @@
   left: 0;
   right: 0;
   bottom: 0;
-  height: 104px;
+  height: 92px;
   z-index: 40;
   pointer-events: none;
+  /* Soft smoke only at the composer boundary. There is no solid horizontal
+     strip, so content remains completely clean until it reaches the bar. */
   background: linear-gradient(
     to bottom,
     rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0.04) 18%,
-    rgba(255, 255, 255, 0.16) 38%,
-    rgba(255, 255, 255, 0.42) 58%,
-    rgba(255, 255, 255, 0.78) 78%,
-    #ffffff 100%
+    rgba(255, 255, 255, 0.02) 24%,
+    rgba(255, 255, 255, 0.12) 48%,
+    rgba(255, 255, 255, 0.34) 68%,
+    rgba(255, 255, 255, 0.72) 86%,
+    rgba(255, 255, 255, 0.98) 100%
   );
+  filter: blur(2px);
+  transform: translateZ(0);
 }
-
 .dark .twinkle-message-scroll-area::after {
   background: linear-gradient(
     to bottom,
     rgba(24, 24, 27, 0) 0%,
-    rgba(24, 24, 27, 0.04) 18%,
-    rgba(24, 24, 27, 0.16) 38%,
-    rgba(24, 24, 27, 0.42) 58%,
-    rgba(24, 24, 27, 0.78) 78%,
-    #18181b 100%
+    rgba(24, 24, 27, 0.02) 24%,
+    rgba(24, 24, 27, 0.12) 48%,
+    rgba(24, 24, 27, 0.34) 68%,
+    rgba(24, 24, 27, 0.72) 86%,
+    rgba(24, 24, 27, 0.98) 100%
   );
 }
 
@@ -942,45 +945,184 @@
   display: none !important;
 }
 
-/* =========================================================
-   RESPONSE EQUATIONS / SYMBOLS
-   ========================================================= */
-.twinkle-response-content .katex-display {
-  display: block;
-  margin: 1rem 0;
-  padding: 0.75rem 0.9rem;
-  overflow-x: auto;
-  overflow-y: hidden;
-  border-radius: 12px;
-  background: rgba(248, 250, 252, 0.92);
-  border: 1px solid rgba(228, 228, 231, 0.9);
-  text-align: center;
+/* Markdown separators are content formatting, not a chat boundary. Hide the
+   horizontal rule so the composer-boundary smoke remains the only visual
+   transition at the bottom of the conversation. */
+.twinkle-response-content hr {
+  display: none;
 }
 
-.twinkle-response-content .katex {
-  font-size: 1.08em;
+/* =========================================================
+   RESPONSE VISUALS — equations, symbols, tables and logos/images
+   ========================================================= */
+.twinkle-response-content {
+  font-variant-ligatures: contextual;
+}
+
+.twinkle-equation-block {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  margin: 0.9rem 0;
+  padding: 0.8rem 0.95rem;
+  overflow-x: auto;
+  border: 1px solid rgba(228, 228, 231, 0.95);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7f7f8 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.95), 0 4px 14px rgba(0,0,0,0.035);
+}
+
+.twinkle-equation-symbol {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: #18181b;
+  color: #ffffff;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 15px;
+}
+
+.twinkle-equation-value {
+  flex: 0 0 auto;
+  min-width: max-content;
+  color: #18181b;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 1.07em;
+  line-height: 1.7;
+  letter-spacing: 0.012em;
+  white-space: nowrap;
+}
+
+.twinkle-response-content :is(code, .math-inline) {
+  font-family: Georgia, 'Times New Roman', serif;
+  letter-spacing: 0.01em;
+}
+
+.twinkle-table-wrap {
+  width: 100%;
+  margin: 1rem 0;
+  overflow-x: auto;
+  border: 1px solid #e4e4e7;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.twinkle-response-table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.94em;
+}
+
+.twinkle-response-th {
+  padding: 0.7rem 0.8rem;
+  background: #f4f4f5;
+  border-bottom: 1px solid #e4e4e7;
+  font-weight: 800;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.twinkle-response-td {
+  padding: 0.68rem 0.8rem;
+  border-bottom: 1px solid #f0f0f1;
+  vertical-align: top;
+}
+
+.twinkle-response-table tr:last-child .twinkle-response-td {
+  border-bottom: 0;
+}
+
+.twinkle-response-image {
+  width: fit-content;
+  max-width: 100%;
+  margin: 1rem 0;
+  overflow: hidden;
+  border: 1px solid #e4e4e7;
+  border-radius: 14px;
+  background: #fafafa;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.04);
+}
+
+.twinkle-response-image img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+}
+
+.twinkle-response-image figcaption {
+  padding: 0.45rem 0.7rem;
+  border-top: 1px solid #ededee;
+  color: #71717a;
+  font-size: 0.72rem;
   line-height: 1.35;
 }
 
-.twinkle-response-content .katex-display > .katex {
-  font-size: 1.12em;
+/* The disclaimer belongs to the fixed composer, not the scrolling document.
+   Its height is reserved so it never jumps when the user reaches the bottom. */
+.twinkle-disclaimer {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 18px;
 }
 
-.twinkle-response-content .math-inline {
-  white-space: normal;
+.dark .twinkle-equation-block {
+  border-color: #3f3f46;
+  background: linear-gradient(180deg, #27272a 0%, #18181b 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 4px 14px rgba(0,0,0,0.18);
 }
 
-.dark .twinkle-response-content .katex-display {
-  background: rgba(39, 39, 42, 0.78);
-  border-color: rgba(82, 82, 91, 0.75);
+.dark .twinkle-equation-symbol {
+  background: #f4f4f5;
+  color: #18181b;
+}
+
+.dark .twinkle-equation-value {
+  color: #f4f4f5;
+}
+
+.dark .twinkle-table-wrap {
+  border-color: #3f3f46;
+  background: #18181b;
+}
+
+.dark .twinkle-response-th {
+  background: #27272a;
+  border-color: #3f3f46;
+}
+
+.dark .twinkle-response-td {
+  border-color: #27272a;
+}
+
+.dark .twinkle-response-image {
+  border-color: #3f3f46;
+  background: #18181b;
+}
+
+.dark .twinkle-response-image figcaption {
+  border-color: #3f3f46;
+  color: #a1a1aa;
 }
 
 @media (max-width: 767px) {
-  .twinkle-response-content .katex-display {
-    margin-left: -0.2rem;
-    margin-right: -0.2rem;
-    padding: 0.65rem;
-    text-align: left;
+  .twinkle-equation-block {
+    margin-left: -0.1rem;
+    margin-right: -0.1rem;
+    width: calc(100% + 0.2rem);
+  }
+
+  .twinkle-response-table {
+    min-width: 460px;
   }
 }
 
