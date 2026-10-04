@@ -1471,6 +1471,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const firstMessageScrollPendingRef = useRef(false);
   const autoFollowScrollRef = useRef(true);
   const isSendingRef = useRef(false);
+  // Locks the short async preparation phase before sendMessage() acquires
+  // isSendingRef. This prevents rapid double-clicks / duplicate key events
+  // from creating two backend requests for the same user message.
+  const sendPreparationLockRef = useRef(false);
   const requestGenerationRef = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamingAssistantIdRef = useRef<string | null>(null);
@@ -1990,6 +1994,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   ) => {
     if ((!messageText.trim() && (!filesToSend || filesToSend.length === 0))) return;
 
+    // sendMessage() is also used by retry/edit flows, so keep this guard at
+    // the actual request boundary as a second line of defense.
+    if (isSendingRef.current) return;
+
     isSendingRef.current = true;
     const requestGeneration = ++requestGenerationRef.current;
     activeResponseSessionRef.current = currentSessionId;
@@ -2355,7 +2363,11 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
   const handleSendMessage = async (e?: React.FormEvent, directMessage?: string) => {
     if (e) { e.preventDefault(); e.stopPropagation(); }
-    if (isSendingRef.current || isTyping) return;
+
+    // Acquire the lock BEFORE any async file conversion. Previously two rapid
+    // clicks could both pass this check while fileToDataUrl() was awaiting,
+    // then both call sendMessage(), producing the same assistant response twice.
+    if (isSendingRef.current || isTyping || sendPreparationLockRef.current) return;
 
     const text = typeof directMessage === 'string' ? directMessage : (input || '');
 
@@ -2366,6 +2378,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       : [];
 
     if (!text.trim() && currentSelectedFiles.length === 0) return;
+
+    sendPreparationLockRef.current = true;
 
     const filesToSend = currentSelectedFiles.length > 0
       ? [...currentSelectedFiles]
@@ -2410,6 +2424,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           timestamp: new Date().toISOString(),
         },
       ]);
+    } finally {
+      sendPreparationLockRef.current = false;
     }
   };
 
