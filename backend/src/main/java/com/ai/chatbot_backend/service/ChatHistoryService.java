@@ -48,6 +48,7 @@ public class ChatHistoryService {
         if (user == null || user.getId() == null) {
             return List.of();
         }
+
         return chatSessionRepository.findByUserIdOrderByUpdatedAtDesc(user.getId());
     }
 
@@ -56,7 +57,10 @@ public class ChatHistoryService {
         return sessionId != null
                 && user != null
                 && user.getId() != null
-                && chatSessionRepository.existsByIdAndUserId(sessionId, user.getId());
+                && chatSessionRepository.existsByIdAndUserId(
+                        sessionId,
+                        user.getId()
+                );
     }
 
     @Transactional(readOnly = true)
@@ -64,11 +68,16 @@ public class ChatHistoryService {
         if (sessionId == null) {
             return List.of();
         }
+
         return chatMessageRepository.findBySessionIdOrderByTimestampAsc(sessionId);
     }
 
     @Transactional
-    public ChatMessage saveMessage(Long sessionId, String role, String content) {
+    public ChatMessage saveMessage(
+            Long sessionId,
+            String role,
+            String content
+    ) {
         return saveMessage(sessionId, role, content, null);
     }
 
@@ -82,14 +91,18 @@ public class ChatHistoryService {
         if (sessionId == null) {
             throw new AIServiceException("Session ID is required");
         }
+
         if (role == null || role.isBlank()) {
             throw new AIServiceException("Message role is required");
         }
 
         ChatSession session = chatSessionRepository.findById(sessionId)
-                .orElseThrow(() -> new AIServiceException("Chat session not found"));
+                .orElseThrow(
+                        () -> new AIServiceException("Chat session not found")
+                );
 
         ChatMessage message = new ChatMessage();
+
         message.setSessionId(sessionId);
         message.setRole(role.trim());
         message.setContent(content == null ? "" : content);
@@ -129,10 +142,16 @@ public class ChatHistoryService {
             session = createNewSession(user, "New Chat");
         } else {
             session = chatSessionRepository.findById(sessionId)
-                    .orElseThrow(() -> new AIServiceException("Live Talk session not found"));
+                    .orElseThrow(
+                            () -> new AIServiceException(
+                                    "Live Talk session not found"
+                            )
+                    );
 
             if (!user.getId().equals(session.getUserId())) {
-                throw new AIServiceException("You do not have access to this Live Talk session");
+                throw new AIServiceException(
+                        "You do not have access to this Live Talk session"
+                );
             }
         }
 
@@ -141,27 +160,37 @@ public class ChatHistoryService {
 
         if (!userText.isEmpty()) {
             ChatMessage userMessage = new ChatMessage();
+
             userMessage.setSessionId(session.getId());
             userMessage.setRole("user");
             userMessage.setContent(userText);
             userMessage.setTimestamp(LocalDateTime.now());
+
             chatMessageRepository.save(userMessage);
         }
 
         if (!assistantText.isEmpty()) {
             ChatMessage assistantMessage = new ChatMessage();
+
             assistantMessage.setSessionId(session.getId());
             assistantMessage.setRole("assistant");
             assistantMessage.setContent(assistantText);
             assistantMessage.setTimestamp(LocalDateTime.now());
+
             chatMessageRepository.save(assistantMessage);
         }
 
-        // This is the important part: do not leave Live Talk sessions as
-        // "New Chat" or the generic "Live Talk" label.
-        // Only assign the title once, using the first meaningful user turn.
+        // Do not leave Live Talk sessions as "New Chat"
+        // or the generic "Live Talk" label.
+        //
+        // Only assign the title once, using the first meaningful
+        // user turn.
         if (isUntitledLiveSession(session)) {
-            String titleSource = !userText.isEmpty() ? userText : assistantText;
+            String titleSource =
+                    !userText.isEmpty()
+                            ? userText
+                            : assistantText;
+
             String liveTitle = buildLiveTalkTitle(titleSource);
 
             if (!liveTitle.isBlank()) {
@@ -170,6 +199,7 @@ public class ChatHistoryService {
         }
 
         session.setUpdatedAt(LocalDateTime.now());
+
         return chatSessionRepository.save(session);
     }
 
@@ -183,31 +213,49 @@ public class ChatHistoryService {
             String userTranscript,
             String assistantTranscript
     ) {
-        return saveLiveTurn(user, null, userTranscript, assistantTranscript);
+        return saveLiveTurn(
+                user,
+                null,
+                userTranscript,
+                assistantTranscript
+        );
     }
 
     @Transactional
-    public ChatSession renameSession(Long sessionId, String name) {
+    public ChatSession renameSession(
+            Long sessionId,
+            String name
+    ) {
         if (sessionId == null) {
             throw new AIServiceException("Session ID is required");
         }
 
-        String trimmed = name == null ? "" : name.trim();
+        String trimmed = name == null
+                ? ""
+                : name.trim();
+
         if (trimmed.isEmpty()) {
-            throw new AIServiceException("Session name cannot be empty");
+            throw new AIServiceException(
+                    "Session name cannot be empty"
+            );
         }
 
         ChatSession session = chatSessionRepository.findById(sessionId)
-                .orElseThrow(() -> new AIServiceException("Session not found"));
+                .orElseThrow(
+                        () -> new AIServiceException("Session not found")
+                );
 
         session.setSessionName(trimmed);
         session.setUpdatedAt(LocalDateTime.now());
+
         return chatSessionRepository.save(session);
     }
 
     @Transactional
     public void deleteSession(Long sessionId) {
-        if (sessionId == null) return;
+        if (sessionId == null) {
+            return;
+        }
 
         chatMessageRepository.deleteBySessionId(sessionId);
         chatSessionRepository.deleteById(sessionId);
@@ -215,48 +263,87 @@ public class ChatHistoryService {
 
     @Transactional
     public void clearUserSessions(User user) {
-        if (user == null || user.getId() == null) return;
-
-        List<ChatSession> sessions = chatSessionRepository.findByUserIdOrderByUpdatedAtDesc(user.getId());
-        for (ChatSession session : sessions) {
-            chatMessageRepository.deleteBySessionId(session.getId());
+        if (user == null || user.getId() == null) {
+            return;
         }
+
+        List<ChatSession> sessions =
+                chatSessionRepository
+                        .findByUserIdOrderByUpdatedAtDesc(user.getId());
+
+        for (ChatSession session : sessions) {
+            chatMessageRepository.deleteBySessionId(
+                    session.getId()
+            );
+        }
+
         chatSessionRepository.deleteByUserId(user.getId());
     }
 
     @Transactional(readOnly = true)
     public Map<String, Object> getProfileStats(User user) {
         List<ChatSession> sessions = getUserSessions(user);
+
         long messageCount = sessions.stream()
-                .mapToLong(session -> chatMessageRepository
-                        .findBySessionIdOrderByTimestampAsc(session.getId())
-                        .size())
+                .mapToLong(
+                        session ->
+                                chatMessageRepository
+                                        .findBySessionIdOrderByTimestampAsc(
+                                                session.getId()
+                                        )
+                                        .size()
+                )
                 .sum();
 
         Map<String, Object> stats = new LinkedHashMap<>();
+
         stats.put("totalChats", sessions.size());
         stats.put("totalSessions", sessions.size());
         stats.put("totalMessages", messageCount);
+
         return stats;
     }
 
+    /**
+     * Determines whether a Live Talk session still has a generic title.
+     */
     private boolean isUntitledLiveSession(ChatSession session) {
         String name = session.getSessionName();
-        if (name == null || name.isBlank()) return true;
+
+        if (name == null || name.isBlank()) {
+            return true;
+        }
 
         String normalized = name.trim();
+
         return normalized.equalsIgnoreCase("New Chat")
                 || normalized.equalsIgnoreCase("Live Talk");
     }
 
+    /**
+     * Creates a compact but meaningful sidebar title from
+     * the first Live Talk transcript.
+     */
     private String buildLiveTalkTitle(String source) {
         if (source == null || source.isBlank()) {
             return "Live Talk";
         }
 
+        /*
+         * Normalize repeated whitespace.
+         *
+         * The previous implementation attempted to strip quotes
+         * using an incorrectly escaped Java string literal. That
+         * caused the Maven compilation error:
+         *
+         * unclosed character literal
+         * illegal character: '\'
+         *
+         * Keeping the normalization simple avoids that issue while
+         * preserving the actual spoken topic.
+         */
         String cleaned = source
                 .replaceAll("\\s+", " ")
-                .replaceAll("^[\\s\\"'`]+|[\\s\\"'`]+$", "")
                 .trim();
 
         if (cleaned.isEmpty()) {
@@ -265,19 +352,34 @@ public class ChatHistoryService {
 
         // Keep the sidebar compact while preserving the actual topic.
         final int maxLength = 58;
+
         if (cleaned.length() > maxLength) {
-            cleaned = cleaned.substring(0, maxLength).trim();
+            cleaned = cleaned
+                    .substring(0, maxLength)
+                    .trim();
+
             int lastSpace = cleaned.lastIndexOf(' ');
+
             if (lastSpace > 30) {
-                cleaned = cleaned.substring(0, lastSpace).trim();
+                cleaned = cleaned
+                        .substring(0, lastSpace)
+                        .trim();
             }
+
             cleaned += "…";
         }
 
         return "Live Talk - " + cleaned;
     }
 
+    /**
+     * Normalizes transcript text before storing it.
+     */
     private String normalizeTranscript(String transcript) {
-        return transcript == null ? "" : transcript.replaceAll("\\s+", " ").trim();
+        return transcript == null
+                ? ""
+                : transcript
+                        .replaceAll("\\s+", " ")
+                        .trim();
     }
 }
