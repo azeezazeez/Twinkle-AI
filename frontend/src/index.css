@@ -953,93 +953,8 @@
 }
 
 /* =========================================================
-   RESPONSE VISUALS — equations, symbols, tables and logos/images
+   RESPONSE VISUALS
    ========================================================= */
-.twinkle-response-content {
-  font-variant-ligatures: contextual;
-}
-
-.twinkle-equation-block {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  width: 100%;
-  margin: 0.9rem 0;
-  padding: 0.8rem 0.95rem;
-  overflow-x: auto;
-  border: 1px solid rgba(228, 228, 231, 0.95);
-  border-radius: 14px;
-  background: linear-gradient(180deg, #ffffff 0%, #f7f7f8 100%);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.95), 0 4px 14px rgba(0,0,0,0.035);
-}
-
-.twinkle-equation-symbol {
-  display: inline-flex;
-  flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 9px;
-  background: #18181b;
-  color: #ffffff;
-  font-family: Georgia, 'Times New Roman', serif;
-  font-size: 15px;
-}
-
-.twinkle-equation-value {
-  flex: 0 0 auto;
-  min-width: max-content;
-  color: #18181b;
-  font-family: Georgia, 'Times New Roman', serif;
-  font-size: 1.07em;
-  line-height: 1.7;
-  letter-spacing: 0.012em;
-  white-space: nowrap;
-}
-
-.twinkle-response-content :is(code, .math-inline) {
-  font-family: Georgia, 'Times New Roman', serif;
-  letter-spacing: 0.01em;
-}
-
-.twinkle-table-wrap {
-  width: 100%;
-  margin: 1rem 0;
-  overflow-x: auto;
-  border: 1px solid #e4e4e7;
-  border-radius: 14px;
-  background: #ffffff;
-}
-
-.twinkle-response-table {
-  width: 100%;
-  min-width: 520px;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: 0.94em;
-}
-
-.twinkle-response-th {
-  padding: 0.7rem 0.8rem;
-  background: #f4f4f5;
-  border-bottom: 1px solid #e4e4e7;
-  font-weight: 800;
-  text-align: left;
-  white-space: nowrap;
-}
-
-.twinkle-response-td {
-  padding: 0.68rem 0.8rem;
-  border-bottom: 1px solid #f0f0f1;
-  vertical-align: top;
-}
-
-.twinkle-response-table tr:last-child .twinkle-response-td {
-  border-bottom: 0;
-}
-
 .twinkle-response-image {
   width: fit-content;
   max-width: 100%;
@@ -1067,12 +982,20 @@
   line-height: 1.35;
 }
 
-/* The disclaimer belongs to the fixed composer, not the scrolling document.
-   Its height is reserved so it never jumps when the user reaches the bottom. */
-.twinkle-disclaimer {
+
+/* The disclaimer belongs to the end of the scrolling conversation.
+   It is therefore visible above the composer only when the user reaches the
+   actual end of the chat, instead of being pinned over every scroll position. */
+.twinkle-chat-disclaimer {
   position: relative;
-  z-index: 2;
-  flex: 0 0 18px;
+  width: 100%;
+  min-height: 20px;
+  margin-top: 1.25rem;
+  padding: 0 0 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
 }
 
 .dark .twinkle-equation-block {
