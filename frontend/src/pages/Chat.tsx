@@ -2534,6 +2534,11 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   };
 
   const createNewSession = () => {
+    // Keep the initial/empty New Chat completely stable. A new chat is only
+    // created after the current chat already contains a conversation. This
+    // prevents repeated clicks on New Chat from changing the greeting/prompt.
+    if (messages.length === 0) return;
+
     setChatGreeting(getRandomChatGreeting());
     setEmptyChatPrompt(current => getNextEmptyChatPrompt(current));
     setCurrentSessionId(null);
@@ -3220,10 +3225,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
         {/* Input bar */}
         <div
-          className="fixed bottom-0 left-0 right-0 z-[9000] w-auto max-w-none overflow-visible bg-transparent px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-4 sm:pt-3 sm:pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-6 md:pt-4 md:pb-[calc(1.5rem+env(safe-area-inset-bottom))]"
+          className="fixed bottom-0 left-0 right-0 z-[9000] w-auto max-w-none overflow-visible bg-transparent px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-4 sm:pt-3 sm:pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-6 md:pt-4 md:pb-[calc(1rem+env(safe-area-inset-bottom))]"
           style={{ left: desktopSidebarExpanded ? `${desktopSidebarWidth}px` : undefined }}
         >
-          <div className="mx-auto w-full max-w-[820px] min-w-0 relative">
+          <div className="mx-auto w-full max-w-[1040px] min-w-0 relative">
             {isAtBottom && messages.length > 0 && !isTyping && (
               <div
                 className="twinkle-chat-disclaimer twinkle-chat-disclaimer-fixed"
@@ -3460,7 +3465,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                     {isProcessingFiles ? (
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
                     ) : (
-                      <Plus className="h-[22px] w-[22px] stroke-[2.7]" />
+                      <Plus className="h-[24px] w-[24px] stroke-[1.8]" />
                     )}
                   </motion.button>
 
