@@ -3,7 +3,7 @@ import React from 'react';
 import { flushSync } from 'react-dom';
 import { User, Session, Message } from '../types';
 import Sidebar from '../components/Sidebar';
-import { chatApi, authApi } from '../lib/api';
+import { chatApi, authApi, createLiveToken } from '../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
 import StormLogo from '../components/StormLogo';
 import ConfirmationModal from '../components/ConfirmationModal';
@@ -1080,6 +1080,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const voiceBrowserRecognitionRef = useRef<any>(null);
   const voiceBrowserRecognitionActiveRef = useRef(false);
   const voiceBrowserStopRequestedRef = useRef(false);
+  const voiceStartInProgressRef = useRef(false);
+  const voiceDictationWantedRef = useRef(false);
   const voiceCommitInProgressRef = useRef(false);
   const voiceSpeechTimerRef = useRef<number | null>(null);
   const [voiceDraftVersion, setVoiceDraftVersion] = useState(0);
@@ -1119,6 +1121,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   }, []);
 
   const cancelVoiceInput = useCallback(() => {
+    voiceStartInProgressRef.current = false;
+    voiceDictationWantedRef.current = false;
     voiceStartRef.current += 1;
     voiceBrowserStopRequestedRef.current = true;
     cleanupVoiceAudio();
@@ -1141,6 +1145,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     if (!voiceInputActive || voiceCommitInProgressRef.current) return input.trim();
 
     voiceCommitInProgressRef.current = true;
+    voiceDictationWantedRef.current = false;
 
     // Snapshot the transcript BEFORE stopping recognition. This is the key
     // difference from the previous implementation: Stop never waits for
@@ -1200,13 +1205,23 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   }, [commitVoiceInput, voiceCaptureStopped, voiceInputActive]);
 
   const startVoiceInput = useCallback(() => {
-    if (voiceInputActive || isTyping || isProcessingFiles || voiceCommitInProgressRef.current) return;
+    if (
+      voiceStartInProgressRef.current ||
+      voiceInputActive ||
+      isTyping ||
+      isProcessingFiles ||
+      voiceCommitInProgressRef.current
+    ) return;
+    voiceStartInProgressRef.current = true;
+    voiceDictationWantedRef.current = true;
 
     const SpeechRecognitionCtor =
       (window as any).SpeechRecognition ||
       (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognitionCtor) {
+      voiceStartInProgressRef.current = false;
+      voiceDictationWantedRef.current = false;
       window.alert('Voice dictation is not supported by this browser. Please use the latest Chrome or Edge.');
       return;
     }
@@ -1230,6 +1245,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
     recognition.onstart = () => {
       if (attempt !== voiceStartRef.current) return;
+      voiceStartInProgressRef.current = false;
       voiceBrowserRecognitionActiveRef.current = true;
       voiceBrowserRecognitionRef.current = recognition;
       flushSync(() => {
@@ -1299,6 +1315,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       if (error === 'not-allowed' || error === 'service-not-allowed') {
         voiceBrowserRecognitionActiveRef.current = false;
         voiceBrowserRecognitionRef.current = null;
+        voiceStartInProgressRef.current = false;
         voiceStartRef.current += 1;
         setVoiceInputActive(false);
         setVoiceCaptureStopped(false);
@@ -1317,7 +1334,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
       voiceBrowserRecognitionActiveRef.current = false;
 
-      if (voiceBrowserStopRequestedRef.current || !voiceInputActive) {
+      if (voiceBrowserStopRequestedRef.current || !voiceDictationWantedRef.current) {
         voiceBrowserRecognitionRef.current = null;
         return;
       }
@@ -1328,7 +1345,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         if (
           attempt !== voiceStartRef.current ||
           voiceBrowserStopRequestedRef.current ||
-          !voiceInputActive
+          !voiceDictationWantedRef.current
         ) return;
 
         try {
@@ -1340,9 +1357,16 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     };
 
     voiceBrowserRecognitionRef.current = recognition;
+    // Make the listening state immediate; native SpeechRecognition can fire
+    // onstart slightly later even though the user has already pressed Mic.
+    flushSync(() => {
+      setVoiceDraftVersion(version => version + 1);
+      setVoiceInputActive(true);
+    });
     try {
       recognition.start();
     } catch (error) {
+      voiceStartInProgressRef.current = false;
       voiceBrowserRecognitionRef.current = null;
       voiceBrowserRecognitionActiveRef.current = false;
       setVoiceInputActive(false);
@@ -1352,6 +1376,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   }, [getSpeechRecognitionLanguage, input, isProcessingFiles, isTyping, voiceInputActive]);
 
   useEffect(() => () => {
+    voiceStartInProgressRef.current = false;
+    voiceDictationWantedRef.current = false;
     voiceStartRef.current += 1;
     voiceBrowserStopRequestedRef.current = true;
     try { voiceBrowserRecognitionRef.current?.stop?.(); } catch {}
@@ -3526,6 +3552,11 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                       <motion.button
                         key="live-talk"
                         type="button"
+                        onPointerDown={() => {
+                          // Start token acquisition on press, in parallel with
+                          // opening the Live Talk modal.
+                          void createLiveToken();
+                        }}
                         onClick={() => setLiveTalkOpen(true)}
                         aria-label="Open Live Talk"
                         data-tooltip="Live Talk"
