@@ -1113,18 +1113,43 @@ export const chatApi = {
         data = { text: rawData };
       }
 
-      if (eventName === 'status') {
+      // Backends/proxies can omit the SSE event name and send a completion
+      // marker in the JSON payload instead. Treat every supported completion
+      // shape as terminal so the composer never remains in a loading state.
+      const payloadDone =
+        data === '[DONE]' ||
+        data?.done === true ||
+        data?.complete === true ||
+        data?.finished === true ||
+        data?.status === 'done' ||
+        data?.status === 'completed' ||
+        (eventName === 'message' && typeof data?.response === 'string');
+
+      if (eventName === 'status' && payloadDone) {
+        finalData = data || {};
+        if (typeof finalData.response !== 'string' && streamedResponse) {
+          finalData = { ...finalData, response: streamedResponse };
+        }
+        doneEventSeen = true;
+      } else if (eventName === 'status') {
         handlers.onStatus?.(typeof data?.status === 'string' ? data.status : 'thinking');
       } else if (eventName === 'delta') {
+        if (payloadDone) {
+          finalData = data || {};
+          if (typeof finalData.response !== 'string' && streamedResponse) {
+            finalData = { ...finalData, response: streamedResponse };
+          }
+          doneEventSeen = true;
+          return;
+        }
         const text = typeof data?.text === 'string' ? data.text : '';
         if (text) {
           streamedResponse += text;
           handlers.onDelta?.(text);
         }
-      } else if (eventName === 'done') {
-        // `done` is the authoritative end-of-generation signal. Some
-        // deployments keep the HTTP connection open briefly after emitting
-        // this event, so do not wait for the network connection to close.
+      } else if (eventName === 'done' || payloadDone) {
+        // `done` is authoritative. Do not wait for the HTTP connection to
+        // close after the server has declared generation complete.
         finalData = data || {};
         if (typeof finalData.response !== 'string' && streamedResponse) {
           finalData = { ...finalData, response: streamedResponse };
