@@ -76,19 +76,6 @@ function SidebarPinIcon({ className = '' }: { className?: string }) {
   );
 }
 
-const getGroupLabel = (session: Session): string => {
-  const raw = (session as any).createdAt || (session as any).created_at;
-  if (!raw) return 'Recent';
-  const date = new Date(raw);
-  const now = new Date();
-  const diffDays = Math.floor((now.getTime() - date.getTime()) / 86_400_000);
-  if (diffDays === 0) return 'Today';
-  if (diffDays === 1) return 'Yesterday';
-  if (diffDays < 7) return 'This Week';
-  if (diffDays < 30) return 'This Month';
-  return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-};
-
 // ─── IconTooltip ──────────────────────────────────────────────────────────────
 function IconTooltip({
   label,
