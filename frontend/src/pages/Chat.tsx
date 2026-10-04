@@ -1291,12 +1291,15 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           setVoiceSpeechDetected(true);
 
           if (voiceTranscribingRef.current) {
+            // A transcription packet means Gemini has produced new text after
+            // Stop was pressed. Debounce the commit so the composer receives
+            // the complete final phrase instead of committing too early.
             if (voiceTranscriptionSettleTimerRef.current !== null) {
               window.clearTimeout(voiceTranscriptionSettleTimerRef.current);
             }
             voiceTranscriptionSettleTimerRef.current = window.setTimeout(() => {
               voiceTranscriptionSettleTimerRef.current = null;
-            }, 700);
+            }, 650);
           }
 
           if (voiceSpeechTimerRef.current !== null) window.clearTimeout(voiceSpeechTimerRef.current);
@@ -1542,10 +1545,11 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       });
     };
 
-    // Most final transcription packets arrive quickly. The longer timeout is
-    // only a safety net for a slower network/browser.
-    voiceTranscriptionSettleTimerRef.current = window.setTimeout(finalize, 1000);
-    voiceTranscriptionMaxTimerRef.current = window.setTimeout(finalize, 3000);
+    // Give Gemini time to return the final input-transcription packet. If a
+    // packet arrives, the message handler above debounces and commits it.
+    // This timer is only the fallback when no packet arrives at all.
+    voiceTranscriptionSettleTimerRef.current = window.setTimeout(finalize, 1800);
+    voiceTranscriptionMaxTimerRef.current = window.setTimeout(finalize, 5000);
   }, [commitVoiceInput, stopGeminiDictationCapture, voiceCaptureStopped, voiceInputActive, voiceTranscribing]);
 
   const startVoiceInput = useCallback(() => {
