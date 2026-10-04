@@ -1265,76 +1265,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       setVoiceInputActive(true);
     });
 
-    // Browser SpeechRecognition is a fast interim STT path. It is started
-    // only after getUserMedia succeeds so Chrome does not have to arbitrate
-    // two microphone acquisition paths at the same instant.
-    const startBrowserRecognition = () => {
-      try {
-        const SpeechRecognitionCtor =
-        (window as any).SpeechRecognition ||
-        (window as any).webkitSpeechRecognition;
-
-      if (SpeechRecognitionCtor) {
-        const recognition = new SpeechRecognitionCtor();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = navigator.language || 'en-US';
-        recognition.maxAlternatives = 1;
-        recognition.onresult = (event: any) => {
-          if (attempt !== voiceStartRef.current) return;
-          let transcript = '';
-          for (let i = 0; i < event.results.length; i += 1) {
-            transcript += String(event.results[i]?.[0]?.transcript || '');
-          }
-          transcript = transcript.trim();
-          if (transcript) {
-            voiceDraftRef.current = transcript;
-            setVoiceDraftVersion(version => version + 1);
-          }
-        };
-
-        recognition.onstart = () => {
-          if (attempt === voiceStartRef.current && voiceBrowserRecognitionRef.current === recognition) {
-            voiceBrowserRecognitionActiveRef.current = true;
-          }
-        };
-
-        recognition.onerror = (_event: any) => {
-          // Never let a browser-recognition failure disable the microphone
-          // pipeline. Gemini remains available as the fallback.
-          voiceBrowserRecognitionActiveRef.current = false;
-          voiceBrowserRecognitionRef.current = null;
-        };
-
-        recognition.onend = () => {
-          if (voiceBrowserStopRequestedRef.current) {
-            voiceBrowserRecognitionActiveRef.current = false;
-            voiceBrowserRecognitionRef.current = null;
-            voiceBrowserStopResolverRef.current?.();
-            voiceBrowserStopResolverRef.current = null;
-            return;
-          }
-          if (attempt !== voiceStartRef.current || voiceBrowserRecognitionRef.current !== recognition) return;
-          window.setTimeout(() => {
-            if (attempt !== voiceStartRef.current || voiceBrowserRecognitionRef.current !== recognition || voiceBrowserStopRequestedRef.current) return;
-            try { recognition.start(); } catch {}
-          }, 0);
-        };
-
-        voiceBrowserRecognitionRef.current = recognition;
-        voiceBrowserRecognitionActiveRef.current = false;
-        try {
-          recognition.start();
-        } catch {
-          voiceBrowserRecognitionActiveRef.current = false;
-          voiceBrowserRecognitionRef.current = null;
-        }
-      }
-      } catch {
-        voiceBrowserRecognitionRef.current = null;
-        voiceBrowserRecognitionActiveRef.current = false;
-      }
-    };
+    // Browser recognition is started only after getUserMedia succeeds so it
+    // cannot race with microphone permission/device initialization.
 
     // Start requesting the session token immediately, in parallel with the
     // microphone permission request, so the actual listening pipeline starts
@@ -1357,9 +1289,66 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         return;
       }
       voiceStreamRef.current = stream;
+      // Start browser-native recognition only after the microphone stream is
+      // successfully acquired. This avoids Chrome microphone-resource races.
+      try {
+        const SpeechRecognitionCtor =
+          (window as any).SpeechRecognition ||
+          (window as any).webkitSpeechRecognition;
 
-      // Start browser STT as soon as the microphone is actually available.
-      startBrowserRecognition();
+        if (SpeechRecognitionCtor) {
+          const recognition = new SpeechRecognitionCtor();
+          recognition.continuous = true;
+          recognition.interimResults = true;
+          recognition.lang = navigator.language || 'en-US';
+          recognition.maxAlternatives = 1;
+
+          recognition.onresult = (event: any) => {
+            if (attempt !== voiceStartRef.current) return;
+            let transcript = '';
+            for (let i = 0; i < event.results.length; i += 1) {
+              transcript += String(event.results[i]?.[0]?.transcript || '');
+            }
+            transcript = transcript.trim();
+            if (transcript) {
+              voiceDraftRef.current = transcript;
+              setVoiceDraftVersion(version => version + 1);
+            }
+          };
+
+          recognition.onerror = (event: any) => {
+            if (event?.error === 'not-allowed' || event?.error === 'service-not-allowed') {
+              voiceBrowserRecognitionActiveRef.current = false;
+              voiceBrowserRecognitionRef.current = null;
+            }
+          };
+
+          recognition.onend = () => {
+            if (voiceBrowserStopRequestedRef.current) {
+              voiceBrowserRecognitionActiveRef.current = false;
+              voiceBrowserRecognitionRef.current = null;
+              voiceBrowserStopResolverRef.current?.();
+              voiceBrowserStopResolverRef.current = null;
+              return;
+            }
+            if (attempt !== voiceStartRef.current || voiceBrowserRecognitionRef.current !== recognition) return;
+            window.setTimeout(() => {
+              if (attempt !== voiceStartRef.current || voiceBrowserRecognitionRef.current !== recognition || voiceBrowserStopRequestedRef.current) return;
+              try { recognition.start(); } catch {}
+            }, 0);
+          };
+
+          voiceBrowserRecognitionRef.current = recognition;
+          voiceBrowserRecognitionActiveRef.current = true;
+          try { recognition.start(); } catch {
+            voiceBrowserRecognitionActiveRef.current = false;
+            voiceBrowserRecognitionRef.current = null;
+          }
+        }
+      } catch {
+        voiceBrowserRecognitionRef.current = null;
+        voiceBrowserRecognitionActiveRef.current = false;
+      }
 
       const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioContextCtor) throw new Error('Web Audio is not supported in this browser.');
@@ -1412,59 +1401,61 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
       // Use AudioWorklet instead of deprecated ScriptProcessorNode. The
       // worklet runs off the main thread and keeps capture latency stable.
-      // The browser STT path above is the primary low-latency path. The
-      // Gemini PCM path is an enhancement/fallback and must never prevent the
-      // microphone UI from working if AudioWorklet is unavailable.
+      const workletBlob = new Blob(
+        [VOICE_PCM_WORKLET_SOURCE],
+        { type: 'application/javascript' },
+      );
+      const workletUrl = URL.createObjectURL(workletBlob);
+
       try {
-        const workletBlob = new Blob(
-          [VOICE_PCM_WORKLET_SOURCE],
-          { type: 'application/javascript' },
-        );
-        const workletUrl = URL.createObjectURL(workletBlob);
-        try {
-          await context.audioWorklet.addModule(workletUrl);
-        } finally {
-          URL.revokeObjectURL(workletUrl);
-        }
-
-        const processor = new AudioWorkletNode(context, 'twinkle-voice-capture');
-        const silentGain = context.createGain();
-        silentGain.gain.value = 0;
-
-        processor.port.onmessage = event => {
-          if (attempt !== voiceStartRef.current) return;
-          try {
-            const pcmBytes = new Uint8Array(event.data as ArrayBuffer);
-            const encodedPcm = bytesToBase64(pcmBytes);
-            const activeSocket = voiceSocketRef.current;
-            if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
-              voicePendingPcmRef.current.push(encodedPcm);
-              if (voicePendingPcmRef.current.length > 100) voicePendingPcmRef.current.shift();
-              return;
-            }
-            activeSocket.send(JSON.stringify({
-              realtimeInput: { audio: { data: encodedPcm, mimeType: 'audio/pcm;rate=16000' } },
-            }));
-          } catch {}
-        };
-
-        source.connect(inputGain);
-        inputGain.connect(inputCompressor);
-        inputCompressor.connect(analyser);
-        inputCompressor.connect(processor);
-        processor.connect(silentGain);
-        silentGain.connect(context.destination);
-
-        voiceInputGainRef.current = inputGain;
-        voiceInputCompressorRef.current = inputCompressor;
-        voiceProcessorRef.current = processor;
-        voiceSilentGainRef.current = silentGain;
-      } catch (workletError) {
-        console.warn('Twinkle PCM AudioWorklet unavailable; using browser speech recognition.', workletError);
-        // Keep the analyser alive for the listening animation and do not
-        // cancel the session just because the optional PCM transport failed.
-        source.connect(analyser);
+        await context.audioWorklet.addModule(workletUrl);
+      } finally {
+        URL.revokeObjectURL(workletUrl);
       }
+
+      const processor = new AudioWorkletNode(context, 'twinkle-voice-capture');
+      const silentGain = context.createGain();
+      silentGain.gain.value = 0;
+
+      processor.port.onmessage = event => {
+        if (attempt !== voiceStartRef.current) return;
+
+        try {
+          const pcmBytes = new Uint8Array(event.data as ArrayBuffer);
+          const encodedPcm = bytesToBase64(pcmBytes);
+          const activeSocket = voiceSocketRef.current;
+
+          if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
+            voicePendingPcmRef.current.push(encodedPcm);
+            if (voicePendingPcmRef.current.length > 100) {
+              voicePendingPcmRef.current.shift();
+            }
+            return;
+          }
+
+          activeSocket.send(JSON.stringify({
+            realtimeInput: {
+              audio: {
+                data: encodedPcm,
+                mimeType: 'audio/pcm;rate=16000',
+              },
+            },
+          }));
+        } catch {}
+      };
+
+      // Meter the enhanced signal, not the raw quiet microphone signal.
+      source.connect(inputGain);
+      inputGain.connect(inputCompressor);
+      inputCompressor.connect(analyser);
+      inputCompressor.connect(processor);
+      processor.connect(silentGain);
+      silentGain.connect(context.destination);
+
+      voiceInputGainRef.current = inputGain;
+      voiceInputCompressorRef.current = inputCompressor;
+      voiceProcessorRef.current = processor;
+      voiceSilentGainRef.current = silentGain;
 
       const { token, model } = await liveTokenPromise;
       if (attempt !== voiceStartRef.current) return;
@@ -3518,59 +3509,46 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                       <X className="h-[20px] w-[20px]" strokeWidth={2.05} />
                     </motion.button>
 
-                    {/* Listening indicator: dots when quiet, live bars only while sound is detected. */}
+                    {/* Sound-state flow: quiet microphone = flowing dots; speech = vertical bars. */}
                     <div
-                      className="relative flex min-w-0 flex-1 items-center overflow-hidden px-2"
-                      aria-hidden="true"
+                      className="relative flex h-10 min-w-0 flex-1 items-center overflow-hidden px-2"
+                      aria-label={voiceSpeechDetected ? 'Sound detected' : 'Listening'}
                     >
-                      {!voiceSpeechDetected ? (
-                        <div className="absolute inset-x-2 top-1/2 h-[6px] -translate-y-1/2 overflow-hidden">
-                          <motion.div
-                            className="flex w-max items-center gap-[5px]"
-                            animate={{ x: ['0%', '-18%'] }}
-                            transition={{ duration: 2.4, repeat: Infinity, ease: 'linear' }}
-                          >
-                            {[...Array(96)].map((_, index) => (
-                              <motion.span
-                                key={index}
-                                className="h-[5px] w-[5px] shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600"
-                                animate={{ opacity: [0.42, 0.92, 0.42] }}
-                                transition={{
-                                  duration: 1.15,
-                                  repeat: Infinity,
-                                  delay: (index % 12) * 0.045,
-                                  ease: 'easeInOut',
-                                }}
-                              />
-                            ))}
-                          </motion.div>
+                      {voiceSpeechDetected ? (
+                        <div className="flex h-full w-full items-center justify-center gap-[3px]" aria-hidden="true">
+                          {[...Array(28)].map((_, index) => (
+                            <motion.span
+                              key={index}
+                              className="w-[3px] rounded-full bg-zinc-500 dark:bg-zinc-300"
+                              animate={{
+                                height: [7, 16 + ((index * 7) % 24), 9, 22 + ((index * 5) % 18), 7],
+                                opacity: [0.55, 1, 0.7, 1, 0.55],
+                              }}
+                              transition={{
+                                duration: 0.65,
+                                repeat: Infinity,
+                                delay: index * 0.025,
+                                ease: 'easeInOut',
+                              }}
+                            />
+                          ))}
                         </div>
                       ) : (
-                        <motion.div
-                          className="absolute inset-x-2 top-1/2 flex h-10 -translate-y-1/2 items-center justify-center gap-[3px] overflow-hidden"
-                          initial={{ opacity: 0.55 }}
-                          animate={{ opacity: [0.72, 1, 0.72] }}
-                          transition={{ duration: 0.7, repeat: Infinity, ease: 'easeInOut' }}
-                        >
-                          {[...Array(54)].map((_, index) => {
-                            const heights = [7, 12, 18, 10, 24, 14, 30, 20, 36, 26, 42, 31, 22, 38, 28, 46, 24, 34, 17, 40, 27, 35, 14, 30, 21, 39, 25, 17, 34, 23, 37, 15, 29, 20, 35, 25];
-                            const height = heights[index % heights.length];
-                            return (
-                              <motion.span
-                                key={index}
-                                className="w-[3px] shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500"
-                                style={{ height: `${Math.max(6, height * 0.72)}px`, transformOrigin: 'center' }}
-                                animate={{ scaleY: [0.42, 1, 0.58, 0.9, 0.42] }}
-                                transition={{
-                                  duration: 0.62 + (index % 5) * 0.06,
-                                  repeat: Infinity,
-                                  delay: (index % 11) * 0.035,
-                                  ease: 'easeInOut',
-                                }}
-                              />
-                            );
-                          })}
-                        </motion.div>
+                        <div className="flex w-full items-center justify-center gap-[7px]" aria-hidden="true">
+                          {[...Array(34)].map((_, index) => (
+                            <motion.span
+                              key={index}
+                              className="h-[3px] w-[3px] shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500"
+                              animate={{ x: [0, 8, 0], opacity: [0.35, 1, 0.35] }}
+                              transition={{
+                                duration: 1.15,
+                                repeat: Infinity,
+                                delay: index * 0.035,
+                                ease: 'linear',
+                              }}
+                            />
+                          ))}
+                        </div>
                       )}
                     </div>
 
