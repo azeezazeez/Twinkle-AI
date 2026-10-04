@@ -1251,15 +1251,12 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
   const startVoiceInput = useCallback(async () => {
     if (voiceInputActive || isTyping || isProcessingFiles || voiceCommitInProgressRef.current) return;
+
+    // Enter listening mode before any permission, device, token, or network
+    // operation. The user should see immediate feedback from the mic click.
+    const attempt = ++voiceStartRef.current;
     voiceCommitInProgressRef.current = false;
     setVoiceCaptureStopped(false);
-
-    if (!navigator.mediaDevices?.getUserMedia) {
-      window.alert('Microphone access is not supported in this browser. Please use a current Chrome, Edge, or Safari browser.');
-      return;
-    }
-
-    const attempt = ++voiceStartRef.current;
     voiceBaseInputRef.current = input.trim();
     voiceDraftRef.current = '';
     voiceFinalTranscriptRef.current = '';
@@ -1268,13 +1265,18 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     voicePendingPcmRef.current = [];
     voiceSpeechDetectedRef.current = false;
 
-    // Paint the listening composer immediately on the same click before
-    // microphone permission/token/network work begins.
     flushSync(() => {
       setVoiceDraftVersion(version => version + 1);
       setVoiceSpeechDetected(false);
       setVoiceInputActive(true);
     });
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setVoiceInputActive(false);
+      voiceStartRef.current += 1;
+      window.alert('Microphone access is not supported in this browser. Please use a current Chrome, Edge, or Safari browser.');
+      return;
+    }
 
     // Browser recognition is started only after getUserMedia succeeds so it
     // cannot race with microphone permission/device initialization.
