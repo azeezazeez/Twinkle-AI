@@ -1123,6 +1123,9 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const voiceGeminiSilentGainRef = useRef<GainNode | null>(null);
   const voiceGeminiFallbackActiveRef = useRef(false);
   const voiceGeminiPendingPcmRef = useRef<string[]>([]);
+  const voiceGeminiSetupReadyRef = useRef(false);
+  const voiceGeminiAudioEndedRef = useRef(false);
+  const voiceFinalizeRef = useRef<(() => void) | null>(null);
   const [voiceDraftVersion, setVoiceDraftVersion] = useState(0);
   const [voiceLiveTranscript, setVoiceLiveTranscript] = useState('');
   const [voiceSpeechDetected, setVoiceSpeechDetected] = useState(false);
@@ -1147,6 +1150,9 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const stopGeminiDictationFallback = useCallback(() => {
     voiceGeminiFallbackActiveRef.current = false;
     voiceGeminiPendingPcmRef.current = [];
+    voiceGeminiSetupReadyRef.current = false;
+    voiceGeminiAudioEndedRef.current = false;
+    voiceFinalizeRef.current = null;
 
     if (voiceTranscriptionSettleTimerRef.current !== null) {
       window.clearTimeout(voiceTranscriptionSettleTimerRef.current);
@@ -1274,10 +1280,44 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         }));
       };
 
+      const flushQueue = () => {
+        const liveSocket = voiceGeminiSocketRef.current;
+        if (liveSocket?.readyState !== WebSocket.OPEN || !voiceGeminiSetupReadyRef.current) return;
+
+        const queued = voiceGeminiPendingPcmRef.current.splice(0);
+        for (const data of queued) {
+          try {
+            liveSocket.send(JSON.stringify({
+              realtimeInput: { audio: { data, mimeType: 'audio/pcm;rate=16000' } },
+            }));
+          } catch {
+            break;
+          }
+        }
+
+        if (voiceGeminiAudioEndedRef.current) {
+          try {
+            liveSocket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
+          } catch {}
+        }
+      };
+
       socket.onmessage = async event => {
         if (attempt !== voiceStartRef.current || !voiceDictationWantedRef.current) return;
+
         try {
           const message = await decodeGeminiLiveMessage(event.data);
+
+          // Gemini Live requires the setup handshake to complete before
+          // realtime audio can be sent. The previous implementation could
+          // send audio immediately after WebSocket open, which is a race on
+          // slower browsers and could result in no transcription at all.
+          if (message?.setupComplete) {
+            voiceGeminiSetupReadyRef.current = true;
+            flushQueue();
+            return;
+          }
+
           const text = String(message?.serverContent?.inputTranscription?.text || '');
           if (!text.trim()) return;
 
@@ -1291,15 +1331,16 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           setVoiceSpeechDetected(true);
 
           if (voiceTranscribingRef.current) {
-            // A transcription packet means Gemini has produced new text after
-            // Stop was pressed. Debounce the commit so the composer receives
-            // the complete final phrase instead of committing too early.
+            // Every final transcription packet resets the settle timer.
+            // When Gemini has been quiet for 700ms, commit the complete
+            // transcript to the actual composer.
             if (voiceTranscriptionSettleTimerRef.current !== null) {
               window.clearTimeout(voiceTranscriptionSettleTimerRef.current);
             }
             voiceTranscriptionSettleTimerRef.current = window.setTimeout(() => {
               voiceTranscriptionSettleTimerRef.current = null;
-            }, 650);
+              voiceFinalizeRef.current?.();
+            }, 700);
           }
 
           if (voiceSpeechTimerRef.current !== null) window.clearTimeout(voiceSpeechTimerRef.current);
@@ -1331,7 +1372,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         if (!voiceGeminiFallbackActiveRef.current || attempt !== voiceStartRef.current) return;
         const data = pcm16ToBase64(buffer);
         const liveSocket = voiceGeminiSocketRef.current;
-        if (liveSocket?.readyState === WebSocket.OPEN) {
+        if (liveSocket?.readyState === WebSocket.OPEN && voiceGeminiSetupReadyRef.current) {
           try {
             liveSocket.send(JSON.stringify({
               realtimeInput: { audio: { data, mimeType: 'audio/pcm;rate=16000' } },
@@ -1379,23 +1420,6 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       voiceGeminiProcessorRef.current = processor as AudioWorkletNode;
       voiceGeminiSilentGainRef.current = silentGain;
 
-      const flushQueue = () => {
-        const liveSocket = voiceGeminiSocketRef.current;
-        if (liveSocket?.readyState !== WebSocket.OPEN) return;
-        const queued = voiceGeminiPendingPcmRef.current.splice(0);
-        for (const data of queued) {
-          try {
-            liveSocket.send(JSON.stringify({ realtimeInput: { audio: { data, mimeType: 'audio/pcm;rate=16000' } } }));
-          } catch {
-            break;
-          }
-        }
-      };
-      const previousOnOpen = socket.onopen;
-      socket.onopen = event => {
-        previousOnOpen?.call(socket, event);
-        window.setTimeout(flushQueue, 0);
-      };
     } catch (error) {
       console.warn('Twinkle Gemini dictation fallback failed:', error);
       stopGeminiDictationFallback();
@@ -1513,8 +1537,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     voiceTranscribingRef.current = true;
     setVoiceSpeechDetected(false);
 
+    voiceGeminiAudioEndedRef.current = true;
+
     const socket = voiceGeminiSocketRef.current;
-    if (socket?.readyState === WebSocket.OPEN) {
+    if (socket?.readyState === WebSocket.OPEN && voiceGeminiSetupReadyRef.current) {
       try {
         socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
       } catch {}
@@ -1545,11 +1571,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       });
     };
 
-    // Give Gemini time to return the final input-transcription packet. If a
-    // packet arrives, the message handler above debounces and commits it.
-    // This timer is only the fallback when no packet arrives at all.
-    voiceTranscriptionSettleTimerRef.current = window.setTimeout(finalize, 1800);
-    voiceTranscriptionMaxTimerRef.current = window.setTimeout(finalize, 5000);
+    // The message handler calls this after the final transcription packet has
+    // settled. The max timer is only a safety net for a provider/network delay.
+    voiceFinalizeRef.current = finalize;
+    voiceTranscriptionMaxTimerRef.current = window.setTimeout(finalize, 7000);
   }, [commitVoiceInput, stopGeminiDictationCapture, voiceCaptureStopped, voiceInputActive, voiceTranscribing]);
 
   const startVoiceInput = useCallback(() => {
