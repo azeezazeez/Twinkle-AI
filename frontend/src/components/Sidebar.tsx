@@ -36,12 +36,14 @@ interface Props {
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PINNED_KEY = 'Twinkle_pinned_sessions';
 const SIDEBAR_SEEN_KEY = 'Twinkle_sidebar_seen';
+const PINNED_CHANGED_EVENT = 'twinkle:pinned-sessions-changed';
 
 const loadPinnedIds = (): number[] => {
   try { return JSON.parse(localStorage.getItem(PINNED_KEY) || '[]'); } catch { return []; }
 };
 const savePinnedIds = (ids: number[]) => {
   localStorage.setItem(PINNED_KEY, JSON.stringify(ids));
+  window.dispatchEvent(new Event(PINNED_CHANGED_EVENT));
 };
 
 const getGroupLabel = (session: Session): string => {
@@ -59,12 +61,25 @@ const getGroupLabel = (session: Session): string => {
 
 // ─── Shared Twinkle logo ─────────────────────────────────────────────────────
 // ─── IconTooltip ──────────────────────────────────────────────────────────────
-function IconTooltip({ label, children }: { label: string; children: ReactNode }) {
+function IconTooltip({
+  label,
+  shortcut,
+  children,
+}: {
+  label: string;
+  shortcut?: string;
+  children: ReactNode;
+}) {
   return (
     <div className="relative group/tip flex items-center justify-center w-full">
       {children}
-      <div className="absolute left-full ml-3 px-3 py-1.5 bg-zinc-900 text-white text-[13px] font-semibold rounded-full whitespace-nowrap pointer-events-none z-[300] shadow-lg opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150">
-        {label}
+      <div className="absolute left-full ml-3 flex items-center gap-2.5 px-3 py-1.5 bg-zinc-900 text-white text-[13px] font-semibold rounded-full whitespace-nowrap pointer-events-none z-[300] shadow-[0_10px_30px_rgba(0,0,0,0.16)] opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150">
+        <span>{label}</span>
+        {shortcut && (
+          <kbd className="rounded-full bg-zinc-600 px-2 py-0.5 text-[12px] font-semibold leading-5 text-zinc-100 shadow-inner">
+            {shortcut}
+          </kbd>
+        )}
         <div className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-zinc-900" />
       </div>
     </div>
@@ -156,6 +171,111 @@ function CollapsedRecentsPopup({
                     : 'text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800/80'
                 }`}
               >
+                <span className="min-w-0 flex-1 truncate">{title}</span>
+              </button>
+            );
+          })
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── Collapsed-sidebar Pinned popup ───────────────────────────────────────────
+function CollapsedPinnedPopup({
+  sessions,
+  currentSessionId,
+  pinnedIds,
+  onSelectSession,
+  onClose,
+}: {
+  sessions: Session[];
+  currentSessionId: number | null;
+  pinnedIds: number[];
+  onSelectSession: (id: number) => void;
+  onClose: () => void;
+}) {
+  const popupRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!popupRef.current?.contains(event.target as Node)) {
+        onClose();
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose]);
+
+  const pinnedSessions = [...sessions]
+    .filter(session => pinnedIds.includes(Number(session.id)))
+    .sort((a, b) => {
+      const aTime = new Date(
+        (a as any).updatedAt || (a as any).updated_at || (a as any).createdAt || 0
+      ).getTime();
+      const bTime = new Date(
+        (b as any).updatedAt || (b as any).updated_at || (b as any).createdAt || 0
+      ).getTime();
+      return bTime - aTime;
+    })
+    .slice(0, 12);
+
+  return (
+    <motion.div
+      ref={popupRef}
+      initial={{ opacity: 0, scale: 0.97, x: -4 }}
+      animate={{ opacity: 1, scale: 1, x: 0 }}
+      exit={{ opacity: 0, scale: 0.97, x: -4 }}
+      transition={{ duration: 0.14, ease: 'easeOut' }}
+      className="fixed left-[58px] top-[278px] z-[2147483647] w-[370px] overflow-hidden rounded-[20px] border border-zinc-200 bg-white shadow-[0_12px_35px_rgba(0,0,0,0.12)] dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-[0_12px_35px_rgba(0,0,0,0.35)]"
+      onPointerDown={event => event.stopPropagation()}
+    >
+      <div className="px-7 pb-2 pt-6">
+        <h3 className="text-[15px] font-medium tracking-tight text-zinc-500 dark:text-zinc-400">
+          Pinned
+        </h3>
+      </div>
+
+      <div className="max-h-[360px] overflow-y-auto px-3 pb-3">
+        {pinnedSessions.length === 0 ? (
+          <div className="px-4 py-6 text-[14px] text-zinc-400 dark:text-zinc-500">
+            No pinned chats
+          </div>
+        ) : (
+          pinnedSessions.map(session => {
+            const id = Number(session.id);
+            const title = String(
+              (session as any).sessionName || (session as any).name || 'New Chat'
+            );
+            const isActive = id === currentSessionId;
+
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => {
+                  onSelectSession(id);
+                  onClose();
+                }}
+                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-[15px] transition-colors ${
+                  isActive
+                    ? 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
+                    : 'text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800/80'
+                }`}
+              >
+                <Pin className="h-[17px] w-[17px] shrink-0 text-zinc-400" strokeWidth={1.8} />
                 <span className="min-w-0 flex-1 truncate">{title}</span>
               </button>
             );
@@ -953,7 +1073,21 @@ export default function Sidebar({
   });
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [recentsPopupOpen, setRecentsPopupOpen] = useState(false);
+  const [pinnedPopupOpen, setPinnedPopupOpen] = useState(false);
+  const [pinnedIds, setPinnedIds] = useState<number[]>(loadPinnedIds);
   const resizingRef = useRef(false);
+
+  useEffect(() => {
+    const syncPinned = () => setPinnedIds(loadPinnedIds());
+
+    window.addEventListener(PINNED_CHANGED_EVENT, syncPinned);
+    window.addEventListener('storage', syncPinned);
+
+    return () => {
+      window.removeEventListener(PINNED_CHANGED_EVENT, syncPinned);
+      window.removeEventListener('storage', syncPinned);
+    };
+  }, []);
 
   useEffect(() => {
     onDesktopWidthChange?.(desktopWidth);
@@ -986,6 +1120,7 @@ export default function Sidebar({
 
   const expandDesktop = useCallback(() => {
     setRecentsPopupOpen(false);
+    setPinnedPopupOpen(false);
     setDesktopCollapsed(false);
     onDesktopStateChange?.(true);
     localStorage.setItem(SIDEBAR_SEEN_KEY, '1');
@@ -993,6 +1128,7 @@ export default function Sidebar({
 
   const collapseDesktop = useCallback(() => {
     setRecentsPopupOpen(false);
+    setPinnedPopupOpen(false);
     setDesktopCollapsed(true);
     onDesktopStateChange?.(false);
     onClose();
@@ -1021,11 +1157,33 @@ export default function Sidebar({
 
   const openSearch = useCallback(() => {
     setSearchModalOpen(true);
+    setRecentsPopupOpen(false);
+    setPinnedPopupOpen(false);
     setDesktopCollapsed(true);
     onDesktopStateChange?.(false);
     onMobileClose?.();
     onClose();
   }, [onClose, onDesktopStateChange, onMobileClose]);
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      const modifier = event.ctrlKey || event.metaKey;
+
+      if (modifier && event.shiftKey && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        toggleDesktop();
+        return;
+      }
+
+      if (modifier && !event.shiftKey && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        openSearch();
+      }
+    };
+
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, [toggleDesktop, openSearch]);
 
   const listProps = {
     user,
@@ -1158,7 +1316,7 @@ export default function Sidebar({
       {desktopCollapsed && (
         <aside className="twinkle-sidebar hidden lg:flex fixed inset-y-0 left-0 z-[2147483645] w-14 bg-white dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 flex-col items-center py-4 shadow-sm">
           {/* Top brand / sidebar control */}
-          <IconTooltip label="Open sidebar">
+          <IconTooltip label="Toggle sidebar" shortcut="Ctrl+Shift+S">
             <button
               onClick={toggleDesktop}
               aria-label="Open sidebar"
@@ -1182,7 +1340,7 @@ export default function Sidebar({
 
 
 
-            <IconTooltip label="Search">
+            <IconTooltip label="Search" shortcut="Ctrl+K">
               <button
                 onClick={openSearch}
                 aria-label="Search"
@@ -1192,9 +1350,28 @@ export default function Sidebar({
               </button>
             </IconTooltip>
 
+            <IconTooltip label="Pinned">
+              <button
+                onClick={() => {
+                  setPinnedPopupOpen(current => !current);
+                  setRecentsPopupOpen(false);
+                }}
+                aria-label="Pinned"
+                aria-expanded={pinnedPopupOpen}
+                className={`w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-none ${
+                  pinnedPopupOpen ? 'bg-zinc-100 dark:bg-zinc-800' : ''
+                }`}
+              >
+                <Pin className="w-[20px] h-[20px]" strokeWidth={1.7} />
+              </button>
+            </IconTooltip>
+
             <IconTooltip label="Recents">
               <button
-                onClick={() => setRecentsPopupOpen(current => !current)}
+                onClick={() => {
+                  setRecentsPopupOpen(current => !current);
+                  setPinnedPopupOpen(false);
+                }}
                 aria-label="Recents"
                 aria-expanded={recentsPopupOpen}
                 className={`w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-none ${
@@ -1209,6 +1386,15 @@ export default function Sidebar({
           <div className="flex-1" />
 
           <AnimatePresence>
+            {pinnedPopupOpen && (
+              <CollapsedPinnedPopup
+                sessions={sessions}
+                currentSessionId={currentSessionId}
+                pinnedIds={pinnedIds}
+                onSelectSession={onSelectSession}
+                onClose={() => setPinnedPopupOpen(false)}
+              />
+            )}
             {recentsPopupOpen && (
               <CollapsedRecentsPopup
                 sessions={sessions}
