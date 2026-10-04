@@ -140,6 +140,9 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
   const assistantTurnRef = useRef('');
   const endingRef = useRef(false);
   const wakeLockRef = useRef<WakeLockSentinelLike | null>(null);
+  // Buffer microphone PCM while the Gemini Live socket is connecting so
+  // the user can start speaking immediately without losing the first words.
+  const pendingPcmRef = useRef<string[]>([]);
 
   const [connected, setConnected] = useState(false);
   const [listening, setListening] = useState(false);
@@ -344,6 +347,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     processorRef.current = null;
     sourceRef.current = null;
     silentGainRef.current = null;
+    pendingPcmRef.current = [];
 
     streamRef.current?.getTracks().forEach(track => track.stop());
     streamRef.current = null;
@@ -446,15 +450,23 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     silentGain.gain.value = 0;
 
     processor.port.onmessage = event => {
-      const activeSocket = socketRef.current;
-      if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) return;
-
       try {
         const pcmBytes = new Uint8Array(event.data as ArrayBuffer);
+        const encodedPcm = bytesToBase64(pcmBytes);
+        const activeSocket = socketRef.current;
+
+        if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
+          // Keep a short startup buffer. This lets the user speak immediately
+          // while the token/WebSocket/Live setup finishes.
+          pendingPcmRef.current.push(encodedPcm);
+          if (pendingPcmRef.current.length > 150) pendingPcmRef.current.shift();
+          return;
+        }
+
         activeSocket.send(JSON.stringify({
           realtimeInput: {
             audio: {
-              data: bytesToBase64(pcmBytes),
+              data: encodedPcm,
               mimeType: 'audio/pcm;rate=16000',
             },
           },
@@ -499,8 +511,12 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
         throw new Error('Microphone access is not supported in this browser.');
       }
 
-      // Ask for the microphone from the original click before the network work.
-      const stream = await navigator.mediaDevices.getUserMedia({
+      // Start the token request at the exact same time as microphone
+      // permission. Neither operation waits for the other.
+      const tokenPromise = createLiveToken(voiceName, appLanguage);
+      tokenPromise.catch(() => undefined);
+
+      const streamPromise = navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
           echoCancellation: true,
@@ -508,7 +524,9 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
           autoGainControl: true,
         },
       });
-      if (attempt !== connectAttemptRef.current) {
+
+      const stream = await streamPromise;
+      if (attempt !== connectAttemptRef.current || endingRef.current) {
         stream.getTracks().forEach(track => track.stop());
         return;
       }
@@ -518,13 +536,13 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
       if (!AudioContextCtor) throw new Error('Web Audio is not supported in this browser.');
       const context = new AudioContextCtor();
       audioContextRef.current = context;
-      await context.resume();
+      if (context.state === 'suspended') await context.resume();
 
-      // Start microphone capture before any token/network work so Live Talk
-      // becomes an active listening session as soon as the modal opens.
+      // Build the microphone pipeline while the token request is still in
+      // flight. Audio is buffered until Gemini's setup is complete.
       await startInputRef.current?.();
 
-      const { token, model } = await createLiveToken(voiceName, appLanguage);
+      const { token, model } = await tokenPromise;
       if (endingRef.current || attempt !== connectAttemptRef.current) return;
 
       const socket = new WebSocket(
@@ -579,7 +597,26 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
           if (message.setupComplete) {
             setConnected(true);
             setStatus('Listening');
-            // Start streaming immediately. No second popup or start button.
+
+            // Send any speech captured while authentication/WebSocket setup
+            // was in progress. This is what makes Live Talk feel as immediate
+            // as the Mic/dictation button without losing the first words.
+            const queuedAudio = pendingPcmRef.current.splice(0);
+            for (const data of queuedAudio) {
+              if (socket.readyState !== WebSocket.OPEN) break;
+              try {
+                socket.send(JSON.stringify({
+                  realtimeInput: {
+                    audio: { data, mimeType: 'audio/pcm;rate=16000' },
+                  },
+                }));
+              } catch {
+                break;
+              }
+            }
+
+            // The microphone pipeline is normally already active. Keep this
+            // call as a safe no-op fallback for reconnect/setup races.
             await startInputRef.current?.();
             return;
           }
