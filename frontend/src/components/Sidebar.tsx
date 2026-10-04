@@ -73,10 +73,10 @@ function IconTooltip({
   return (
     <div className="relative group/tip flex items-center justify-center w-full">
       {children}
-      <div className="absolute left-full ml-3 flex items-center gap-2 px-4 py-2.5 bg-[#111111] text-white text-[15px] font-semibold rounded-full whitespace-nowrap pointer-events-none z-[300] shadow-[0_12px_32px_rgba(0,0,0,0.18)] opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150">
+      <div className="absolute left-full ml-2.5 flex items-center gap-2 px-3.5 py-2 bg-[#111111] text-white text-[14px] font-semibold rounded-full whitespace-nowrap pointer-events-none z-[300] shadow-[0_12px_32px_rgba(0,0,0,0.18)] opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150">
         <span>{label}</span>
         {shortcut && (
-          <kbd className="rounded-full bg-zinc-600 px-2.5 py-0.5 text-[14px] font-semibold leading-5 text-zinc-100 shadow-inner">
+          <kbd className="rounded-full bg-zinc-600 px-2 py-0.5 text-[13px] font-semibold leading-5 text-zinc-100 shadow-inner">
             {shortcut}
           </kbd>
         )}
@@ -1334,20 +1334,20 @@ export default function Sidebar({
           DESKTOP COLLAPSED ICON RAIL  (lg+ only)
       ═══════════════════════════════════════════════════ */}
       {desktopCollapsed && (
-        <aside className="twinkle-sidebar group/collapsed hidden lg:flex fixed inset-y-0 left-0 z-[2147483645] w-[98px] bg-white dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 flex-col items-center pt-4 pb-4 shadow-sm">
+        <aside className="twinkle-sidebar group/collapsed hidden lg:flex fixed inset-y-0 left-0 z-[2147483645] w-[56px] bg-white dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 flex-col items-center pt-4 pb-4 shadow-sm">
           {/* Brand stays visible. Only the sidebar toggle replaces it while hovering. */}
           <IconTooltip label="Toggle sidebar" shortcut="Ctrl+Shift+S">
-            <div className="relative flex h-11 w-11 items-center justify-center">
+            <div className="relative flex h-10 w-10 items-center justify-center">
               <button
                 type="button"
                 onClick={toggleDesktop}
                 aria-label="Open sidebar"
-                className="group/sidebar-toggle relative flex h-11 w-11 items-center justify-center rounded-xl text-zinc-900 dark:text-white"
+                className="group/sidebar-toggle relative flex h-10 w-10 items-center justify-center rounded-xl text-zinc-900 dark:text-white"
               >
-              <StormLogo className="h-[35px] w-[35px] text-zinc-900 dark:text-white transition-opacity duration-100 group-hover/sidebar-toggle:opacity-0" />
+              <StormLogo className="h-[28px] w-[28px] text-zinc-900 dark:text-white transition-opacity duration-100 group-hover/sidebar-toggle:opacity-0" />
               <svg
-                width="30"
-                height="27"
+                width="26"
+                height="24"
                 viewBox="0 0 24 20"
                 fill="none"
                 aria-hidden="true"
@@ -1361,14 +1361,14 @@ export default function Sidebar({
           </IconTooltip>
 
           {/* Reference-style icon rail: identical button and icon sizing. */}
-          <div className="mt-9 flex w-full flex-col items-center gap-2">
+          <div className="mt-6 flex w-full flex-col items-center gap-1">
             <IconTooltip label="New Chat">
               <button
                 onClick={onNewSession}
                 aria-label="New Chat"
-                className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-900 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 transition-none"
+                className="flex h-10 w-10 items-center justify-center rounded-xl text-zinc-900 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 transition-none"
               >
-                <SquarePen className="h-[29px] w-[29px]" strokeWidth={1.8} />
+                <SquarePen className="h-[24px] w-[24px]" strokeWidth={1.8} />
               </button>
             </IconTooltip>
 
@@ -1376,9 +1376,9 @@ export default function Sidebar({
               <button
                 onClick={openSearch}
                 aria-label="Search"
-                className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-900 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 transition-none"
+                className="flex h-10 w-10 items-center justify-center rounded-xl text-zinc-900 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 transition-none"
               >
-                <Search className="h-[29px] w-[29px]" strokeWidth={1.9} />
+                <Search className="h-[24px] w-[24px]" strokeWidth={1.9} />
               </button>
             </IconTooltip>
 
@@ -1393,9 +1393,9 @@ export default function Sidebar({
                               }}
                 aria-label="Pinned"
                 aria-expanded={pinnedPopupOpen}
-                className={`flex h-11 w-11 items-center justify-center rounded-xl text-zinc-900 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 transition-none ${pinnedPopupOpen ? 'bg-zinc-100 dark:bg-zinc-800' : ''}`}
+                className={`flex h-10 w-10 items-center justify-center rounded-xl text-zinc-900 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 transition-none ${pinnedPopupOpen ? 'bg-zinc-100 dark:bg-zinc-800' : ''}`}
               >
-                <Pin className="h-[29px] w-[29px]" strokeWidth={1.8} />
+                <Pin className="h-[25px] w-[25px]" strokeWidth={1.9} />
               </button>
             </IconTooltip>
 
@@ -1410,9 +1410,9 @@ export default function Sidebar({
                               }}
                 aria-label="Recents"
                 aria-expanded={recentsPopupOpen}
-                className={`flex h-11 w-11 items-center justify-center rounded-xl text-zinc-900 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 transition-none ${recentsPopupOpen ? 'bg-zinc-100 dark:bg-zinc-800' : ''}`}
+                className={`flex h-10 w-10 items-center justify-center rounded-xl text-zinc-900 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 transition-none ${recentsPopupOpen ? 'bg-zinc-100 dark:bg-zinc-800' : ''}`}
               >
-                <MessageCircle className="h-[29px] w-[29px]" strokeWidth={1.8} />
+                <MessageCircle className="h-[24px] w-[24px]" strokeWidth={1.8} />
               </button>
             </IconTooltip>
 
@@ -1473,56 +1473,30 @@ export default function Sidebar({
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">
-                  <motion.button
-                    type="button"
-                    onClick={openSearch}
-                    aria-label="Search chats"
-                    title="Search chats"
-                    className="group/search flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-none"
-                  >
-                    <Search className="twinkle-search-icon h-[19px] w-[19px]" strokeWidth={1.8} />
-                  </motion.button>
-
-                  <div className="relative group/close">
-                  <motion.button
-                    type="button"
-                    onClick={collapseDesktop}
-                    aria-label="Close sidebar"
-                    title="Close sidebar"
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-none
-                      bg-transparent border-0 shadow-none
-                      text-zinc-500 dark:text-zinc-400
-                      hover:text-zinc-700 dark:hover:text-zinc-200
-                      transition-colors duration-200"
-                  >
-                    <svg
-                      width="23"
-                      height="20"
-                      viewBox="0 0 24 20"
-                      fill="none"
-                      aria-hidden="true"
+                  <IconTooltip label="Search" shortcut="Ctrl+K">
+                    <motion.button
+                      type="button"
+                      onClick={openSearch}
+                      aria-label="Search chats"
+                      className="flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-none"
                     >
-                      <rect
-                        x="2"
-                        y="2"
-                        width="20"
-                        height="16"
-                        rx="4"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                      />
-                      <path
-                        d="M8.5 2.5V17.5"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  </motion.button>
-                  <div className="pointer-events-none absolute right-0 top-full mt-2 z-[300] whitespace-nowrap rounded-lg bg-zinc-900 px-2.5 py-1.5 text-xs font-bold text-white opacity-0 shadow-lg transition-opacity duration-150 group-hover/close:opacity-100">
-                    Close Sidebar
-                  </div>
-                  </div>
+                      <Search className="twinkle-search-icon h-[19px] w-[19px]" strokeWidth={1.8} />
+                    </motion.button>
+                  </IconTooltip>
+
+                  <IconTooltip label="Toggle sidebar" shortcut="Ctrl+Shift+S">
+                    <motion.button
+                      type="button"
+                      onClick={collapseDesktop}
+                      aria-label="Close sidebar"
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-none bg-transparent border-0 shadow-none text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors duration-200"
+                    >
+                      <svg width="23" height="20" viewBox="0 0 24 20" fill="none" aria-hidden="true">
+                        <rect x="2" y="2" width="20" height="16" rx="4" stroke="currentColor" strokeWidth="1.8" />
+                        <path d="M8.5 2.5V17.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                      </svg>
+                    </motion.button>
+                  </IconTooltip>
                 </div>
               </div>
 
