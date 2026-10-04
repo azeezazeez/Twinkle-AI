@@ -20,8 +20,29 @@ import {
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown'; 
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+
+
+/**
+ * Normalize the LaTeX delimiters commonly emitted by chat models into the
+ * $ / $$ delimiters understood by remark-math. Fenced code blocks are left
+ * untouched so source code containing backslashes is never interpreted as math.
+ */
+const normalizeMathDelimiters = (value: string): string => {
+  const parts = value.split(/(```[\s\S]*?```)/g);
+  return parts
+    .map((part, index) => {
+      if (index % 2 === 1) return part;
+      return part
+        .replace(/\\\[([\s\S]*?)\\\]/g, (_, expression) => `$$\n${expression.trim()}\n$$`)
+        .replace(/\\\(([\s\S]*?)\\\)/g, (_, expression) => `$${expression.trim()}$`);
+    })
+    .join('');
+};
 
 const PDFJS_MODULE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs';
 const PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
@@ -1356,6 +1377,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const firstMessageScrollPendingRef = useRef(false);
   const autoFollowScrollRef = useRef(true);
   const isSendingRef = useRef(false);
+  const requestGenerationRef = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamingAssistantIdRef = useRef<string | null>(null);
   const streamReceivedTextRef = useRef('');
@@ -1403,7 +1425,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
 
   const startStreamRenderer = useCallback(() => {
     if (streamRenderTimerRef.current !== null) return;
-    streamRenderTimerRef.current = window.setTimeout(flushStreamRenderQueue, 55);
+    streamRenderTimerRef.current = window.requestAnimationFrame(flushStreamRenderQueue);
   }, [flushStreamRenderQueue]);
 
   const drainStreamRenderer = useCallback(() => {
@@ -1417,7 +1439,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const cancelStreamRenderer = useCallback(() => {
     streamRenderQueueRef.current = '';
     if (streamRenderTimerRef.current !== null) {
-      window.clearTimeout(streamRenderTimerRef.current);
+      window.cancelAnimationFrame(streamRenderTimerRef.current);
       streamRenderTimerRef.current = null;
     }
     const resolve = streamDrainResolverRef.current;
@@ -1607,18 +1629,37 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     return () => cancelAnimationFrame(frame);
   }, [messages.length]);
 
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
-    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-
-    // The scroll-to-bottom control is meaningful only when a conversation
-    // exists and the user is actually away from the latest messages.
-    const awayFromBottom = distanceFromBottom > 100;
+  const syncScrollState = useCallback((container: HTMLDivElement | null) => {
+    if (!container) return;
+    const distanceFromBottom = Math.max(0, container.scrollHeight - container.scrollTop - container.clientHeight);
     const atBottom = distanceFromBottom <= 40;
+    const awayFromBottom = distanceFromBottom > 100;
     autoFollowScrollRef.current = atBottom;
     setShowScrollBottom(messages.length > 0 && awayFromBottom);
     setIsAtBottom(atBottom);
+  }, [messages.length]);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    syncScrollState(e.currentTarget);
   };
+
+  // Re-measure after message/stream layout changes. This prevents the
+  // floating control from becoming stale while the stream grows underneath
+  // the user, especially when they return to the bottom.
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => syncScrollState(messagesContainerRef.current));
+    const container = messagesContainerRef.current;
+    if (!container || typeof ResizeObserver === 'undefined') {
+      return () => cancelAnimationFrame(frame);
+    }
+
+    const observer = new ResizeObserver(() => syncScrollState(container));
+    observer.observe(container);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [messages.length, isTyping, syncScrollState]);
 
   const extractZipEntry = async (file: File, entryName: string): Promise<string | null> => {
     const buffer = await file.arrayBuffer();
@@ -1836,6 +1877,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     if ((!messageText.trim() && (!filesToSend || filesToSend.length === 0))) return;
 
     isSendingRef.current = true;
+    const requestGeneration = ++requestGenerationRef.current;
     setIsTyping(true);
     setResponsePhase('connecting');
     streamingAssistantIdRef.current = null;
@@ -1958,6 +2000,9 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         );
       }
 
+      // A user stop invalidates this request generation. Never finalize or
+      // replace the preserved partial response after Stop has been clicked.
+      if (requestGeneration !== requestGenerationRef.current) return;
 
       const activeSessionId = response.sessionId || currentSessionId;
 
@@ -2010,6 +2055,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       // message. This prevents the final response from jumping ahead of the
       // visible stream.
       await drainStreamRenderer();
+      if (requestGeneration !== requestGenerationRef.current) return;
       setIsTyping(false);
 
       const aiContent =
@@ -2272,6 +2318,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   };
 
   const handleStopResponse = () => {
+    // Invalidate the active send before aborting the network request. This
+    // closes the race where the SSE `done` event arrives at the same time as
+    // the user presses Stop and the full response gets committed again.
+    requestGenerationRef.current += 1;
     const streamId = streamingAssistantIdRef.current;
     const streamedText = streamReceivedTextRef.current;
 
@@ -2749,7 +2799,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                                 </div>
                               ) : (
                                 <ReactMarkdown
-                                  remarkPlugins={[remarkGfm]}
+                                  remarkPlugins={[remarkGfm, remarkMath]}
+                                  rehypePlugins={[rehypeKatex]}
                                   components={{
                                     h1({ children, ...props }: any) {
                                       return (
@@ -2857,7 +2908,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                                     }
                                   } as Components}
                                 >
-                                  {displayContent}
+                                  {normalizeMathDelimiters(displayContent)}
                                 </ReactMarkdown>
                               )}
                             </div>
@@ -2973,16 +3024,28 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
               </p>
             </div>
 
-            {isTyping && showScrollBottom && (
-              <div
-                className="twinkle-floating-thinking twinkle-floating-thinking-away"
-                aria-live="polite"
-                aria-label="Twinkle is generating a response below"
+            {isTyping && showScrollBottom && !isAtBottom && (
+              <button
+                type="button"
+                className="twinkle-floating-thinking twinkle-floating-thinking-away group"
+                aria-label="Scroll to latest message"
+                data-tooltip="Scroll to latest message"
+                onClick={() => {
+                  const container = messagesContainerRef.current;
+                  if (!container) return;
+                  container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+                  requestAnimationFrame(() => syncScrollState(container));
+                }}
               >
-                <span className="twinkle-floating-thinking-dot" />
-                <span className="twinkle-floating-thinking-dot" />
-                <span className="twinkle-floating-thinking-dot" />
-              </div>
+                <span className="twinkle-floating-thinking-dots" aria-hidden="true">
+                  <span className="twinkle-floating-thinking-dot" />
+                  <span className="twinkle-floating-thinking-dot" />
+                  <span className="twinkle-floating-thinking-dot" />
+                </span>
+                <svg className="twinkle-floating-thinking-arrow" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 2.5V21.5M4.75 14.25 12 21.5l7.25-7.25" fill="none" stroke="currentColor" strokeWidth="2.15" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
             )}
 
             <AnimatePresence>
