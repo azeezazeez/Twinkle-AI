@@ -1095,6 +1095,8 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const voiceSilentGainRef = useRef<GainNode | null>(null);
   const voiceStartRef = useRef(0);
   const voiceTurnCompleteResolverRef = useRef<(() => void) | null>(null);
+  const voiceBrowserRecognitionRef = useRef<any>(null);
+  const voiceBrowserRecognitionActiveRef = useRef(false);
   const [voiceDraftVersion, setVoiceDraftVersion] = useState(0);
   const [voiceSpeechDetected, setVoiceSpeechDetected] = useState(false);
 
@@ -1131,6 +1133,9 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       else socket?.close();
     } catch {}
     voiceSocketRef.current = null;
+    try { voiceBrowserRecognitionRef.current?.stop?.(); } catch {}
+    voiceBrowserRecognitionRef.current = null;
+    voiceBrowserRecognitionActiveRef.current = false;
     voiceTurnCompleteResolverRef.current?.();
     voiceTurnCompleteResolverRef.current = null;
     cleanupVoiceAudio();
@@ -1171,11 +1176,17 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       }
     } catch {}
 
+    // Stop the browser recognizer before committing so no late result can
+    // mutate the composer after the voice capture has ended.
+    voiceStartRef.current += 1;
+    try { voiceBrowserRecognitionRef.current?.stop?.(); } catch {}
+    voiceBrowserRecognitionRef.current = null;
+    voiceBrowserRecognitionActiveRef.current = false;
+
     const base = voiceBaseInputRef.current.trim();
     const spoken = voiceDraftRef.current.trim();
     const combined = `${base}${base && spoken ? ' ' : ''}${spoken}`.trim();
 
-    voiceStartRef.current += 1;
     try { voiceSocketRef.current?.close(1000, 'committed'); } catch {}
     voiceSocketRef.current = null;
     voiceTurnCompleteResolverRef.current?.();
@@ -1224,6 +1235,60 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       setVoiceSpeechDetected(false);
       setVoiceInputActive(true);
     });
+
+    // Start browser-native speech recognition immediately. Chrome/Edge can
+    // produce words while Gemini Live is still acquiring the token and
+    // opening the WebSocket, removing the noticeable startup delay. Gemini
+    // remains the audio/AI pipeline and fallback when SpeechRecognition is
+    // unavailable.
+    try {
+      const SpeechRecognitionCtor =
+        (window as any).SpeechRecognition ||
+        (window as any).webkitSpeechRecognition;
+
+      if (SpeechRecognitionCtor) {
+        const recognition = new SpeechRecognitionCtor();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = navigator.language || 'en-US';
+        recognition.maxAlternatives = 1;
+
+        recognition.onresult = (event: any) => {
+          if (attempt !== voiceStartRef.current) return;
+          let transcript = '';
+          for (let i = 0; i < event.results.length; i += 1) {
+            transcript += String(event.results[i]?.[0]?.transcript || '');
+          }
+          transcript = transcript.trim();
+          if (transcript) {
+            voiceDraftRef.current = transcript;
+            setVoiceDraftVersion(version => version + 1);
+          }
+        };
+
+        recognition.onerror = (event: any) => {
+          if (event?.error === 'not-allowed' || event?.error === 'service-not-allowed') {
+            voiceBrowserRecognitionActiveRef.current = false;
+            voiceBrowserRecognitionRef.current = null;
+          }
+        };
+
+        recognition.onend = () => {
+          if (attempt !== voiceStartRef.current || voiceBrowserRecognitionRef.current !== recognition) return;
+          window.setTimeout(() => {
+            if (attempt !== voiceStartRef.current || voiceBrowserRecognitionRef.current !== recognition) return;
+            try { recognition.start(); } catch {}
+          }, 0);
+        };
+
+        voiceBrowserRecognitionRef.current = recognition;
+        voiceBrowserRecognitionActiveRef.current = true;
+        try { recognition.start(); } catch {}
+      }
+    } catch {
+      voiceBrowserRecognitionRef.current = null;
+      voiceBrowserRecognitionActiveRef.current = false;
+    }
 
     // Request the token immediately in parallel with microphone permission.
     // The composer is already painted synchronously, so the user sees the
@@ -1382,7 +1447,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
           if (message?.error) throw new Error(message.error.message || 'Speech transcription service returned an error.');
 
           const text = String(message?.serverContent?.inputTranscription?.text || '');
-          if (text) {
+          // Browser recognition supplies immediate transcription. Use Gemini
+          // transcription only when browser recognition is unavailable,
+          // otherwise the two streams would duplicate the user's words.
+          if (text && !voiceBrowserRecognitionActiveRef.current) {
             voiceDraftRef.current += text;
             setVoiceDraftVersion(version => version + 1);
           }
