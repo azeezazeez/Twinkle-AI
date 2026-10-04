@@ -1160,13 +1160,24 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const stopVoiceCapture = useCallback(async () => {
     if (!voiceInputActive || voiceCaptureStopped) return;
 
-    // The Stop button is the end of the recording, so it must commit the
-    // recognized speech into the normal composer immediately. Do not merely
-    // stop the microphone and leave the draft hidden in voiceDraftRef.
-    // commitVoiceInput also waits briefly for the final Gemini transcription
-    // chunk, then calls setInput() with the complete spoken text.
-    await commitVoiceInput();
-  }, [commitVoiceInput, voiceCaptureStopped, voiceInputActive]);
+    try {
+      const socket = voiceSocketRef.current;
+      if (socket?.readyState === WebSocket.OPEN) {
+        try {
+          socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
+        } catch {}
+        await new Promise(resolve => window.setTimeout(resolve, 120));
+      }
+    } catch {}
+
+    try { voiceSocketRef.current?.close(1000, 'capture-stopped'); } catch {}
+    voiceSocketRef.current = null;
+    try { voiceBrowserRecognitionRef.current?.stop?.(); } catch {}
+    voiceBrowserRecognitionRef.current = null;
+    voiceBrowserRecognitionActiveRef.current = false;
+    cleanupVoiceAudio();
+    setVoiceCaptureStopped(true);
+  }, [cleanupVoiceAudio, voiceCaptureStopped, voiceInputActive]);
 
   const startVoiceInput = useCallback(async () => {
     if (voiceInputActive || isTyping || isProcessingFiles) return;
@@ -3488,7 +3499,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                     {isProcessingFiles ? (
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
                     ) : (
-                      <Plus className="h-[22px] w-[22px] stroke-[2.25]" />
+                      <Plus className="h-[22px] w-[22px] stroke-[2.25] opacity-100" />
                     )}
                   </motion.button>
 
