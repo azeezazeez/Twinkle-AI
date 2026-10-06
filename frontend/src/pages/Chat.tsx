@@ -1116,7 +1116,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const voiceGeminiStreamRef = useRef<MediaStream | null>(null);
   const voiceGeminiAudioContextRef = useRef<AudioContext | null>(null);
   const voiceGeminiSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const voiceGeminiProcessorRef = useRef<AudioWorkletNode | null>(null);
+  const voiceGeminiProcessorRef = useRef<AudioWorkletNode | ScriptProcessorNode | null>(null);
   const voiceGeminiSilentGainRef = useRef<GainNode | null>(null);
   const voiceGeminiWorkletReadyRef = useRef<Promise<void> | null>(null);
   const voiceGeminiFallbackActiveRef = useRef(false);
@@ -1195,14 +1195,25 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       voiceGeminiAudioContextRef.current = context;
       if (context.state === 'suspended') await context.resume();
 
-      if (!voiceGeminiWorkletReadyRef.current) {
-        const workletBlob = new Blob([pcmCaptureWorkletSource], { type: 'application/javascript' });
-        const workletUrl = URL.createObjectURL(workletBlob);
-        voiceGeminiWorkletReadyRef.current = context.audioWorklet.addModule(workletUrl)
-          .finally(() => URL.revokeObjectURL(workletUrl));
+      // Brave can expose AudioWorklet but still fail to construct the node after
+      // loading a blob module. Do not make dictation depend on AudioWorklet:
+      // keep it as a low-latency option and fall back to ScriptProcessorNode
+      // when the worklet cannot be created. This keeps the microphone flow alive.
+      let workletReadyPromise: Promise<void> = Promise.resolve();
+      const hasAudioWorklet = Boolean(context.audioWorklet?.addModule);
+      if (hasAudioWorklet) {
+        try {
+          const workletBlob = new Blob([pcmCaptureWorkletSource], { type: 'application/javascript' });
+          const workletUrl = URL.createObjectURL(workletBlob);
+          workletReadyPromise = context.audioWorklet.addModule(workletUrl)
+            .catch(() => undefined)
+            .finally(() => URL.revokeObjectURL(workletUrl));
+        } catch {
+          workletReadyPromise = Promise.resolve();
+        }
       }
 
-      const [stream, { token, model }] = await Promise.all([streamPromise, tokenPromise, voiceGeminiWorkletReadyRef.current]);
+      const [stream, { token, model }] = await Promise.all([streamPromise, tokenPromise, workletReadyPromise]);
       if (attempt !== voiceStartRef.current || !voiceDictationWantedRef.current) {
         stream.getTracks().forEach(track => track.stop());
         return;
@@ -1274,27 +1285,78 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       };
 
       const source = context.createMediaStreamSource(stream);
-      const processor = new AudioWorkletNode(context, 'twinkle-pcm-capture');
       const silentGain = context.createGain();
       silentGain.gain.value = 0;
-      source.connect(processor);
-      processor.connect(silentGain);
-      silentGain.connect(context.destination);
 
-      processor.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+      const sendPcm = (buffer: ArrayBuffer) => {
         if (!voiceGeminiFallbackActiveRef.current || attempt !== voiceStartRef.current) return;
-        const data = pcm16ToBase64(event.data);
+        const data = pcm16ToBase64(buffer);
         const liveSocket = voiceGeminiSocketRef.current;
         if (liveSocket?.readyState === WebSocket.OPEN) {
-          liveSocket.send(JSON.stringify({
-            realtimeInput: { audio: { data, mimeType: 'audio/pcm;rate=16000' } },
-          }));
+          try {
+            liveSocket.send(JSON.stringify({
+              realtimeInput: { audio: { data, mimeType: 'audio/pcm;rate=16000' } },
+            }));
+          } catch {
+            // The socket close handler will clean up without interrupting capture.
+          }
         } else {
           const queue = voiceGeminiPendingPcmRef.current;
           queue.push(data);
           if (queue.length > 60) queue.splice(0, queue.length - 60);
         }
       };
+
+      let processor: AudioWorkletNode | ScriptProcessorNode;
+      if (hasAudioWorklet) {
+        try {
+          processor = new AudioWorkletNode(context, 'twinkle-pcm-capture');
+          processor.port.onmessage = (event: MessageEvent<ArrayBuffer>) => sendPcm(event.data);
+        } catch (workletError) {
+          console.warn('Twinkle AudioWorklet unavailable; using compatibility microphone capture.', workletError);
+          const scriptProcessor = context.createScriptProcessor(4096, 1, 1);
+          scriptProcessor.onaudioprocess = event => {
+            const inputData = event.inputBuffer.getChannelData(0);
+            const ratio = context.sampleRate / 16000;
+            const outputLength = Math.max(1, Math.round(inputData.length / ratio));
+            const pcm = new Int16Array(outputLength);
+            for (let i = 0; i < outputLength; i += 1) {
+              const position = i * ratio;
+              const left = Math.min(Math.floor(position), inputData.length - 1);
+              const right = Math.min(left + 1, inputData.length - 1);
+              const fraction = position - left;
+              const sample = inputData[left] * (1 - fraction) + inputData[right] * fraction;
+              const clamped = Math.max(-1, Math.min(1, sample));
+              pcm[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+            }
+            sendPcm(pcm.buffer);
+          };
+          processor = scriptProcessor;
+        }
+      } else {
+        const scriptProcessor = context.createScriptProcessor(4096, 1, 1);
+        scriptProcessor.onaudioprocess = event => {
+          const inputData = event.inputBuffer.getChannelData(0);
+          const ratio = context.sampleRate / 16000;
+          const outputLength = Math.max(1, Math.round(inputData.length / ratio));
+          const pcm = new Int16Array(outputLength);
+          for (let i = 0; i < outputLength; i += 1) {
+            const position = i * ratio;
+            const left = Math.min(Math.floor(position), inputData.length - 1);
+            const right = Math.min(left + 1, inputData.length - 1);
+            const fraction = position - left;
+            const sample = inputData[left] * (1 - fraction) + inputData[right] * fraction;
+            const clamped = Math.max(-1, Math.min(1, sample));
+            pcm[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+          }
+          sendPcm(pcm.buffer);
+        };
+        processor = scriptProcessor;
+      }
+
+      source.connect(processor);
+      processor.connect(silentGain);
+      silentGain.connect(context.destination);
 
       voiceGeminiSourceRef.current = source;
       voiceGeminiProcessorRef.current = processor;
@@ -3562,9 +3624,9 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                 {/* Main prompt area — always above the action row */}
                 {voiceInputActive ? (
                   <div
-                    className="relative flex min-h-[58px] w-full min-w-0 items-center gap-2 px-2 py-2 sm:min-h-[64px] sm:px-3"
+                    className="relative flex min-h-[62px] w-full min-w-0 items-center gap-2 rounded-[20px] px-2 py-2 sm:min-h-[68px] sm:px-3"
                     aria-live="polite"
-                    aria-label="Listening for voice input"
+                    aria-label={voiceSpeechDetected ? 'Listening and transcribing' : 'Listening for voice input'}
                   >
                     {/* Cancel */}
                     <motion.button
@@ -3579,53 +3641,41 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                       <X className="h-[20px] w-[20px]" strokeWidth={2.05} />
                     </motion.button>
 
-                    {/* Live transcript + sound-state indicator. */}
-                    <div
-                      className="relative flex min-h-10 min-w-0 flex-1 items-center overflow-hidden px-2"
-                      aria-label={voiceSpeechDetected ? 'Listening and transcribing' : 'Listening'}
-                    >
-                      {voiceLiveTranscript.trim() ? (
-                        <div
-                          key={voiceDraftVersion}
-                          className="max-h-16 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words px-1 text-sm font-medium leading-6 text-zinc-800 dark:text-zinc-100 sm:text-[15px]"
-                        >
-                          {voiceLiveTranscript}
-                        </div>
-                      ) : voiceSpeechDetected ? (
-                        <div className="flex h-full w-full items-center justify-center gap-[3px]" aria-hidden="true">
-                          {[...Array(28)].map((_, index) => (
-                            <motion.span
-                              key={index}
-                              className="w-[3px] rounded-full bg-zinc-500 dark:bg-zinc-300"
-                              animate={{
-                                height: [7, 16 + ((index * 7) % 24), 9, 22 + ((index * 5) % 18), 7],
-                                opacity: [0.55, 1, 0.7, 1, 0.55],
-                              }}
-                              transition={{
-                                duration: 0.65,
-                                repeat: Infinity,
-                                delay: index * 0.025,
-                                ease: 'easeInOut',
-                              }}
-                            />
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="relative h-6 w-full overflow-hidden" aria-hidden="true">
-                          <motion.div
-                            className="absolute left-1/2 top-1/2 flex w-max -translate-y-1/2 items-center gap-[7px]"
-                            animate={{ x: ['-50%', '0%'] }}
-                            transition={{ duration: 2.8, repeat: Infinity, ease: 'linear' }}
-                          >
-                            {[...Array(84)].map((_, index) => (
-                              <span
+                    {/* Premium live listening surface. */}
+                    <div className="relative flex min-h-11 min-w-0 flex-1 items-center gap-3 overflow-hidden rounded-2xl bg-zinc-50/90 px-3 dark:bg-zinc-800/70">
+                      <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full" aria-hidden="true">
+                        <motion.span
+                          className="absolute inset-0 rounded-full"
+                          style={{ background: liveTalkColor.swatch }}
+                          animate={{ scale: voiceSpeechDetected ? [1, 1.18, 1] : [1, 1.06, 1], opacity: voiceSpeechDetected ? [0.16, 0.04, 0.16] : [0.12, 0.05, 0.12] }}
+                          transition={{ duration: voiceSpeechDetected ? 0.9 : 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                        />
+                        <span className="relative flex h-8 w-8 items-center justify-center rounded-full" style={{ background: liveTalkColor.swatch }}>
+                          <Mic className="h-[17px] w-[17px] text-white" strokeWidth={2.25} />
+                        </span>
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-0.5 flex items-center gap-2">
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">
+                            {voiceSpeechDetected ? 'Listening' : 'Speak now'}
+                          </span>
+                          <span className="flex items-center gap-1" aria-hidden="true">
+                            {[0, 1, 2, 3, 4].map(index => (
+                              <motion.span
                                 key={index}
-                                className="h-[3px] w-[3px] shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500"
+                                className="w-[2px] rounded-full"
+                                style={{ background: liveTalkColor.swatch }}
+                                animate={{ height: voiceSpeechDetected ? [4, 12 + ((index * 5) % 8), 5] : [4, 7, 4] }}
+                                transition={{ duration: 0.55, repeat: Infinity, delay: index * 0.06, ease: 'easeInOut' }}
                               />
                             ))}
-                          </motion.div>
+                          </span>
                         </div>
-                      )}
+                        <div key={voiceDraftVersion} className="min-w-0 truncate text-sm font-medium text-zinc-800 dark:text-zinc-100 sm:text-[15px]">
+                          {voiceLiveTranscript.trim() || 'Start speaking and your words will appear here…'}
+                        </div>
+                      </div>
                     </div>
 
                     {/* Same stop control used while a response is streaming. */}
