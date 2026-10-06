@@ -1179,7 +1179,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         throw new Error('Microphone access is not supported in this browser.');
       }
 
-      const tokenPromise = createLiveToken();
+      const tokenPromise = createLiveToken('Charon', getSpeechRecognitionLanguage(), true);
       const streamPromise = navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
@@ -1233,7 +1233,12 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         socket.send(JSON.stringify({
           setup: {
             model: `models/${model || 'gemini-3.8-live'}`,
-            generationConfig: { responseModalities: ['TEXT'] },
+            generationConfig: { responseModalities: ['AUDIO'] },
+            systemInstruction: {
+              parts: [{
+                text: `Twinkle AI speech-to-text mode. Transcribe the user's speech accurately. Preserve the user's wording and language. The selected language is ${getSpeechRecognitionLanguage()}. Do not translate the user's speech. Do not answer the user.`,
+              }],
+            },
             inputAudioTranscription: {},
             realtimeInputConfig: {
               automaticActivityDetection: {
@@ -1250,15 +1255,32 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         if (attempt !== voiceStartRef.current || !voiceDictationWantedRef.current) return;
         try {
           const message = await decodeGeminiLiveMessage(event.data);
-          const text = String(message?.serverContent?.inputTranscription?.text || '');
-          if (!text.trim()) return;
-
-          voiceFinalTranscriptRef.current = `${voiceFinalTranscriptRef.current}${text}`
+          if (message?.error) throw new Error(message.error.message || 'Gemini transcription failed.');
+          const finalText = String(message?.serverContent?.inputTranscription?.text || '')
             .replace(/\s+/g, ' ')
             .trim();
-          voiceInterimTranscriptRef.current = '';
-          voiceDraftRef.current = voiceFinalTranscriptRef.current;
-          setVoiceLiveTranscript(voiceFinalTranscriptRef.current);
+          const interimText = String(message?.serverContent?.interimInputTranscription?.text || '')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+          if (finalText) {
+            voiceFinalTranscriptRef.current = `${voiceFinalTranscriptRef.current}${finalText}`
+              .replace(/\s+/g, ' ')
+              .trim();
+            voiceInterimTranscriptRef.current = '';
+          } else if (interimText) {
+            voiceInterimTranscriptRef.current = interimText;
+          } else {
+            return;
+          }
+
+          const liveText = `${voiceFinalTranscriptRef.current}${voiceFinalTranscriptRef.current && voiceInterimTranscriptRef.current ? ' ' : ''}${voiceInterimTranscriptRef.current}`
+            .replace(/\s+/g, ' ')
+            .trim();
+          voiceDraftRef.current = liveText;
+          const composedText = `${voiceBaseInputRef.current}${voiceBaseInputRef.current && liveText ? ' ' : ''}${liveText}`.trim();
+          setInput(composedText);
+          setVoiceLiveTranscript(liveText);
           setVoiceDraftVersion(version => version + 1);
           setVoiceSpeechDetected(true);
 
@@ -1280,8 +1302,14 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         }
       };
 
-      socket.onclose = () => {
+      socket.onclose = (event) => {
         if (voiceGeminiSocketRef.current === socket) voiceGeminiSocketRef.current = null;
+        if (attempt === voiceStartRef.current && voiceDictationWantedRef.current && event.code !== 1000) {
+          // Do not immediately tear down the listening UI. The next start gets
+          // a fresh ephemeral token, while any text already received remains
+          // in the real search field.
+          console.warn('Twinkle Gemini dictation socket closed:', event.code, event.reason || 'no reason');
+        }
       };
 
       const source = context.createMediaStreamSource(stream);
@@ -1530,6 +1558,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       });
 
       void startGeminiDictationFallback(attempt);
+      window.setTimeout(() => inputRef.current?.focus(), 0);
       return;
     }
 
@@ -1598,8 +1627,11 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
         .trim();
       voiceDraftRef.current = liveText;
 
-      // This is the actual text shown in the listening composer while the user
-      // is speaking — no Gemini handshake is involved.
+      // Keep the real search/composer value synchronized while listening.
+      // This is important in Brave: the transcript must be the actual textarea
+      // value, not only a separate listening preview.
+      const composedText = `${voiceBaseInputRef.current}${voiceBaseInputRef.current && liveText ? ' ' : ''}${liveText}`.trim();
+      setInput(composedText);
       setVoiceLiveTranscript(liveText);
       setVoiceDraftVersion(version => version + 1);
       setVoiceSpeechDetected(true);
@@ -3624,7 +3656,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                 {/* Main prompt area — always above the action row */}
                 {voiceInputActive ? (
                   <div
-                    className="relative flex min-h-[62px] w-full min-w-0 items-center gap-2 rounded-[20px] px-2 py-2 sm:min-h-[68px] sm:px-3"
+                    className="relative flex min-h-[60px] w-full min-w-0 items-center gap-1.5 rounded-[28px] border border-zinc-200/90 bg-white px-1.5 py-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.08)] dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-black/20 sm:min-h-[66px] sm:px-2"
                     aria-live="polite"
                     aria-label={voiceSpeechDetected ? 'Listening and transcribing' : 'Listening for voice input'}
                   >
@@ -3634,87 +3666,97 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                       onClick={cancelVoiceInput}
                       aria-label="Cancel dictation"
                       data-tooltip="Cancel"
-                      whileHover={{ scale: 1.04 }}
+                      whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.9 }}
-                      className="twinkle-tooltip-trigger flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-800 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:h-11 sm:w-11"
+                      className="twinkle-tooltip-trigger flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white sm:h-11 sm:w-11"
                     >
-                      <X className="h-[20px] w-[20px]" strokeWidth={2.05} />
+                      <X className="h-[19px] w-[19px]" strokeWidth={2.1} />
                     </motion.button>
 
-                    {/* Premium live listening surface. */}
-                    <div className="relative flex min-h-11 min-w-0 flex-1 items-center gap-3 overflow-hidden rounded-2xl bg-zinc-50/90 px-3 dark:bg-zinc-800/70">
-                      <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full" aria-hidden="true">
-                        <motion.span
-                          className="absolute inset-0 rounded-full"
-                          style={{ background: liveTalkColor.swatch }}
-                          animate={{ scale: voiceSpeechDetected ? [1, 1.18, 1] : [1, 1.06, 1], opacity: voiceSpeechDetected ? [0.16, 0.04, 0.16] : [0.12, 0.05, 0.12] }}
-                          transition={{ duration: voiceSpeechDetected ? 0.9 : 1.8, repeat: Infinity, ease: 'easeInOut' }}
-                        />
-                        <span className="relative flex h-8 w-8 items-center justify-center rounded-full" style={{ background: liveTalkColor.swatch }}>
-                          <Mic className="h-[17px] w-[17px] text-white" strokeWidth={2.25} />
+                    {/* The actual search bar remains visible while listening. */}
+                    <div className="relative min-w-0 flex-1">
+                      <div className="pointer-events-none absolute -top-0.5 left-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 dark:text-zinc-500">
+                        <span>{voiceSpeechDetected ? 'Listening' : 'Speak now'}</span>
+                        <span className="flex items-end gap-[2px]" aria-hidden="true">
+                          {[0, 1, 2, 3].map(index => (
+                            <motion.span
+                              key={index}
+                              className="w-[2px] rounded-full"
+                              style={{ background: liveTalkColor.swatch }}
+                              animate={{ height: voiceSpeechDetected ? [4, 10 + index * 2, 4] : [4, 6, 4] }}
+                              transition={{ duration: 0.5, repeat: Infinity, delay: index * 0.07, ease: 'easeInOut' }}
+                            />
+                          ))}
                         </span>
                       </div>
-
-                      <div className="min-w-0 flex-1">
-                        <div className="mb-0.5 flex items-center gap-2">
-                          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">
-                            {voiceSpeechDetected ? 'Listening' : 'Speak now'}
-                          </span>
-                          <span className="flex items-center gap-1" aria-hidden="true">
-                            {[0, 1, 2, 3, 4].map(index => (
-                              <motion.span
-                                key={index}
-                                className="w-[2px] rounded-full"
-                                style={{ background: liveTalkColor.swatch }}
-                                animate={{ height: voiceSpeechDetected ? [4, 12 + ((index * 5) % 8), 5] : [4, 7, 4] }}
-                                transition={{ duration: 0.55, repeat: Infinity, delay: index * 0.06, ease: 'easeInOut' }}
-                              />
-                            ))}
-                          </span>
-                        </div>
-                        <div key={voiceDraftVersion} className="min-w-0 truncate text-sm font-medium text-zinc-800 dark:text-zinc-100 sm:text-[15px]">
-                          {voiceLiveTranscript.trim() || 'Start speaking and your words will appear here…'}
-                        </div>
-                      </div>
+                      <textarea
+                        ref={inputRef}
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        rows={1}
+                        aria-label="Ask Anything"
+                        className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent px-1 pt-3 text-[16px] font-medium leading-[1.35] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[96px] sm:text-[17px]"
+                        placeholder="Speak to Twinkle…"
+                        onInput={(e) => {
+                          const t = e.target as HTMLTextAreaElement;
+                          t.style.height = 'auto';
+                          t.style.height = `${Math.min(t.scrollHeight, 96)}px`;
+                        }}
+                      />
                     </div>
 
-                    {/* Same stop control used while a response is streaming. */}
+                    {/* Live microphone state */}
+                    <motion.div
+                      className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full sm:h-11 sm:w-11"
+                      animate={{ scale: voiceSpeechDetected ? [1, 1.05, 1] : 1 }}
+                      transition={{ duration: 0.8, repeat: Infinity, ease: 'easeInOut' }}
+                      aria-hidden="true"
+                    >
+                      <motion.span
+                        className="absolute inset-0 rounded-full"
+                        style={{ background: liveTalkColor.swatch }}
+                        animate={{ scale: voiceSpeechDetected ? [1, 1.28, 1] : [1, 1.08, 1], opacity: voiceSpeechDetected ? [0.18, 0.02, 0.18] : [0.1, 0.04, 0.1] }}
+                        transition={{ duration: voiceSpeechDetected ? 0.9 : 1.7, repeat: Infinity, ease: 'easeOut' }}
+                      />
+                      <span className="relative flex h-8 w-8 items-center justify-center rounded-full text-white sm:h-9 sm:w-9" style={{ background: liveTalkColor.swatch }}>
+                        <Mic className="h-[17px] w-[17px]" strokeWidth={2.2} />
+                      </span>
+                    </motion.div>
+
+                    {/* Stop */}
                     <motion.button
                       type="button"
                       onClick={() => void stopVoiceCapture()}
                       disabled={voiceCaptureStopped}
                       aria-label="Stop dictation"
                       data-tooltip="Stop"
-                      whileHover={{ scale: voiceCaptureStopped ? 1 : 1.04 }}
+                      whileHover={{ scale: voiceCaptureStopped ? 1 : 1.05 }}
                       whileTap={{ scale: 0.9 }}
-                      className="twinkle-tooltip-trigger relative z-[30] flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-transparent text-white shadow-sm transition-all duration-200 disabled:cursor-default disabled:opacity-60 sm:h-11 sm:w-11"
-                      style={{ background: liveTalkColor.swatch, boxShadow: 'none' }}
+                      className="twinkle-tooltip-trigger relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition-all disabled:cursor-default disabled:opacity-60 sm:h-11 sm:w-11"
+                      style={{ background: liveTalkColor.swatch }}
                     >
-                      <span className="h-3.5 w-3.5 rounded-[3px] bg-white shadow-sm" />
+                      <span className="h-3.5 w-3.5 rounded-[3px] bg-white" />
                     </motion.button>
 
-                    {/* Send button is the final control at the end of the composer. */}
+                    {/* Send */}
                     <motion.button
                       type="button"
                       onClick={async () => {
                         const text = await commitVoiceInput();
-                        if (text.trim()) {
-                          await handleSendMessage(undefined, text);
-                        }
+                        if (text.trim()) await handleSendMessage(undefined, text);
                       }}
                       aria-label="Send message"
                       data-tooltip="Send message"
                       whileHover={{ scale: 1.05, y: -1 }}
                       whileTap={{ scale: 0.92 }}
-                      className="twinkle-tooltip-trigger relative z-[30] flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-transparent text-white shadow-sm transition-all duration-200 sm:h-11 sm:w-11"
-                      style={{ background: liveTalkColor.swatch, boxShadow: 'none' }}
+                      className="twinkle-tooltip-trigger relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition-all sm:h-11 sm:w-11"
+                      style={{ background: liveTalkColor.swatch }}
                     >
-                      <svg viewBox="0 0 24 24" className="h-[20px] w-[20px]" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" className="h-[19px] w-[19px]" aria-hidden="true">
                         <path d="M12 21V4M6.25 9.75 12 4l5.75 5.75" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                     </motion.button>
                   </div>
-
                 ) : (
                   <div className="twinkle-composer-prompt relative flex min-h-[58px] min-w-0 flex-1 items-center px-2 py-2 sm:min-h-[64px] sm:px-3">
                     <textarea
