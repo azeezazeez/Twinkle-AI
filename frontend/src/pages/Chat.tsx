@@ -1440,12 +1440,15 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     voiceBrowserStopRequestedRef.current = true;
     cleanupVoiceAudio();
 
+    const restoreComposerValue = voiceBaseInputRef.current.trim();
+
     voiceDraftRef.current = '';
     voiceFinalTranscriptRef.current = '';
     voiceInterimTranscriptRef.current = '';
     voiceBaseInputRef.current = '';
     voiceCommitInProgressRef.current = false;
 
+    setInput(restoreComposerValue);
     setVoiceLiveTranscript('');
     setVoiceDraftVersion(version => version + 1);
     setVoiceInputActive(false);
@@ -1467,7 +1470,14 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
     const spoken = `${voiceFinalTranscriptRef.current}${voiceFinalTranscriptRef.current && voiceInterimTranscriptRef.current ? ' ' : ''}${voiceInterimTranscriptRef.current}`
       .replace(/\s+/g, ' ')
       .trim();
-    const combined = `${base}${base && spoken ? ' ' : ''}${spoken}`.trim();
+
+    // The real composer value is authoritative while Gemini is streaming.
+    // This prevents Stop/Send from clearing the transcript that is already
+    // visible in the existing search bar.
+    const currentComposerValue = input.trim();
+    const combined = currentComposerValue !== base
+      ? currentComposerValue
+      : `${base}${base && spoken ? ' ' : ''}${spoken}`.trim();
 
     // Put the text into the real textarea immediately.
     flushSync(() => {
@@ -3656,11 +3666,11 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                 {/* Main prompt area — always above the action row */}
                 {voiceInputActive ? (
                   <div
-                    className="relative flex min-h-[60px] w-full min-w-0 items-center gap-1.5 rounded-[28px] border border-zinc-200/90 bg-white px-1.5 py-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.08)] dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-black/20 sm:min-h-[66px] sm:px-2"
+                    className="relative flex min-h-[58px] w-full min-w-0 items-center gap-1.5 px-1.5 py-1.5 sm:min-h-[64px] sm:px-2"
                     aria-live="polite"
-                    aria-label={voiceSpeechDetected ? 'Listening and transcribing' : 'Listening for voice input'}
+                    aria-label={voiceSpeechDetected ? 'Listening and transcribing' : 'Speak now'}
                   >
-                    {/* Cancel */}
+                    {/* Cancel — returns to the normal composer without sending. */}
                     <motion.button
                       type="button"
                       onClick={cancelVoiceInput}
@@ -3673,9 +3683,9 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                       <X className="h-[19px] w-[19px]" strokeWidth={2.1} />
                     </motion.button>
 
-                    {/* The actual search bar remains visible while listening. */}
-                    <div className="relative min-w-0 flex-1">
-                      <div className="pointer-events-none absolute -top-0.5 left-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 dark:text-zinc-500">
+                    {/* This is the existing composer/search field — no second popup. */}
+                    <div className="relative min-w-0 flex-1 self-stretch">
+                      <div className="pointer-events-none absolute left-1 top-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 dark:text-zinc-500">
                         <span>{voiceSpeechDetected ? 'Listening' : 'Speak now'}</span>
                         <span className="flex items-end gap-[2px]" aria-hidden="true">
                           {[0, 1, 2, 3].map(index => (
@@ -3695,7 +3705,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                         onChange={(e) => setInput(e.target.value)}
                         rows={1}
                         aria-label="Ask Anything"
-                        className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent px-1 pt-3 text-[16px] font-medium leading-[1.35] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[96px] sm:text-[17px]"
+                        className="twinkle-composer-textarea block h-full w-full min-w-0 resize-none overflow-y-auto bg-transparent px-1 pt-4 text-[16px] font-medium leading-[1.35] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[44px] max-h-[96px] sm:text-[17px]"
                         placeholder="Speak to Twinkle…"
                         onInput={(e) => {
                           const t = e.target as HTMLTextAreaElement;
@@ -3705,25 +3715,10 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                       />
                     </div>
 
-                    {/* Live microphone state */}
-                    <motion.div
-                      className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full sm:h-11 sm:w-11"
-                      animate={{ scale: voiceSpeechDetected ? [1, 1.05, 1] : 1 }}
-                      transition={{ duration: 0.8, repeat: Infinity, ease: 'easeInOut' }}
-                      aria-hidden="true"
-                    >
-                      <motion.span
-                        className="absolute inset-0 rounded-full"
-                        style={{ background: liveTalkColor.swatch }}
-                        animate={{ scale: voiceSpeechDetected ? [1, 1.28, 1] : [1, 1.08, 1], opacity: voiceSpeechDetected ? [0.18, 0.02, 0.18] : [0.1, 0.04, 0.1] }}
-                        transition={{ duration: voiceSpeechDetected ? 0.9 : 1.7, repeat: Infinity, ease: 'easeOut' }}
-                      />
-                      <span className="relative flex h-8 w-8 items-center justify-center rounded-full text-white sm:h-9 sm:w-9" style={{ background: liveTalkColor.swatch }}>
-                        <Mic className="h-[17px] w-[17px]" strokeWidth={2.2} />
-                      </span>
-                    </motion.div>
+                    {/* Deliberate space before the voice controls. */}
+                    <div className="w-2 shrink-0 sm:w-3" aria-hidden="true" />
 
-                    {/* Stop */}
+                    {/* Stop — commits the spoken text to the existing search bar. */}
                     <motion.button
                       type="button"
                       onClick={() => void stopVoiceCapture()}
@@ -3738,10 +3733,11 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                       <span className="h-3.5 w-3.5 rounded-[3px] bg-white" />
                     </motion.button>
 
-                    {/* Send */}
+                    {/* Send — commits the current composer text, then sends it. */}
                     <motion.button
                       type="button"
                       onClick={async () => {
+                        if (voiceCommitInProgressRef.current) return;
                         const text = await commitVoiceInput();
                         if (text.trim()) await handleSendMessage(undefined, text);
                       }}
