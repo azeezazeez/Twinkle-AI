@@ -1443,10 +1443,31 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       (window as any).SpeechRecognition ||
       (window as any).webkitSpeechRecognition;
 
-    if (!SpeechRecognitionCtor) {
-      voiceStartInProgressRef.current = false;
-      voiceDictationWantedRef.current = false;
-      window.alert('Voice dictation is not supported by this browser. Please use the latest Chrome or Edge.');
+    // Brave can expose the Web Speech API but route recognition through a
+    // browser speech service that frequently returns `network`. For Brave,
+    // use the already-implemented Gemini realtime transcription path directly
+    // so listening starts immediately and does not wait for that failure.
+    const isBraveBrowser = Boolean((navigator as any).brave?.isBrave);
+    if (isBraveBrowser || !SpeechRecognitionCtor) {
+      const attempt = ++voiceStartRef.current;
+      voiceBrowserStopRequestedRef.current = false;
+      voiceCommitInProgressRef.current = false;
+      voiceBaseInputRef.current = input.trim();
+      voiceDraftRef.current = '';
+      voiceFinalTranscriptRef.current = '';
+      voiceInterimTranscriptRef.current = '';
+      setVoiceLiveTranscript('');
+      setVoiceCaptureStopped(false);
+      setVoiceSpeechDetected(false);
+
+      // Enter listening state before the realtime handshake so the Mic feels
+      // immediate. The transcript itself continues to arrive asynchronously.
+      flushSync(() => {
+        setVoiceDraftVersion(version => version + 1);
+        setVoiceInputActive(true);
+      });
+
+      void startGeminiDictationFallback(attempt);
       return;
     }
 
