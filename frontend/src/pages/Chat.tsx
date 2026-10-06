@@ -3481,7 +3481,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
               )}
             </AnimatePresence>
 
-            <div className={`relative z-[60] flex w-full min-w-0 flex-col overflow-visible rounded-[24px] border border-zinc-200/90 bg-white shadow-[0_2px_18px_rgba(0,0,0,0.08)] transition-all dark:border-zinc-700/90 dark:bg-zinc-900 dark:shadow-black/20 ${justFinished ? 'animate-blink' : ''}`}>
+            <div className={`relative z-[60] flex w-full min-w-0 flex-col overflow-visible rounded-[32px] border border-zinc-200/90 bg-white shadow-[0_2px_18px_rgba(0,0,0,0.08)] transition-all dark:border-zinc-700/90 dark:bg-zinc-900 dark:shadow-black/20 ${justFinished ? 'animate-blink' : ''}`}>
               {/* File preview strip (kept for consistency but never shown without UI trigger) */}
               <AnimatePresence>
                 {filePreviews.length > 0 && (
@@ -3656,7 +3656,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                           handleSendMessage();
                         }
                       }}
-                      placeholder="Ask Twinkle"
+                      placeholder="Ask Anything"
                       rows={1}
                       className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent p-0 text-[17px] font-medium leading-[1.35] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[42px] max-h-[180px] sm:text-[18px] sm:min-h-[46px]"
                       onInput={(e) => {
@@ -3680,12 +3680,12 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                     data-tooltip="Attach files"
                     whileHover={{ scale: 1.04 }}
                     whileTap={{ scale: 0.94 }}
-                    className="twinkle-tooltip-trigger twinkle-composer-plus group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                    className="twinkle-tooltip-trigger twinkle-composer-plus group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-700 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-900 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-zinc-800 dark:hover:text-white"
                   >
                     {isProcessingFiles ? (
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
                     ) : (
-                      <Plus className="h-[22px] w-[22px] stroke-[2.25] opacity-100" />
+                      <Plus className="h-[24px] w-[24px] scale-105 stroke-[2.5] opacity-100" />
                     )}
                   </motion.button>
 
@@ -3767,7 +3767,13 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
                   {!voiceInputActive && (
                     <motion.button
                       type="button"
-                      onClick={startVoiceInput}
+                      // Start voice capture on the earliest pointer event so the
+                      // browser can initialize the microphone before the click
+                      // event/render cycle completes. The existing guard inside
+                      // startVoiceInput prevents the follow-up click from
+                      // starting a second recognition session.
+                      onPointerDown={startVoiceInput}
+                      onClick={(event) => event.preventDefault()}
                       disabled={isTyping || isProcessingFiles}
                       aria-label="Voice input"
                       data-tooltip="Dictate"
