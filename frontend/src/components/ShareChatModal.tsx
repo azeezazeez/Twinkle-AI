@@ -143,12 +143,15 @@ const ShareChatModal: React.FC<ShareChatModalProps> = ({
             {isLoading ? (
               <div className="mt-5 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-400" role="status">
                 Creating share link…
-              </div>
-            ) : error ? (
-              <div className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-600 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400" role="alert">
-                {error}
-              </div>
-            ) : shareUrl ? (
+              </div>        
+                  ) : error ? (
+                   <div
+                  className="mt-5 rounded-xl border border-red-200 !bg-white px-4 py-4 text-sm !text-red-600 dark:border-red-900/50 dark:!bg-white dark:!text-red-600"
+                   role="alert"
+                      >
+                       {error}
+                        </div>
+                     ) : shareUrl ? (
               <div className="mt-4 flex flex-wrap items-center justify-center gap-x-8 gap-y-3 border-t border-zinc-100 pt-4 dark:border-zinc-800 sm:mt-5 sm:gap-x-12 sm:pt-5">
                 <button type="button" onClick={handleCopy} className="group flex min-w-[72px] flex-col items-center gap-2 text-sm text-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-100">
                   <span className="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-100 transition-colors group-hover:bg-zinc-200 dark:bg-zinc-800 dark:group-hover:bg-zinc-700">
