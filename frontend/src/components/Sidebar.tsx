@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { Session, User } from '../types';
@@ -19,6 +19,8 @@ interface Props {
   sessions: Session[];
   currentSessionId: number | null;
   respondingSessionId?: number | null;
+  typingSessionId?: number | null;
+  onTypingDone?: () => void;
   onSelectSession: (id: number) => void;
   onNewSession: () => void;
   onDeleteSession: (id: number) => void;
@@ -322,12 +324,48 @@ function CollapsedPinnedPopup({
   );
 }
 
+// ─── TypewriterText ───────────────────────────────────────────────────────────
+// Types a chat name in letter by letter. The real, full name always lives in the
+// sessions data; this only controls how much of it is shown, so a name can never
+// get stuck on a partial value (e.g. just "F").
+function TypewriterText({ text, onDone }: { text: string; onDone?: () => void }) {
+  const chars = useMemo<string[]>(() => {
+    try {
+      const Seg = (Intl as any).Segmenter;
+      if (Seg) return Array.from(new Seg(undefined, { granularity: 'grapheme' }).segment(text), (part: any) => part.segment as string);
+    } catch { /* fall through */ }
+    return Array.from(text);
+  }, [text]);
+  const [count, setCount] = useState(Math.min(1, chars.length));
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+
+  useEffect(() => {
+    const started = Date.now();
+    const duration = Math.min(1800, Math.max(500, chars.length * 45));
+    setCount(Math.min(1, chars.length));
+    const timer = window.setInterval(() => {
+      const progress = Math.min(1, (Date.now() - started) / duration);
+      setCount(Math.max(1, Math.ceil(chars.length * progress)));
+      if (progress >= 1) {
+        window.clearInterval(timer);
+        onDoneRef.current?.();
+      }
+    }, 40);
+    return () => window.clearInterval(timer);
+  }, [chars]);
+
+  return <>{chars.slice(0, count).join('')}</>;
+}
+
 // ─── SessionList ──────────────────────────────────────────────────────────────
 interface SessionListProps {
   user: User;
   sessions: Session[];
   currentSessionId: number | null;
   respondingSessionId?: number | null;
+  typingSessionId?: number | null;
+  onTypingDone?: () => void;
   onSelectSession: (id: number) => void;
   onNewSession: () => void;
   onDeleteSession: (id: number) => void;
@@ -345,6 +383,8 @@ function SessionList({
   sessions,
   currentSessionId,
   respondingSessionId,
+  typingSessionId,
+  onTypingDone,
   onSelectSession,
   onNewSession,
   onDeleteSession,
@@ -741,7 +781,9 @@ function SessionList({
                           />
                         ) : (
                           <span className="flex-1 min-w-0 truncate text-xs font-semibold leading-snug">
-                            {session.sessionName}
+                            {typingSessionId === session.id
+                              ? <TypewriterText text={session.sessionName} onDone={onTypingDone} />
+                              : session.sessionName}
                           </span>
                         )}
 
@@ -1266,6 +1308,8 @@ export default function Sidebar({
   sessions,
   currentSessionId,
   respondingSessionId,
+  typingSessionId,
+  onTypingDone,
   onSelectSession,
   onNewSession,
   onDeleteSession,
@@ -1441,6 +1485,8 @@ export default function Sidebar({
     sessions,
     currentSessionId,
     respondingSessionId,
+    typingSessionId,
+    onTypingDone,
     onSelectSession,
     onNewSession,
     onDeleteSession,
