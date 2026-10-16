@@ -12,6 +12,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import UserAvatar from './UserAvatar'; 
 import { chatApi } from '../lib/api';
 import StormLogo from './StormLogo'; 
+import SearchBar from './SearchBar';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Props {
@@ -780,7 +781,7 @@ function SessionList({
                             className="flex-1 min-w-0 bg-white dark:bg-zinc-900 border border-zinc-400 rounded-lg px-2 py-0.5 text-xs font-medium text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-indigo-400/30"
                           />
                         ) : (
-                          <span className="flex-1 min-w-0 truncate text-xs font-semibold leading-snug">
+                          <span data-twinkle-user-content className="flex-1 min-w-0 truncate text-xs font-semibold leading-snug">
                             {typingSessionId === session.id
                               ? <TypewriterText text={session.sessionName} onDone={onTypingDone} />
                               : session.sessionName}
@@ -1240,23 +1241,21 @@ function ChatSearchModal({
         exit={{ opacity: 0, scale: 0.985, y: -6 }}
         className="relative z-10 flex h-[min(620px,76vh)] w-full max-w-[720px] flex-col overflow-hidden rounded-[24px] border border-zinc-200 bg-white shadow-[0_24px_70px_rgba(0,0,0,0.16)] dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-[0_24px_70px_rgba(0,0,0,0.45)]"
       >
-        <div className="flex shrink-0 items-center border-b border-zinc-100 px-7 py-5 dark:border-zinc-800">
-          <Search className="mr-4 h-[21px] w-[21px] text-zinc-400" strokeWidth={1.8} />
-          <input
+        <div className="flex shrink-0 items-center gap-3 px-5 pb-1 pt-5 sm:px-7">
+          <SearchBar
             ref={inputRef}
             value={query}
-            onChange={event => setQuery(event.target.value)}
+            onChange={setQuery}
             placeholder="Search..."
             type="search"
-            autoComplete="off"
-            spellCheck={false}
-            className="min-w-0 flex-1 bg-transparent text-[18px] font-normal text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100"
+            size="lg"
+            className="flex-1"
           />
           <button
             type="button"
             onClick={onClose}
             aria-label="Close search"
-            className="ml-4 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
           >
             <X className="h-[20px] w-[20px]" strokeWidth={1.8} />
           </button>
@@ -1289,7 +1288,7 @@ function ChatSearchModal({
                   className="flex w-full items-center gap-5 rounded-xl px-3 py-3 text-left transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
                 >
                   <MessageCircle className="h-[22px] w-[22px] shrink-0 text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
-                  <span className="min-w-0 flex-1 truncate text-[17px] font-normal text-zinc-900 dark:text-zinc-100">
+                  <span data-twinkle-user-content className="min-w-0 flex-1 truncate text-[17px] font-normal text-zinc-900 dark:text-zinc-100">
                     {session.sessionName}
                   </span>
                 </button>
