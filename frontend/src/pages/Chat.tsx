@@ -884,12 +884,12 @@ const playModelSwitchSound = () => {
 
 
 const EMPTY_CHAT_PROMPTS = [
-  "What's on your mind today?",
-  "What would you like to explore?",
-  "What can I help you with today?",
-  "What are you working on?",
-  "What would you like to create today?",
-  "What should we figure out together?",
+  "What's on your mind today? 💭",
+  "What would you like to explore? 🔍",
+  "What can I help you with today? 😊",
+  "What are you working on? 🛠️",
+  "What would you like to create today? 🎨",
+  "What should we figure out together? 🤝",
 ];
 
 const getNextEmptyChatPrompt = (current: string): string => {
@@ -899,52 +899,49 @@ const getNextEmptyChatPrompt = (current: string): string => {
 };
 
 const EMPTY_CHAT_GREETINGS = [
-  'Good to see you, {name}',
-  'Welcome back.',
-  'Nice to see you.',
-  'Great to have you here.',
-  'Hello there.',
-  'Hey, {name}. Ready to dive in?',
-  'Good to have you here.',
-  'What would you like to explore?',
-  'What can we work on today?',
-  'Ready when you are.',
-  'Let’s make something great today.',
-  'What’s on your mind?',
-  'What shall we work on?',
-  'Where should we start?',
-  'Let’s get started.',
-  'What can I help you with?',
-  'Have something in mind?',
-  'What are we building today?',
-  'What would you like to accomplish?',
-  'Let’s figure it out together.',
+  'Good to see you, {name} 👋',
+  'Welcome back, {name} ✨',
+  'Hey {name}, ready to dive in? 🚀',
+  'Nice to see you 😊',
+  'Great to have you here 🌟',
+  'Hello there 👋',
+  'What would you like to explore? 🔍',
+  'What can we work on today? 💡',
+  'Ready when you are ⚡',
+  'Let’s make something great today 🎨',
+  'What’s on your mind? 💭',
+  'Where should we start? 🧭',
+  'Let’s get started 🚀',
+  'Have something in mind? 💡',
+  'What are we building today? 🛠️',
+  'What would you like to accomplish? 🎯',
+  'Let’s figure it out together 🤝',
 ];
 
 const TIME_BASED_CHAT_GREETINGS = {
   morning: [
-    'Good morning, {name}',
-    'Good morning.',
-    'A fresh morning, a fresh start.',
-    'Good morning. What shall we work on?',
-    'Hope your morning is going well.',
-    'Ready to make the most of your morning?',
+    'Good morning, {name} ☀️',
+    'Good morning ☀️',
+    'A fresh morning, a fresh start 🌅',
+    'Good morning. What shall we work on? ☕',
+    'Hope your morning is going well 🌼',
+    'Ready to make the most of your morning? 🚀',
   ],
   afternoon: [
-    'Good afternoon, {name}',
-    'Good afternoon.',
-    'Good afternoon. What can we work on?',
-    'Hope your afternoon is going well.',
-    'Ready for a productive afternoon?',
-    'What would you like to explore this afternoon?',
+    'Good afternoon, {name} 🌤️',
+    'Good afternoon 🌤️',
+    'Good afternoon. What can we work on? 💡',
+    'Hope your afternoon is going well 😊',
+    'Ready for a productive afternoon? ⚡',
+    'What would you like to explore this afternoon? 🔍',
   ],
   evening: [
-    'Good evening, {name}',
-    'Good evening.',
-    'Good evening. What shall we work on?',
-    'Hope your evening is going well.',
-    'Ready to get something done this evening?',
-    'What would you like to explore this evening?',
+    'Good evening, {name} 🌙',
+    'Good evening 🌆',
+    'Good evening. What shall we work on? ✨',
+    'Hope your evening is going well 🌙',
+    'Ready to get something done this evening? 💪',
+    'What would you like to explore this evening? 🔭',
   ],
 };
 
@@ -957,19 +954,30 @@ const getTimeOfDay = (): 'morning' | 'afternoon' | 'evening' => {
 };
 
 const getRandomChatGreeting = (userName = '', previousGreeting = ''): string => {
-  const name = userName.trim().split(/\s+/)[0];
-  const timeGreetings = TIME_BASED_CHAT_GREETINGS[getTimeOfDay()];
-  const namedGreetings = name
-    ? [`Good to see you, ${name}.`, `Hey ${name}, ready to dive in?`, `Welcome back, ${name}.`]
-    : [];
-  const choices = [...new Set([
-    ...namedGreetings,
-    ...timeGreetings,
-    ...EMPTY_CHAT_GREETINGS.filter(greeting => !greeting.includes('{name}')),
+  const rawName = userName.trim().split(/\s+/)[0] || '';
+  // Never greet someone with an email address or a username full of digits.
+  const name = rawName.includes('@') ? rawName.split('@')[0] : rawName;
+  const displayName = name ? name.charAt(0).toUpperCase() + name.slice(1) : '';
+
+  // Fill {name}. Templates that need a name are dropped when there is none, so
+  // the placeholder text can never reach the screen.
+  const fill = (template: string): string | null => {
+    if (!template.includes('{name}')) return template;
+    return displayName ? template.replace(/\{name\}/g, displayName) : null;
+  };
+
+  const pool = [
+    ...TIME_BASED_CHAT_GREETINGS[getTimeOfDay()],
+    ...TIME_BASED_CHAT_GREETINGS[getTimeOfDay()], // weight the time-aware greetings
+    ...EMPTY_CHAT_GREETINGS,
     ...EMPTY_CHAT_PROMPTS,
-  ])].filter(greeting => greeting !== previousGreeting);
-  const available = choices.length ? choices : [...timeGreetings, ...EMPTY_CHAT_PROMPTS];
-  return available[Math.floor(Math.random() * available.length)];
+  ]
+    .map(fill)
+    .filter((greeting): greeting is string => Boolean(greeting));
+
+  const choices = [...new Set(pool)].filter(greeting => greeting !== previousGreeting);
+  const available = choices.length ? choices : [...new Set(pool)];
+  return available[Math.floor(Math.random() * available.length)] || 'What’s on your mind? 💭';
 };
 
 const LongTailArrowDown = ({ className = '' }: { className?: string }) => (
@@ -1444,12 +1452,16 @@ ${textToRead}` }] }], turnComplete: true },
           autoGainControl: true,
         },
       });
+      streamPromise.catch(() => undefined); // surfaced later; avoids an unhandled rejection
 
       const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioContextCtor) throw new Error('Web Audio is not supported in this browser.');
       const context = new AudioContextCtor();
       voiceGeminiAudioContextRef.current = context;
-      if (context.state === 'suspended') await context.resume();
+      // Resume in parallel with everything else instead of blocking on it.
+      const resumePromise: Promise<unknown> = context.state === 'suspended'
+        ? context.resume().catch(() => undefined)
+        : Promise.resolve();
 
       // Brave can expose AudioWorklet but still fail to construct the node after
       // loading a blob module. Do not make dictation depend on AudioWorklet:
@@ -1469,12 +1481,18 @@ ${textToRead}` }] }], turnComplete: true },
         }
       }
 
-      const [stream, { token, model }] = await Promise.all([streamPromise, tokenPromise, workletReadyPromise]);
+      // Open the Gemini socket the moment the (pre-warmed) token is ready. The
+      // microphone, AudioContext and worklet keep initializing in parallel, so
+      // the network handshake no longer waits for them. Mic audio is buffered
+      // until the socket is open.
+      const { token, model } = await tokenPromise.catch(error => {
+        streamPromise.then(s => s.getTracks().forEach(track => track.stop())).catch(() => undefined);
+        throw error;
+      });
       if (attempt !== voiceStartRef.current || !voiceDictationWantedRef.current) {
-        stream.getTracks().forEach(track => track.stop());
+        streamPromise.then(s => s.getTracks().forEach(track => track.stop())).catch(() => undefined);
         return;
       }
-      voiceGeminiStreamRef.current = stream;
 
       const socket = new WebSocket(
         `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}`
@@ -1567,6 +1585,13 @@ ${textToRead}` }] }], turnComplete: true },
           console.warn('Twinkle Gemini dictation socket closed:', event.code, event.reason || 'no reason');
         }
       };
+
+      const [stream] = await Promise.all([streamPromise, workletReadyPromise, resumePromise]);
+      if (attempt !== voiceStartRef.current || !voiceDictationWantedRef.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+      voiceGeminiStreamRef.current = stream;
 
       const source = context.createMediaStreamSource(stream);
       const silentGain = context.createGain();
@@ -4690,6 +4715,8 @@ const chooseModel = useCallback((modelId: string) => {
                       // event/render cycle completes. The existing guard inside
                       // startVoiceInput prevents the follow-up click from
                       // starting a second recognition session.
+                      onPointerEnter={() => warmLiveToken()}
+                      onFocus={() => warmLiveToken()}
                       onPointerDown={startVoiceInput}
                       onClick={(event) => event.preventDefault()}
                       disabled={isTyping || isProcessingFiles}
