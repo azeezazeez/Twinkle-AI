@@ -98,7 +98,7 @@ const ShareChatModal: React.FC<ShareChatModalProps> = ({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="absolute inset-0 cursor-default border-0 bg-black/30 backdrop-blur-[2px]"
+            className="absolute inset-0 cursor-default border-0 bg-white/30 backdrop-blur-[2px]"
           />
 
           <motion.div
