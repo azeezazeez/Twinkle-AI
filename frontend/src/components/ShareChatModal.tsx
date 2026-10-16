@@ -11,6 +11,10 @@ interface ShareChatModalProps {
   promptText?: string;
   isLoading?: boolean;
   error?: string | null;
+  /** 'prompt' shares a single prompt; 'conversation' shares the whole chat. */
+  mode?: 'prompt' | 'conversation';
+  /** Conversation mode: creates the public link when the user asks for it. */
+  onCreateLink?: () => void;
   onClose: () => void;
 }
 
@@ -22,12 +26,17 @@ const ShareChatModal: React.FC<ShareChatModalProps> = ({
   promptText = '',
   isLoading = false,
   error = null,
+  mode = 'prompt',
+  onCreateLink,
   onClose,
 }) => {
   const [copied, setCopied] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const title = 'Share prompt';
-  const description = shareDescription || 'Anyone with this link can open Twinkle AI with this prompt ready to send.';
+  const isConversation = mode === 'conversation';
+  const title = isConversation ? 'Share chat' : 'Share prompt';
+  const description = shareDescription || (isConversation
+    ? 'Anyone with this link can view this conversation. Messages you send afterwards are not shared.'
+    : 'Anyone with this link can open Twinkle AI with this prompt ready to send.');
 
   useEffect(() => {
     if (!isOpen) {
@@ -122,35 +131,58 @@ const ShareChatModal: React.FC<ShareChatModalProps> = ({
             </button>
 
             <h2 id="share-chat-title" className="pr-12 text-[24px] font-semibold leading-tight tracking-[-0.025em] text-zinc-900 dark:text-zinc-100 sm:text-[26px]">
-              Share prompt
+              {title}
             </h2>
 
             {/* Prompt preview, styled like the requested ChatGPT share dialog. */}
             <div className="mt-4 min-h-[150px] max-h-[42dvh] flex-1 overflow-y-auto rounded-xl border border-zinc-200 bg-[#fcfcfc] p-3 dark:border-zinc-700 dark:bg-zinc-950/30 sm:mt-5 sm:min-h-[230px] sm:p-5">
               <div className="ml-auto max-w-[min(100%,560px)] rounded-[22px] bg-[#f0f0f0] px-4 py-3 text-[14px] leading-6 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100 sm:px-5 sm:text-[15px] sm:leading-7">
-                <p className="whitespace-pre-wrap break-words">{promptText.trim() || 'Your shared prompt preview will appear here.'}</p>
+                <p className="whitespace-pre-wrap break-words">{promptText.trim() || (isConversation ? 'Untitled chat' : 'Your shared prompt preview will appear here.')}</p>
               </div>
             </div>
 
             <div className="mt-4 flex items-start gap-3 sm:mt-5">
               <Globe className="mt-0.5 h-5 w-5 shrink-0 text-zinc-900 dark:text-zinc-100" strokeWidth={1.8} />
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Share a public link to this prompt</p>
-                <p className="mt-1 text-sm leading-5 text-zinc-500 dark:text-zinc-400">Anyone with this link can open Twinkle AI with this prompt ready to send.</p>
+                <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{isConversation ? 'Share a public link to this chat' : 'Share a public link to this prompt'}</p>
+                <p className="mt-1 text-sm leading-5 text-zinc-500 dark:text-zinc-400">{description}</p>
               </div>
             </div>
 
             {isLoading ? (
               <div className="mt-5 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-400" role="status">
                 Creating share link…
-              </div>        
+              </div>
                   ) : error ? (
-                   <div
-                  className="mt-5 rounded-xl border border-red-200 !bg-white px-4 py-4 text-sm !text-red-600 dark:border-red-900/50 dark:!bg-white dark:!text-red-600"
-                   role="alert"
-                      >
-                       {error}
-                        </div>
+                   <div className="mt-5">
+                    <div
+                      className="rounded-xl border border-red-200 !bg-white px-4 py-4 text-sm !text-red-600 dark:border-red-900/50 dark:!bg-white dark:!text-red-600"
+                      role="alert"
+                    >
+                      {error}
+                    </div>
+                    {isConversation && onCreateLink && (
+                      <div className="mt-3 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={onCreateLink}
+                          className="inline-flex h-9 items-center justify-center rounded-lg border border-zinc-300 px-4 text-[14px] font-medium text-zinc-800 transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:border-zinc-600 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                        >
+                          Try again
+                        </button>
+                      </div>
+                    )}
+                   </div>
+                     ) : isConversation && !shareUrl && onCreateLink ? (
+              <div className="mt-4 flex justify-end border-t border-zinc-100 pt-4 dark:border-zinc-800 sm:mt-5 sm:pt-5">
+                <button
+                  type="button"
+                  onClick={onCreateLink}
+                  className="inline-flex h-9 items-center justify-center rounded-lg bg-zinc-900 px-4 text-[14px] font-medium text-white transition-colors hover:bg-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+                >
+                  Create public link
+                </button>
+              </div>
                      ) : shareUrl ? (
               <div className="mt-4 flex flex-wrap items-center justify-center gap-x-8 gap-y-3 border-t border-zinc-100 pt-4 dark:border-zinc-800 sm:mt-5 sm:gap-x-12 sm:pt-5">
                 <button type="button" onClick={handleCopy} className="group flex min-w-[72px] flex-col items-center gap-2 text-sm text-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-100">
