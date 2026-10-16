@@ -110,7 +110,7 @@ function saveDb(data: Db): void {
 
 async function startServer(): Promise<void> {
   const app = express();
-  const PORT = process.env.PORT ?? 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // Increased limit to handle base64-encoded file uploads (images, text files)
   app.use(express.json({ limit: "50mb" }));
