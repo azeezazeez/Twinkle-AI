@@ -3895,11 +3895,12 @@ const chooseModel = useCallback((modelId: string) => {
                   <StormLogo className="twinkle-chat-logo h-7 w-7 md:h-8 md:w-8 text-zinc-800 dark:text-zinc-100" />
                 </motion.div>
                 <motion.h2
+                  key={chatGreeting}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   className="whitespace-normal text-balance text-[clamp(1.2rem,2.25vw,1.5rem)] font-normal tracking-tight text-zinc-900 dark:text-zinc-100"
                 >
-                  Have Something in Mind?
+                  {chatGreeting}
                 </motion.h2>
               </div>
             ) : (
