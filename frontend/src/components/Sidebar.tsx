@@ -387,6 +387,11 @@ function SessionList({
   const [dateSortOrder, setDateSortOrder] = useState<'newest' | 'oldest'>('newest');
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [newChatTooltipPosition, setNewChatTooltipPosition] = useState<{ top: number; left: number } | null>(null);
+  const [headerTooltip, setHeaderTooltip] = useState<{ label: string; top: number; left: number } | null>(null);
+  const showHeaderTooltip = (label: string, el: HTMLElement) => {
+    const rect = el.getBoundingClientRect();
+    setHeaderTooltip({ label, top: Math.max(8, rect.top - 42), left: rect.left + rect.width / 2 });
+  };
 
   useEffect(() => {
     if (menuOpenId === null) return;
@@ -572,9 +577,11 @@ function SessionList({
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
+                          setHeaderTooltip(null);
                           setSortMenuOpen(open => !open);
                         }}
-                        title="Sort chats"
+                        onMouseEnter={(e) => { if (!sortMenuOpen) showHeaderTooltip('Sort chats', e.currentTarget); }}
+                        onMouseLeave={() => setHeaderTooltip(null)}
                         aria-label="Sort chats"
                         aria-haspopup="menu"
                         aria-expanded={sortMenuOpen}
@@ -654,14 +661,25 @@ function SessionList({
                         document.body
                       )}
                     </div>
+                    {headerTooltip && typeof document !== 'undefined' && createPortal(
+                      <div
+                        className="pointer-events-none fixed -translate-x-1/2 rounded-full bg-[#111111] px-3.5 py-2 text-[14px] font-bold [font-family:inherit] text-white whitespace-nowrap shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
+                        style={{ top: headerTooltip.top, left: headerTooltip.left, zIndex: 2147483647 }}
+                      >
+                        {headerTooltip.label}
+                      </div>,
+                      document.body
+                    )}
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
+                        setHeaderTooltip(null);
                         onClose();
                         onClearAll();
                       }}
-                      title="Clear all"
+                      onMouseEnter={(e) => showHeaderTooltip('Clear all', e.currentTarget)}
+                      onMouseLeave={() => setHeaderTooltip(null)}
                       aria-label="Clear all chats"
                       className="inline-flex h-6 w-6 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
                     >
