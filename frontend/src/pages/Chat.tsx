@@ -562,6 +562,52 @@ const generateProfessionalChatTitle = (message: string, hasFiles = false): strin
   return action ? `${action} ${fallback}`.split(/\s+/).slice(0, 6).join(' ') : fallback.split(/\s+/).slice(0, 6).join(' ');
 };
 
+/**
+ * Normalizes any chat title (AI generated, Live Talk, legacy rows) into a clean,
+ * professional sidebar title: no markdown, quotes, "Title:" prefixes, trailing
+ * punctuation/ellipsis, or mid-word cuts. Safe to run repeatedly (idempotent).
+ */
+const polishChatTitle = (raw: unknown, fallback = ''): string => {
+  let t = String(raw ?? '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/[`*_#>~]+/g, '')
+    .replace(/^\s*(?:chat\s+title|conversation\s+title|title)\s*[:\-–—]\s*/i, '')
+    .replace(/^\s*live\s*talk\s*[:\-–—]\s*/i, '')
+    .replace(/^["'“”‘’«»\s]+|["'“”‘’«»\s]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/(?:\.{2,}|…)+\s*$/, '')
+    .replace(/[\s.,;:!?\-–—]+$/, '')
+    .trim();
+  if (!t) return fallback;
+
+  const MAX = 50;
+  if (t.length > MAX) {
+    const cut = t.slice(0, MAX);
+    const lastSpace = cut.lastIndexOf(' ');
+    t = (lastSpace > 20 ? cut.slice(0, lastSpace) : cut)
+      .replace(/\s+(?:a|an|the|and|or|of|to|for|in|on|with|about|from|by|is|are)$/i, '')
+      .replace(/[\s.,;:!?\-–—]+$/, '')
+      .trim();
+  }
+
+  // Capitalize titles that came back entirely lowercase (Latin script only).
+  if (/^[a-z0-9\s'’:&/+.-]+$/.test(t)) {
+    const small = new Set(['a', 'an', 'the', 'and', 'or', 'of', 'to', 'for', 'in', 'on', 'with', 'vs']);
+    t = t.split(' ').map((w, i) => (i > 0 && small.has(w)) ? w : w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  }
+  return t || fallback;
+};
+
+const isGenericOrRawTitle = (name: unknown): boolean => {
+  const n = String(name ?? '').trim();
+  if (!n) return true;
+  if (/^(new chat|chat|live talk|file analysis|untitled)$/i.test(n)) return true;
+  if (/(?:\.{2,}|…)\s*$/.test(n)) return true;          // truncated raw message
+  if (n.length > 55) return true;                        // pasted sentence
+  if (/[?]$/.test(n) && n.split(/\s+/).length > 6) return true;
+  return false;
+};
+
 const formatFileSize = (bytes: number): string => {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)}KB`;
@@ -1286,7 +1332,7 @@ ${textToRead}` }] }], turnComplete: true },
   const sidebarSessions = sessions.map(session =>
     typingSessionTitle?.id === session.id
       ? { ...session, sessionName: typedSessionTitle }
-      : session
+      : { ...session, sessionName: polishChatTitle(session.sessionName, session.sessionName || 'New Chat') }
   );
   const sessionToDelete = sessions.find(session => session.id === sessionIdToDelete);
   const deleteDataWeight = (() => {
@@ -2248,7 +2294,7 @@ const chooseModel = useCallback((modelId: string) => {
   // immediately instead of forcing another GET /chat/sessions request.
   useEffect(() => {
     const handleLiveSessionUpdate = (event: Event) => {
-      const detail = (event as CustomEvent<{ id: number; sessionName?: string }>).detail;
+      const detail = (event as CustomEvent<{ id: number; sessionName?: string; publicId?: string }>).detail;
       if (!detail?.id) return;
 
       const now = new Date().toISOString();
@@ -2257,6 +2303,7 @@ const chooseModel = useCallback((modelId: string) => {
         if (existing) {
           const updated = {
             ...existing,
+            publicId: existing.publicId || detail.publicId,
             sessionName: detail.sessionName || existing.sessionName,
             updatedAt: now,
           };
@@ -2266,6 +2313,7 @@ const chooseModel = useCallback((modelId: string) => {
         return [
           {
             id: detail.id,
+            publicId: detail.publicId,
             userId: user.id,
             sessionName: detail.sessionName || 'Live Talk',
             createdAt: now,
@@ -2280,12 +2328,12 @@ const chooseModel = useCallback((modelId: string) => {
     return () => window.removeEventListener('twinkle-live-session-updated', handleLiveSessionUpdate);
   }, [user.id]);
 
-  const loadMessages = useCallback(async (sid: number) => {
+  const loadMessages = useCallback(async (sid: number): Promise<Message[] | null> => {
     // The streaming request owns the local message state while it is active.
     // Do not hydrate the same session from history during that window; doing
     // so can insert the persisted first answer and then the final SSE answer.
     if (isSendingRef.current && activeResponseSessionRef.current === sid) {
-      return;
+      return null;
     }
 
     try {
@@ -2300,7 +2348,8 @@ const chooseModel = useCallback((modelId: string) => {
         timestamp: msg?.timestamp || new Date().toISOString(),
       }));
 
-      setMessages(dedupeMessages(normalizedMessages));
+      const finalMessages = dedupeMessages(normalizedMessages);
+      setMessages(finalMessages);
 
       const persistedAttachments: Record<string | number, string[]> = {};
       rawMessages.forEach((msg: any, index: number) => {
@@ -2313,9 +2362,11 @@ const chooseModel = useCallback((modelId: string) => {
       });
 
       setMessageAttachments(persistedAttachments);
+      return finalMessages;
     } catch (err: any) {
       console.error('Failed to load messages:', err);
       if (err.status === 401) onLogout();
+      return null;
     }
   }, [onLogout]);
 
@@ -3114,12 +3165,11 @@ const chooseModel = useCallback((modelId: string) => {
           const titleResponse: any = await chatApi.generateTitle(titleInput);
 
           const titleFromModel = typeof titleResponse?.title === 'string' ? titleResponse.title.trim() : '';
-          const titleFromMessage = titleInput.replace(/\s+/g, ' ').trim();
-          const fallbackTitle = titleFromMessage.length > 36 ? `${titleFromMessage.slice(0, 33).trim()}...` : titleFromMessage;
+          const polishedModelTitle = polishChatTitle(titleFromModel);
           const newTitle =
-            titleFromModel.length >= 3 && !/^(new chat|chat|question|request|e)$/i.test(titleFromModel)
-              ? titleFromModel.slice(0, 60)
-              : (fallbackTitle || 'New Chat');
+            polishedModelTitle.length >= 3 && !/^(new chat|chat|question|request|conversation|e)$/i.test(polishedModelTitle)
+              ? polishedModelTitle
+              : polishChatTitle(generateProfessionalChatTitle(titleInput, Boolean(filesToSend?.length)), 'New Chat');
 
           await chatApi.renameSession(activeSessionId, newTitle);
           setTypingSessionTitle({ id: activeSessionId, title: newTitle });
@@ -3429,35 +3479,36 @@ const chooseModel = useCallback((modelId: string) => {
     setModalType('delete-single');
   };
 
-  const confirmDeleteSession = async () => {
-    if (sessionIdToDelete === null || isDeletingChat) return;
+  const confirmDeleteSession = () => {
+    if (sessionIdToDelete === null) return;
 
     const deletedSessionId = sessionIdToDelete;
-    setIsDeletingChat(true);
+    const removedSession = sessions.find(session => session.id === deletedSessionId);
+    const wasCurrent = currentSessionId === deletedSessionId;
 
-    try {
-      await chatApi.deleteSession(deletedSessionId);
-
-      // Update React state immediately after the server confirms deletion.
-      // This keeps the sidebar in sync without requiring a browser refresh.
-      setSessions(prev => prev.filter(session => session.id !== deletedSessionId));
-
-      if (currentSessionId === deletedSessionId) {
-        setCurrentSessionId(null);
-        persistSessionId(null);
-        setMessages([]);
-        setEditingMessage(null);
-        setTypingSessionTitle(current =>
-          current?.id === deletedSessionId ? null : current
-        );
-      }
-    } catch (err) {
-      console.error('Delete session failed:', err);
-    } finally {
-      setIsDeletingChat(false);
-      setSessionIdToDelete(null);
-      setModalType('none');
+    // Optimistic: close the dialog and remove the chat instantly; the server
+    // request runs in the background and the chat is restored if it fails.
+    setModalType('none');
+    setSessionIdToDelete(null);
+    setSessions(prev => prev.filter(session => session.id !== deletedSessionId));
+    setTypingSessionTitle(current => current?.id === deletedSessionId ? null : current);
+    if (wasCurrent) {
+      setCurrentSessionId(null);
+      persistSessionId(null);
+      setMessages([]);
+      setEditingMessage(null);
+      if (window.location.pathname !== '/') navigate('/', { replace: true });
     }
+
+    void chatApi.deleteSession(deletedSessionId).catch(err => {
+      console.error('Delete session failed:', err);
+      if (removedSession) {
+        setSessions(prev => prev.some(session => session.id === deletedSessionId)
+          ? prev
+          : [removedSession, ...prev]);
+      }
+      window.alert('The chat could not be deleted. Please try again.');
+    });
   };
 
   const renameSession = async (sid: number, newName: string) => {
@@ -3520,7 +3571,6 @@ const chooseModel = useCallback((modelId: string) => {
       return;
     }
 
-    const shareStartedAt = Date.now();
     setTopShareBusy(true);
     setShareSuccessVisible(false);
     setShareError(null);
@@ -3542,12 +3592,6 @@ const chooseModel = useCallback((modelId: string) => {
       }
       await navigator.clipboard.writeText(url);
 
-      // Keep the share icon spinning for a total of at least five seconds,
-      // but only show success after link creation and clipboard copy succeed.
-      const remainingLoadingTime = Math.max(0, 5000 - (Date.now() - shareStartedAt));
-      if (remainingLoadingTime > 0) {
-        await new Promise<void>(resolve => window.setTimeout(resolve, remainingLoadingTime));
-      }
       setShareUrl(url);
       setShareSuccessVisible(true);
       setShareSessionId(null);
@@ -3569,27 +3613,25 @@ const chooseModel = useCallback((modelId: string) => {
     setShareLoading(false);
   };
 
-  const confirmClearAll = async () => {
-    if (isDeletingChat) return;
-    setIsDeletingChat(true);
-    try {
-      await chatApi.clearSessions();
+  const confirmClearAll = () => {
+    const previousSessions = sessions;
 
-      // Clear the local session collection as soon as the backend confirms
-      // the operation so the sidebar updates immediately.
-      setSessions([]);
-      setTypingSessionTitle(null);
-      setSessionIdToDelete(null);
-      setCurrentSessionId(null);
-      persistSessionId(null);
-      setMessages([]);
-      setEditingMessage(null);
-    } catch (err) {
+    // Optimistic clear: instant UI, background request, rollback on failure.
+    setModalType('none');
+    setSessions([]);
+    setTypingSessionTitle(null);
+    setSessionIdToDelete(null);
+    setCurrentSessionId(null);
+    persistSessionId(null);
+    setMessages([]);
+    setEditingMessage(null);
+    if (window.location.pathname !== '/') navigate('/', { replace: true });
+
+    void chatApi.clearSessions().catch(err => {
       console.error('Clear sessions failed:', err);
-    } finally {
-      setIsDeletingChat(false);
-      setModalType('none');
-    }
+      setSessions(previousSessions);
+      window.alert('Your chats could not be cleared. Please try again.');
+    });
   };
 
   const handleLogout = async () => {
@@ -3650,33 +3692,81 @@ const chooseModel = useCallback((modelId: string) => {
    * Make that saved Live Talk session the active chat immediately so the
    * normal chat area displays the complete transcript without a refresh.
    */
-  const handleLiveSessionComplete = useCallback((sessionId: number) => {
+  const handleLiveSessionComplete = useCallback(async (sessionId: number, sessionName?: string, publicIdFromLive?: string) => {
     if (!Number.isFinite(sessionId)) return;
 
-    setSessions(prev => {
-      const existing = prev.find(session => session.id === sessionId);
-      if (existing) {
-        return [existing, ...prev.filter(session => session.id !== sessionId)];
-      }
-
+    // Hold the URL/session effects for a moment so they cannot snap back to the
+    // chat that was open before Live Talk started (e.g. /c/<old-uuid>).
+    creatingNewSessionRef.current = true;
+    try {
       const now = new Date().toISOString();
-      return [
-        {
+      let publicId = publicIdFromLive || sessions.find(session => session.id === sessionId)?.publicId;
+
+      // Make the saved chat visible in the sidebar right away.
+      setSessions(prev => {
+        const existing = prev.find(session => session.id === sessionId);
+        const base = existing ?? {
           id: sessionId,
           userId: user.id,
-          sessionName: 'Live Talk',
+          sessionName: sessionName || 'Live Talk',
           createdAt: now,
           updatedAt: now,
-        },
-        ...prev,
-      ];
-    });
+        } as Session;
+        return [
+          { ...base, publicId: base.publicId || publicId, sessionName: sessionName || base.sessionName, updatedAt: now },
+          ...prev.filter(session => session.id !== sessionId),
+        ];
+      });
 
-    setCurrentSessionId(sessionId);
-    persistSessionId(sessionId);
-    setMessages([]);
-    setEditingMessage(null);
-  }, [user.id]);
+      // Select it and put its permanent URL in the address bar in the same
+      // batch, so nothing flips back to the previous chat.
+      skipMessageLoadRef.current = currentSessionId === sessionId ? null : sessionId;
+      setEditingMessage(null);
+      setCurrentSessionId(sessionId);
+      persistSessionId(sessionId);
+      if (publicId) navigate(`/c/${publicId}`);
+
+      // Load the transcript directly. Relying only on the currentSessionId
+      // effect meant nothing was fetched when the id did not change.
+      const loaded = await loadMessages(sessionId);
+
+      // Backend titles can be a raw truncated transcript; replace those with a
+      // clean professional title. Never blocks the UI.
+      const firstUser = loaded?.find(message => message.role === 'user' && message.content.trim());
+      const currentName = sessionName || sessions.find(session => session.id === sessionId)?.sessionName;
+      if (firstUser && isGenericOrRawTitle(currentName)) {
+        void (async () => {
+          try {
+            const titleResponse: any = await chatApi.generateTitle(firstUser.content);
+            const polished = polishChatTitle(titleResponse?.title);
+            const finalTitle = polished.length >= 3 && !/^(new chat|chat|question|request|conversation)$/i.test(polished)
+              ? polished
+              : polishChatTitle(generateProfessionalChatTitle(firstUser.content), 'Live Talk');
+            setSessions(prev => prev.map(session => session.id === sessionId ? { ...session, sessionName: finalTitle } : session));
+            await chatApi.renameSession(sessionId, finalTitle);
+          } catch (titleError) {
+            console.warn('Live Talk title cleanup failed:', titleError);
+          }
+        })();
+      }
+
+      // Backend always has the permanent URL id; pick it up if Live Talk did
+      // not have it yet.
+      if (!publicId) {
+        try {
+          const refreshed: any = await chatApi.getSessions();
+          const match = (refreshed?.sessions || []).find((item: any) => Number(item.id) === sessionId);
+          publicId = match?.publicId;
+          if (publicId) {
+            setSessions(prev => prev.map(session => session.id === sessionId ? { ...session, publicId } : session));
+            navigate(`/c/${publicId}`, { replace: true });
+          }
+        } catch { /* sidebar already shows the chat */ }
+      }
+    } finally {
+      window.setTimeout(() => { creatingNewSessionRef.current = false; }, 400);
+    }
+  }, [user.id, sessions, currentSessionId, navigate, loadMessages]);
 
   // Render the chat shell immediately; avoid a separate full-screen loading animation.
 
@@ -4385,94 +4475,90 @@ const chooseModel = useCallback((modelId: string) => {
 
                 {/* Main prompt area — always above the action row */}
                 {voiceInputActive ? (
-                  <div
-                    className="relative flex min-h-[58px] w-full min-w-0 items-center gap-1.5 px-1.5 py-1.5 sm:min-h-[64px] sm:px-2"
-                    aria-live="polite"
-                    aria-label={voiceSpeechDetected ? 'Listening and transcribing' : 'Speak now'}
-                  >
-                    {/* Cancel — returns to the normal composer without sending. */}
-                    <motion.button
-                      type="button"
-                      onClick={cancelVoiceInput}
-                      aria-label="Cancel dictation"
-                      data-tooltip="Cancel"
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.9 }}
-                      className="twinkle-tooltip-trigger flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white sm:h-9 sm:w-9"
+                  <>
+                    {/* Text area on top — the real composer field, filled live while speaking. */}
+                    <div
+                      className="twinkle-composer-prompt relative flex min-h-[48px] min-w-0 flex-1 items-start px-2 py-1 sm:min-h-[52px]"
+                      aria-live="polite"
+                      aria-label={voiceSpeechDetected ? 'Listening and transcribing' : 'Speak now'}
                     >
-                      <X className="h-[19px] w-[19px]" strokeWidth={2.1} />
-                    </motion.button>
-
-                    {/* This is the existing composer/search field — no second popup. */}
-                    <div className="relative min-w-0 flex-1 self-stretch">
-                      <div className="pointer-events-none absolute left-1 top-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 dark:text-zinc-500">
-                        <span>{voiceSpeechDetected ? 'Listening' : 'Speak now'}</span>
-                        <span className="flex items-end gap-[2px]" aria-hidden="true">
-                          {[0, 1, 2, 3].map(index => (
-                            <motion.span
-                              key={index}
-                              className="w-[2px] rounded-full"
-                              style={{ background: liveTalkColor.swatch }}
-                              animate={{ height: voiceSpeechDetected ? [4, 10 + index * 2, 4] : [4, 6, 4] }}
-                              transition={{ duration: 0.5, repeat: Infinity, delay: index * 0.07, ease: 'easeInOut' }}
-                            />
-                          ))}
-                        </span>
-                      </div>
                       <textarea
                         ref={inputRef}
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         rows={1}
                         aria-label="Ask Anything"
-                        className="twinkle-composer-textarea block h-full w-full min-w-0 resize-none overflow-y-auto bg-transparent px-1 pt-4 text-[16px] font-medium leading-[1.35] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[44px] max-h-[96px] sm:text-[17px]"
-                        placeholder="Speak to Twinkle…"
+                        className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent p-0 text-[15px] font-medium leading-[1.35] text-zinc-900 outline-none placeholder:italic placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[38px] max-h-[200px] sm:text-[16px] sm:min-h-[40px]"
+                        placeholder={voiceSpeechDetected ? '' : 'Listening…'}
                         onInput={(e) => {
                           const t = e.target as HTMLTextAreaElement;
                           t.style.height = 'auto';
-                          t.style.height = `${Math.min(t.scrollHeight, 96)}px`;
+                          t.style.height = `${Math.min(t.scrollHeight, 200)}px`;
                         }}
                       />
                     </div>
 
-                    {/* Deliberate space before the voice controls. */}
-                    <div className="w-2 shrink-0 sm:w-3" aria-hidden="true" />
+                    {/* Bottom row: + · dotted listening line · ✕ · ✓ */}
+                    <motion.button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isProcessingFiles}
+                      aria-label="Attach files"
+                      data-tooltip="Attach files"
+                      whileTap={{ scale: 0.94 }}
+                      className="twinkle-tooltip-trigger twinkle-composer-plus flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                    >
+                      <Plus className="h-7 w-7 shrink-0" strokeWidth={1.6} />
+                    </motion.button>
 
-                    {/* Stop — commits the spoken text to the existing search bar. */}
+                    <div
+                      className="flex min-w-0 items-center justify-end overflow-hidden px-2"
+                      style={{ gridArea: 'spacer' }}
+                      aria-hidden="true"
+                    >
+                      <div className="flex h-6 items-center gap-[5px]">
+                        {Array.from({ length: 16 }).map((_, index) => (
+                          <motion.span
+                            key={index}
+                            className="block shrink-0 rounded-full bg-zinc-500 dark:bg-zinc-400"
+                            style={{ width: 3, height: 3 }}
+                            animate={voiceSpeechDetected
+                              ? { scaleY: [1, 3.2 + ((index * 7) % 5) * 0.9, 1], opacity: [0.55, 1, 0.55] }
+                              : { scaleY: 1, opacity: [0.35, 0.8, 0.35] }}
+                            transition={{ duration: voiceSpeechDetected ? 0.55 : 1.4, repeat: Infinity, delay: index * 0.05, ease: 'easeInOut' }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Cancel — discards dictation and restores the composer. */}
+                    <motion.button
+                      type="button"
+                      onClick={cancelVoiceInput}
+                      aria-label="Cancel dictation"
+                      data-tooltip="Cancel"
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.92 }}
+                      className="twinkle-tooltip-trigger twinkle-composer-mic flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-zinc-200 bg-white text-zinc-800 shadow-sm transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                    >
+                      <X className="h-[18px] w-[18px]" strokeWidth={2} />
+                    </motion.button>
+
+                    {/* Confirm — keeps the spoken text in the composer. */}
                     <motion.button
                       type="button"
                       onClick={() => void stopVoiceCapture()}
                       disabled={voiceCaptureStopped}
-                      aria-label="Stop dictation"
-                      data-tooltip="Stop"
+                      aria-label="Confirm dictation"
+                      data-tooltip="Done"
                       whileHover={{ scale: voiceCaptureStopped ? 1 : 1.05 }}
-                      whileTap={{ scale: 0.9 }}
-                      className="twinkle-tooltip-trigger relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition-all disabled:cursor-default disabled:opacity-60 sm:h-9 sm:w-9"
-                      style={{ background: liveTalkColor.swatch }}
-                    >
-                      <span className="h-3.5 w-3.5 rounded-[3px] bg-white" />
-                    </motion.button>
-
-                    {/* Send — commits the current composer text, then sends it. */}
-                    <motion.button
-                      type="button"
-                      onClick={async () => {
-                        if (voiceCommitInProgressRef.current) return;
-                        const text = await commitVoiceInput();
-                        if (text.trim()) await handleSendMessage(undefined, text);
-                      }}
-                      aria-label="Send message"
-                      data-tooltip="Send message"
-                      whileHover={{ scale: 1.05, y: -1 }}
                       whileTap={{ scale: 0.92 }}
-                      className="twinkle-tooltip-trigger relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition-all sm:h-9 sm:w-9"
-                      style={{ background: liveTalkColor.swatch }}
+                      className="twinkle-tooltip-trigger twinkle-composer-submit flex shrink-0 items-center justify-center rounded-xl border border-zinc-200 bg-white text-zinc-800 shadow-sm transition-colors hover:bg-zinc-50 disabled:cursor-default disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                      style={{ width: 36, minWidth: 36, height: 36, flexBasis: 36, justifySelf: 'end' }}
                     >
-                      <svg viewBox="0 0 24 24" className="h-[19px] w-[19px]" aria-hidden="true">
-                        <path d="M12 21V4M6.25 9.75 12 4l5.75 5.75" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
+                      <Check className="h-[18px] w-[18px]" strokeWidth={2} />
                     </motion.button>
-                  </div>
+                  </>
                 ) : (
                   <div className="twinkle-composer-prompt relative flex min-h-[48px] min-w-0 flex-1 items-center px-2 py-1 sm:min-h-[52px] sm:px-2">
                     <textarea
@@ -4772,20 +4858,16 @@ const chooseModel = useCallback((modelId: string) => {
         onClose={() => setModalType('none')}
         onConfirm={confirmDeleteSession}
         title="Delete chat?"
-        confirmText={isDeletingChat ? 'Deleting…' : 'Delete'}
-        isLoading={isDeletingChat}
-        closeOnConfirm={false}
-        message={<>This will permanently delete{' '}<strong className="font-bold">{sessionToDelete?.sessionName || 'this chat'}</strong>. {isDeletingChat ? `Processing a ${deleteDataWeight} volume of chat data. Please wait…` : 'This can’t be undone.'}</>}
+        confirmText="Delete"
+        message={<>This will permanently delete{' '}<strong className="font-bold">{sessionToDelete?.sessionName || 'this chat'}</strong>. This can’t be undone.</>}
       />
       <ConfirmationModal
         isOpen={modalType === 'delete-all'}
         onClose={() => setModalType('none')}
         onConfirm={confirmClearAll}
         title="Clear all chats?"
-        message={isDeletingChat ? `Processing a ${deleteDataWeight} volume of chat data. Please wait…` : `All ${sessions.length} chats will be permanently deleted.`}
-        confirmText={isDeletingChat ? 'Deleting…' : 'Clear All'}
-        isLoading={isDeletingChat}
-        closeOnConfirm={false}
+        message={`All ${sessions.length} chats will be permanently deleted.`}
+        confirmText="Clear All"
       />
     </div>
   );
