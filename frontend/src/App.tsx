@@ -360,6 +360,7 @@ function AuthenticatedApp({
           user ? (
             <Settings
               user={user}
+              onLogout={handleLogout}
             />
           ) : (
             <Navigate
