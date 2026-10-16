@@ -1015,7 +1015,7 @@ function AccountMenu({
         className={
           compact
             ? "flex h-8 w-8 items-center justify-center rounded-full outline-none transition hover:scale-105 focus-visible:ring-2 focus-visible:ring-zinc-300 dark:focus-visible:ring-zinc-700"
-            : "flex h-10 w-full items-center gap-2 rounded-lg px-1.5 text-left transition-colors hover:bg-zinc-200/60 dark:hover:bg-zinc-800/70"
+            : "flex h-9 w-full items-center gap-2 rounded-lg px-1.5 text-left transition-colors hover:bg-zinc-200/60 dark:hover:bg-zinc-800/70"
         }
       >
         <UserAvatar
@@ -1023,20 +1023,20 @@ function AccountMenu({
           avatarUrl={user.avatarUrl}
           className={
             compact
-              ? "h-7 w-7 text-[10px] shadow-sm"
-              : "h-7 w-7 shrink-0 text-[11px] font-semibold shadow-none"
+              ? "h-6 w-6 text-[9px] shadow-none"
+              : "h-6 w-6 shrink-0 text-[10px] font-semibold shadow-none"
           }
         />
 
         {!compact && (
           <>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[14px] font-medium text-zinc-800 dark:text-zinc-200">
+              <span className="block truncate text-[13px] font-medium text-zinc-800 dark:text-zinc-200">
                 {user.username}
               </span>
             </span>
             <ChevronRight
-              className={`h-3.5 w-3.5 shrink-0 text-zinc-400 transition-transform ${
+              className={`h-3 w-3 shrink-0 text-zinc-400 transition-transform ${
                 open ? '-rotate-90' : ''
               }`}
             />
@@ -1069,12 +1069,12 @@ function AccountMenu({
             role="menu"
             className={
               compact
-                ? "twinkle-account-menu absolute bottom-0 left-full z-[10000] ml-3 w-[264px] origin-bottom-left overflow-hidden rounded-xl border border-zinc-200 bg-white p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.14)] dark:border-zinc-700 dark:bg-zinc-900"
-                : "twinkle-account-menu absolute bottom-[calc(100%+8px)] left-0 z-[10000] w-full min-w-[248px] origin-bottom-left overflow-hidden rounded-xl border border-zinc-200 bg-white p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.14)] dark:border-zinc-700 dark:bg-zinc-900"
+                ? "twinkle-account-menu absolute bottom-0 left-full z-[10000] ml-3 w-[264px] origin-bottom-left overflow-hidden rounded-2xl border border-zinc-200/80 bg-white p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.16)] dark:border-zinc-700/80 dark:bg-zinc-900"
+                : "twinkle-account-menu absolute bottom-[calc(100%+8px)] left-0 z-[10000] w-full min-w-[248px] origin-bottom-left overflow-hidden rounded-2xl border border-zinc-200/80 bg-white p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.16)] dark:border-zinc-700/80 dark:bg-zinc-900"
             }
           >
             {/* Account header */}
-            <div className="flex items-center gap-3 rounded-lg bg-zinc-50 px-3 py-2.5 dark:bg-zinc-800/50">
+            <div className="flex items-center gap-3 px-2.5 pb-2.5 pt-2">
               <UserAvatar
                 name={user.username}
                 avatarUrl={user.avatarUrl}
@@ -1092,12 +1092,14 @@ function AccountMenu({
               </div>
             </div>
 
-            <div className="mt-1.5 flex flex-col gap-px">
+            <div className="mx-1 border-t border-zinc-200/80 dark:border-zinc-700/70" />
+
+            <div className="mt-1.5 flex flex-col gap-0.5">
               <button
                 type="button"
                 role="menuitem"
                 onClick={goProfile}
-                className="group/item flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[14px] font-normal text-zinc-800 transition-colors hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                className="group/item flex h-9 w-full items-center gap-2.5 rounded-[10px] px-2.5 text-left text-[14px] font-normal text-zinc-800 transition-colors hover:bg-zinc-100 focus-visible:bg-zinc-100 focus-visible:outline-none dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:bg-zinc-800"
               >
                 <UserCircle2 className="h-4 w-4 shrink-0 text-zinc-500 transition-colors group-hover/item:text-zinc-800 dark:text-zinc-400 dark:group-hover/item:text-zinc-100" strokeWidth={1.8} />
                 <span className="flex-1">Profile</span>
@@ -1108,7 +1110,7 @@ function AccountMenu({
                 type="button"
                 role="menuitem"
                 onClick={goSettings}
-                className="group/item flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[14px] font-normal text-zinc-800 transition-colors hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                className="group/item flex h-9 w-full items-center gap-2.5 rounded-[10px] px-2.5 text-left text-[14px] font-normal text-zinc-800 transition-colors hover:bg-zinc-100 focus-visible:bg-zinc-100 focus-visible:outline-none dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:bg-zinc-800"
               >
                 <Settings2 className="h-4 w-4 shrink-0 text-zinc-500 transition-colors group-hover/item:text-zinc-800 dark:text-zinc-400 dark:group-hover/item:text-zinc-100" strokeWidth={1.8} />
                 <span className="flex-1">Settings</span>
@@ -1116,13 +1118,13 @@ function AccountMenu({
               </button>
             </div>
 
-            <div className="my-1.5 border-t border-zinc-200/80 dark:border-zinc-700/70" />
+            <div className="mx-1 my-1.5 border-t border-zinc-200/80 dark:border-zinc-700/70" />
 
             <button
               type="button"
               role="menuitem"
               onClick={logout}
-              className="group/item flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[14px] font-normal text-zinc-800 transition-colors hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
+              className="group/item flex h-9 w-full items-center gap-2.5 rounded-[10px] px-2.5 text-left text-[14px] font-normal text-zinc-800 transition-colors hover:bg-zinc-100 focus-visible:bg-zinc-100 focus-visible:outline-none dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:bg-zinc-800"
             >
               <LogOut className="h-4 w-4 shrink-0 text-zinc-500 transition-colors group-hover/item:text-zinc-800 dark:text-zinc-400 dark:group-hover/item:text-zinc-100" strokeWidth={1.8} />
               <span className="flex-1">Log out</span>
