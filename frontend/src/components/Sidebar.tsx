@@ -5,7 +5,7 @@ import { Session, User } from '../types';
 import {
   LogOut, Trash2, X, Search, SquarePen,
   MoreHorizontal, PinOff, Loader2, 
-  MessageCircle, Pencil, Upload,
+  MessageCircle, Pencil, Upload, 
   Settings2, UserCircle2, ChevronRight, ChevronDown, PanelLeft, ArrowUpDown, ListFilter, Check,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
