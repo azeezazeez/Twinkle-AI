@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import StormLogo from '../components/StormLogo';
 import ConfirmationModal from '../components/ConfirmationModal';
 import ShareChatModal from '../components/ShareChatModal';
+import UploadFilesModal from '../components/UploadFilesModal';
 import LiveTalkModal from '../components/LiveTalkModal';
 import { getSavedLiveTalkColor } from '../lib/liveTalkColors';
 import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw'; 
@@ -608,6 +609,53 @@ const isGenericOrRawTitle = (name: unknown): boolean => {
   return false;
 };
 
+/**
+ * Rotating status line shown while the AI is preparing its answer
+ * ("Thinking" -> "Understanding your question" -> ...). Advances on a timer
+ * and holds on the last message so it never loops or flickers.
+ */
+const ResponseStatusText = ({ hasFiles = false }: { hasFiles?: boolean }) => {
+  const phrases = hasFiles
+    ? ['Reading your files', 'Analyzing the content', 'Understanding your question', 'Putting the answer together', 'Polishing the response', 'Still working on it']
+    : ['Thinking', 'Understanding your question', 'Gathering the details', 'Putting the answer together', 'Polishing the response', 'Still working on it'];
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    setIndex(0);
+    const timer = window.setInterval(() => {
+      setIndex(current => Math.min(current + 1, phrases.length - 1));
+    }, 2200);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasFiles]);
+
+  return (
+    <span className="inline-flex" aria-label={phrases[index]}>
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.span
+          key={index}
+          className="text-sm font-semibold bg-gradient-to-r from-fuchsia-500 via-violet-500 to-sky-500 bg-clip-text text-transparent"
+          initial={{ opacity: 0, y: 5 }}
+          animate={{
+            opacity: [0.65, 1, 0.75],
+            y: 0,
+            backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'],
+          }}
+          exit={{ opacity: 0, y: -5, transition: { duration: 0.16 } }}
+          transition={{
+            y: { duration: 0.22, ease: 'easeOut' },
+            opacity: { duration: 2, repeat: Infinity, ease: 'easeInOut' },
+            backgroundPosition: { duration: 2, repeat: Infinity, ease: 'easeInOut' },
+          }}
+          style={{ backgroundSize: '200% 200%' }}
+        >
+          {phrases[index]}
+        </motion.span>
+      </AnimatePresence>
+    </span>
+  );
+};
+
 const formatFileSize = (bytes: number): string => {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)}KB`;
@@ -1109,6 +1157,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const [responsePhase, setResponsePhase] = useState<'idle' | 'connecting' | 'thinking' | 'streaming'>('idle');
   const [responseDataWeight, setResponseDataWeight] = useState<'light' | 'moderate' | 'heavy'>('light');
   const [longPromptPending, setLongPromptPending] = useState(false);
+  const [responseHasFiles, setResponseHasFiles] = useState(false);
   const [showLongThinking, setShowLongThinking] = useState(false);
   useEffect(() => {
     if (!isTyping || responsePhase === 'idle' || responsePhase === 'streaming' || !longPromptPending) {
@@ -1324,16 +1373,25 @@ ${textToRead}` }] }], turnComplete: true },
       return;
     }
     const { title } = typingSessionTitle;
-    // Time-based reveal: always finishes within ~0.5s no matter how slow the
-    // timers run, so the sidebar can never get stuck on a partial name like "F".
+    // Split into user-perceived characters so Telugu/Hindi/Arabic/emoji never
+    // get cut in the middle of a letter while typing.
+    const chars: string[] = (() => {
+      try {
+        const Seg = (Intl as any).Segmenter;
+        if (Seg) return Array.from(new Seg(undefined, { granularity: 'grapheme' }).segment(title), (part: any) => part.segment as string);
+      } catch { /* fall through */ }
+      return Array.from(title);
+    })();
+    // Time-based reveal (about 45ms per letter) so it reads as real typing, but
+    // always finishes, even if timers are throttled in a background tab.
     const started = performance.now();
-    const duration = Math.min(500, Math.max(150, title.length * 16));
-    setTypedSessionTitle(title.slice(0, 1));
+    const duration = Math.min(1800, Math.max(500, chars.length * 45));
+    setTypedSessionTitle(chars[0] ?? '');
     let frame = 0;
     const tick = () => {
       const progress = Math.min(1, (performance.now() - started) / duration);
-      const count = Math.max(1, Math.ceil(title.length * progress));
-      setTypedSessionTitle(title.slice(0, count));
+      const count = Math.max(1, Math.ceil(chars.length * progress));
+      setTypedSessionTitle(chars.slice(0, count).join(''));
       if (progress >= 1) {
         setTypingSessionTitle(null);
         return;
@@ -2080,6 +2138,7 @@ ${textToRead}` }] }], turnComplete: true },
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewText, setPreviewText] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
 
 
   // Theme
@@ -2839,6 +2898,7 @@ const chooseModel = useCallback((modelId: string) => {
     // get the Thinking label, and only if the response is still pending.
     setLongPromptPending(messageText.trim().length >= 120 || (filesToSend?.length ?? 0) > 0 || totalRequestWeight > 18000);
     setShowLongThinking(false);
+    setResponseHasFiles((filesToSend?.length ?? 0) > 0);
     setIsTyping(true);
     setResponsePhase('connecting');
     streamingAssistantIdRef.current = null;
@@ -2905,9 +2965,7 @@ const chooseModel = useCallback((modelId: string) => {
             userId: user.id,
             // Name the chat in the sidebar the moment it is created, instead of
             // waiting for the AI response + title request to finish.
-            sessionName: messageText.trim()
-              ? generateProfessionalChatTitle(messageText, Boolean(filesToSend?.length))
-              : (filesToSend && filesToSend.length ? 'File Analysis' : 'New Chat'),
+            sessionName: filesToSend && filesToSend.length && !messageText.trim() ? 'File Analysis' : 'New Chat',
             createdAt,
             updatedAt: createdAt,
           },
@@ -3070,8 +3128,10 @@ const chooseModel = useCallback((modelId: string) => {
       // endpoint: file-only chats used to stay as "New Chat" until refresh.
       if (isNewSession && activeSessionId) {
         const fileNames = (filesToSend || []).map(file => file.name.trim()).filter(Boolean);
+        // Text chats keep a neutral placeholder until the AI title arrives and is
+        // typed in letter by letter (instead of flashing the raw first message).
         const immediateTitle = messageText.trim()
-          ? generateProfessionalChatTitle(messageText, Boolean(filesToSend?.length))
+          ? 'New Chat'
           : fileNames.length === 1
             ? fileNames[0].replace(/\.[^.]+$/, '').slice(0, 60)
             : fileNames.length > 1
@@ -3202,19 +3262,22 @@ const chooseModel = useCallback((modelId: string) => {
           const titleInput = finalMessage ||
             (filesToSend || []).map(file => file.name).filter(Boolean).join(', ') ||
             'File analysis';
-          const titleResponse: any = await chatApi.generateTitle(titleInput);
+          let titleResponse: any = null;
+          try {
+            titleResponse = await chatApi.generateTitle(titleInput);
+          } catch (titleErr) {
+            console.warn('AI chat title request failed, using fallback:', titleErr);
+          }
 
           const titleFromModel = typeof titleResponse?.title === 'string' ? titleResponse.title.trim() : '';
           const polishedModelTitle = polishChatTitle(titleFromModel);
           const newTitle =
-            polishedModelTitle.length >= 3 && !/^(new chat|chat|question|request|conversation|e)$/i.test(polishedModelTitle)
+            polishedModelTitle.length >= 2 && !/^(new chat|chat|question|request|conversation|e)$/i.test(polishedModelTitle)
               ? polishedModelTitle
               : polishChatTitle(generateProfessionalChatTitle(titleInput, Boolean(filesToSend?.length)), 'New Chat');
 
-          await chatApi.renameSession(activeSessionId, newTitle);
+          // Show the name immediately with the typing effect; persist in parallel.
           setTypingSessionTitle({ id: activeSessionId, title: newTitle });
-
-          // Keep the Sidebar's sessions prop synchronized immediately.
           setSessions(prev =>
             prev.map(session =>
               session.id === activeSessionId
@@ -3222,9 +3285,7 @@ const chooseModel = useCallback((modelId: string) => {
                 : session
             )
           );
-
-          // The optimistic sidebar update above is already authoritative for
-          // this UI. Avoid an extra network round-trip after every message.
+          await chatApi.renameSession(activeSessionId, newTitle);
         } catch (renameErr) {
           console.error('AI-generated Twinkle AI chat title save failed:', renameErr);
         }
@@ -3863,6 +3924,7 @@ if (isBlankDraft) {
             const finalTitle = polished.length >= 3 && !/^(new chat|chat|question|request|conversation)$/i.test(polished)
               ? polished
               : polishChatTitle(generateProfessionalChatTitle(firstUser.content), 'Live Talk');
+            setTypingSessionTitle({ id: sessionId, title: finalTitle });
             setSessions(prev => prev.map(session => session.id === sessionId ? { ...session, sessionName: finalTitle } : session));
             await chatApi.renameSession(sessionId, finalTitle);
           } catch (titleError) {
@@ -4455,23 +4517,7 @@ if (isBlankDraft) {
                       <StormLogo className="twinkle-chat-logo h-6 w-6 text-zinc-800 dark:text-zinc-100 md:h-7 md:w-7" />
                     </div>
                     <div className="flex min-h-[40px] items-center border-0 bg-transparent py-2 shadow-none rounded-none">
-                      <motion.span
-                        className="text-sm font-semibold bg-gradient-to-r from-fuchsia-500 via-violet-500 to-sky-500 bg-clip-text text-transparent"
-                        aria-label="Thinking"
-                        animate={{
-                          opacity: [0.65, 1, 0.75],
-                          backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'],
-                          filter: [
-                            'drop-shadow(0 0 0px rgba(217,70,239,0))',
-                            'drop-shadow(0 0 5px rgba(168,85,247,0.35))',
-                            'drop-shadow(0 0 0px rgba(217,70,239,0))',
-                          ],
-                        }}
-                        transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-                        style={{ backgroundSize: '200% 200%' }}
-                      >
-                        Thinking
-                      </motion.span>
+                      <ResponseStatusText hasFiles={responseHasFiles} />
                       <motion.span
                         className="ml-1 inline-flex gap-0.5 text-sm font-semibold text-violet-500"
                         aria-hidden="true"
@@ -4603,6 +4649,7 @@ if (isBlankDraft) {
                   onChange={(e) => {
                     void handleFileSelection(e.target.files);
                     e.currentTarget.value = '';
+                    setUploadModalOpen(false);
                   }}
                 />
 
@@ -4634,7 +4681,7 @@ if (isBlankDraft) {
                     {/* Bottom row: + · dotted listening line · ✕ · ✓ */}
                     <motion.button
                       type="button"
-                      onClick={() => fileInputRef.current?.click()}
+                      onClick={() => setUploadModalOpen(true)}
                       disabled={isProcessingFiles}
                       aria-label="Attach files"
                       data-tooltip="Attach files"
@@ -4722,7 +4769,7 @@ if (isBlankDraft) {
                   {/* + attachment button */}
                   <motion.button
                     type="button"
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => setUploadModalOpen(true)}
                     disabled={isTyping || isProcessingFiles}
                     aria-label="Attach files"
                     data-tooltip="Attach files"
@@ -4989,6 +5036,15 @@ if (isBlankDraft) {
         onClose={closeShareModal}
       />
 
+      <UploadFilesModal
+        isOpen={uploadModalOpen}
+        onClose={() => setUploadModalOpen(false)}
+        onChooseFiles={() => fileInputRef.current?.click()}
+        onFilesDropped={(files) => {
+          void handleFileSelection(files);
+          setUploadModalOpen(false);
+        }}
+      />
       <ConfirmationModal
         isOpen={modalType === 'delete-single'}
         onClose={() => setModalType('none')}
