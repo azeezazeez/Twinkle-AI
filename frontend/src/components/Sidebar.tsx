@@ -566,12 +566,12 @@ function SessionList({
           type="button"
           onClick={() => { onNewSession(); onClose(); }}
           aria-label="New chat"
-          className="group/newchat w-full h-10 px-2 bg-transparent text-zinc-900 dark:text-zinc-100 rounded-lg flex items-center gap-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors active:bg-zinc-100 dark:active:bg-zinc-800"
+          className="group/newchat w-full h-8 px-2 bg-transparent text-zinc-900 dark:text-zinc-100 rounded-lg flex items-center gap-2.5 text-left hover:bg-zinc-200/60 dark:hover:bg-zinc-800 transition-colors active:bg-zinc-200/60 dark:active:bg-zinc-800"
         >
-          <span className="twinkle-newchat-box shrink-0 flex h-7 w-7 items-center justify-center rounded-md" aria-hidden="true">
+          <span className="twinkle-newchat-box shrink-0 flex h-5 w-5 items-center justify-center rounded-md" aria-hidden="true">
             <SquarePen className="twinkle-newchat-icon w-[18px] h-[18px] text-zinc-900 dark:text-zinc-100" strokeWidth={1.7} />
           </span>
-          <span className="text-[15px] font-normal tracking-tight">New chat</span>
+          <span className="text-[14px] font-normal tracking-normal">New chat</span>
         </button>
 
       </div>
@@ -586,8 +586,8 @@ function SessionList({
           title={recentsCollapsed ? 'Expand Recents' : 'Collapse Recents'}
           className="flex items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
         >
-          <span className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Recents</span>
-          <ChevronDown className={`h-3.5 w-3.5 text-zinc-400 transition-transform ${recentsCollapsed ? '-rotate-90' : 'rotate-0'}`} />
+          <span className="text-[12px] font-medium text-zinc-500 dark:text-zinc-400 tracking-normal">Recents</span>
+          <ChevronDown className={`h-3 w-3 text-zinc-400 transition-transform ${recentsCollapsed ? '-rotate-90' : 'rotate-0'}`} />
         </button>
         {sessions.length > 0 && (
           <div className="flex shrink-0 items-center gap-0.5">
@@ -728,13 +728,13 @@ function SessionList({
         ) : (
           grouped.map(group => (
             <div key={group.label} className="mb-2">
-              <div className="flex items-center justify-between px-3 pt-4 pb-1.5">
-                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">
+              <div className="flex items-center justify-between px-2 pt-3 pb-1">
+                <span className="text-[12px] font-medium text-zinc-500 dark:text-zinc-400 tracking-normal">
                   {group.label}
                 </span>
               </div>
 
-              <div className="space-y-0.5">
+              <div className="space-y-px">
                 {group.items.map(session => {
                   const isActive = currentSessionId === session.id;
                   const isPinned = pinnedIds.includes(session.id);
@@ -751,19 +751,19 @@ function SessionList({
                       <motion.div
                         initial={{ opacity: 0, x: -6 }}
                         animate={{ opacity: 1, x: 0 }}
-                        className={`group/item flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer transition-all ${
+                        className={`group/item flex h-8 items-center gap-2 px-2 rounded-lg cursor-pointer transition-colors ${
                           isActive
-                            ? 'bg-zinc-50 dark:bg-zinc-950 text-zinc-700 dark:text-zinc-300'
-                            : 'text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-800 dark:hover:text-zinc-200'
+                            ? 'bg-zinc-200/70 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
+                            : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/60 dark:hover:bg-zinc-800/70 hover:text-zinc-900 dark:hover:text-zinc-100'
                         }`}
                         onClick={() => handleSelectSession(session.id)}
                       >
                         {deletingIds.includes(session.id) ? (
                           <Loader2 className="h-4 w-4 shrink-0 animate-spin text-zinc-500" aria-label="Deleting chat" />
                         ) : (
-                          <div className={`shrink-0 w-1.5 h-1.5 rounded-full transition-colors ${
-                            isActive ? 'bg-zinc-500' : isPinned ? 'bg-amber-400' : 'bg-transparent'
-                          }`} />
+                          isPinned ? (
+                            <SidebarPinIcon className="h-3.5 w-3.5 shrink-0 text-zinc-500 dark:text-zinc-400" />
+                          ) : null
                         )}
 
                         {isRenaming ? (
@@ -781,7 +781,7 @@ function SessionList({
                             className="flex-1 min-w-0 bg-white dark:bg-zinc-900 border border-zinc-400 rounded-lg px-2 py-0.5 text-xs font-medium text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-indigo-400/30"
                           />
                         ) : (
-                          <span data-twinkle-user-content className="flex-1 min-w-0 truncate text-xs font-semibold leading-snug">
+                          <span data-twinkle-user-content className="flex-1 min-w-0 truncate text-[14px] font-normal leading-snug">
                             {typingSessionId === session.id
                               ? <TypewriterText text={session.sessionName} onDone={onTypingDone} />
                               : session.sessionName}
@@ -926,7 +926,7 @@ function SessionList({
       {recentsCollapsed && <div className="flex-1 min-h-0" aria-hidden="true" />}
 
       {/* Footer */}
-      <div className="mt-auto p-4 shrink-0 border-t border-zinc-200 dark:border-zinc-800">
+      <div className="mt-auto shrink-0 border-t border-zinc-200/80 p-2 dark:border-zinc-800">
         <AccountMenu
           user={user}
           onProfile={onProfile}
@@ -1015,7 +1015,7 @@ function AccountMenu({
         className={
           compact
             ? "flex h-8 w-8 items-center justify-center rounded-full outline-none transition hover:scale-105 focus-visible:ring-2 focus-visible:ring-zinc-300 dark:focus-visible:ring-zinc-700"
-            : "flex w-full items-center gap-2.5 rounded-xl p-2 text-left transition hover:bg-zinc-50 dark:hover:bg-zinc-900"
+            : "flex h-10 w-full items-center gap-2 rounded-lg px-1.5 text-left transition-colors hover:bg-zinc-200/60 dark:hover:bg-zinc-800/70"
         }
       >
         <UserAvatar
@@ -1024,20 +1024,20 @@ function AccountMenu({
           className={
             compact
               ? "h-7 w-7 text-[10px] shadow-sm"
-              : "h-8 w-8 shrink-0 text-[10px] shadow-sm"
+              : "h-7 w-7 shrink-0 text-[11px] font-semibold shadow-none"
           }
         />
 
         {!compact && (
           <>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-xs font-bold text-zinc-800 dark:text-zinc-200">
+              <span className="block truncate text-[14px] font-medium text-zinc-800 dark:text-zinc-200">
                 {user.username}
               </span>
             </span>
             <ChevronRight
-              className={`h-4 w-4 shrink-0 text-zinc-400 transition-transform ${
-                open ? 'rotate-90' : ''
+              className={`h-3.5 w-3.5 shrink-0 text-zinc-400 transition-transform ${
+                open ? '-rotate-90' : ''
               }`}
             />
           </>
@@ -1069,59 +1069,62 @@ function AccountMenu({
             role="menu"
             className={
               compact
-                ? "absolute bottom-0 left-1/2 z-[10000] ml-0 w-[290px] max-w-[calc(100vw-24px)] -translate-x-1/2 origin-bottom-left overflow-hidden rounded-2xl border border-zinc-200 bg-white p-1.5 shadow-[0_18px_55px_rgba(0,0,0,.16)] dark:border-zinc-800 dark:bg-zinc-950 sm:left-full sm:ml-3 sm:translate-x-0"
-                : "absolute bottom-[calc(100%+10px)] left-1/2 z-[10000] w-[290px] max-w-[calc(100vw-24px)] -translate-x-1/2 origin-bottom-left overflow-hidden rounded-2xl border border-zinc-200 bg-white p-1.5 shadow-[0_18px_55px_rgba(0,0,0,.16)] dark:border-zinc-800 dark:bg-zinc-950 sm:left-0 sm:translate-x-0"
+                ? "twinkle-account-menu absolute bottom-0 left-full z-[10000] ml-3 w-[264px] origin-bottom-left overflow-hidden rounded-xl border border-zinc-200 bg-white p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.14)] dark:border-zinc-700 dark:bg-zinc-900"
+                : "twinkle-account-menu absolute bottom-[calc(100%+8px)] left-0 z-[10000] w-full min-w-[248px] origin-bottom-left overflow-hidden rounded-xl border border-zinc-200 bg-white p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.14)] dark:border-zinc-700 dark:bg-zinc-900"
             }
           >
             {/* Account header */}
-            <div className="rounded-xl px-2.5 py-2.5">
-              <div className="flex items-center gap-3">
-                <UserAvatar
-                  name={user.username}
-                  avatarUrl={user.avatarUrl}
-                  className="h-9 w-9 shrink-0 text-xs shadow-sm"
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">
-                    {user.username}
+            <div className="flex items-center gap-3 rounded-lg bg-zinc-50 px-3 py-2.5 dark:bg-zinc-800/50">
+              <UserAvatar
+                name={user.username}
+                avatarUrl={user.avatarUrl}
+                className="h-9 w-9 shrink-0 text-[13px] font-semibold shadow-none ring-1 ring-black/5 dark:ring-white/10"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[14px] font-medium leading-5 text-zinc-900 dark:text-zinc-50">
+                  {user.name || user.username}
+                </p>
+                {user.email && (
+                  <p className="truncate text-[12px] leading-4 text-zinc-500 dark:text-zinc-400">
+                    {user.email}
                   </p>
-                </div>
+                )}
               </div>
             </div>
 
-            <div className="my-1 border-t border-zinc-100 dark:border-zinc-800" />
+            <div className="mt-1.5 flex flex-col gap-px">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={goProfile}
+                className="group/item flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[14px] font-normal text-zinc-800 transition-colors hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
+              >
+                <UserCircle2 className="h-4 w-4 shrink-0 text-zinc-500 transition-colors group-hover/item:text-zinc-800 dark:text-zinc-400 dark:group-hover/item:text-zinc-100" strokeWidth={1.8} />
+                <span className="flex-1">Profile</span>
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-400 transition-transform group-hover/item:translate-x-0.5" />
+              </button>
 
-            <button
-              type="button"
-              role="menuitem"
-              onClick={goProfile}
-              className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
-            >
-              <UserCircle2 className="h-[18px] w-[18px] text-zinc-500" />
-              <span className="flex-1">Profile</span>
-              <ChevronRight className="h-4 w-4 text-zinc-400" />
-            </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={goSettings}
+                className="group/item flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[14px] font-normal text-zinc-800 transition-colors hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
+              >
+                <Settings2 className="h-4 w-4 shrink-0 text-zinc-500 transition-colors group-hover/item:text-zinc-800 dark:text-zinc-400 dark:group-hover/item:text-zinc-100" strokeWidth={1.8} />
+                <span className="flex-1">Settings</span>
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-400 transition-transform group-hover/item:translate-x-0.5" />
+              </button>
+            </div>
 
-            <button
-              type="button"
-              role="menuitem"
-              onClick={goSettings}
-              className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
-            >
-              <Settings2 className="h-[18px] w-[18px] text-zinc-500" />
-              <span className="flex-1">Settings</span>
-              <ChevronRight className="h-4 w-4 text-zinc-400" />
-            </button>
-
-            <div className="my-1 border-t border-zinc-100 dark:border-zinc-800" />
+            <div className="my-1.5 border-t border-zinc-200/80 dark:border-zinc-700/70" />
 
             <button
               type="button"
               role="menuitem"
               onClick={logout}
-              className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              className="group/item flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[14px] font-normal text-zinc-800 transition-colors hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
             >
-              <LogOut className="h-[18px] w-[18px] text-zinc-500" />
+              <LogOut className="h-4 w-4 shrink-0 text-zinc-500 transition-colors group-hover/item:text-zinc-800 dark:text-zinc-400 dark:group-hover/item:text-zinc-100" strokeWidth={1.8} />
               <span className="flex-1">Log out</span>
             </button>
           </motion.div>
@@ -1329,10 +1332,11 @@ export default function Sidebar({
   const [desktopCollapsed, setDesktopCollapsed] = useState(true);
   const [desktopWidth, setDesktopWidth] = useState<number>(() => {
     try {
-      const stored = Number(localStorage.getItem('Twinkle_sidebar_width'));
-      return Number.isFinite(stored) ? Math.min(520, Math.max(260, stored)) : 280;
+      const raw = localStorage.getItem('Twinkle_sidebar_width');
+      const stored = raw === null ? NaN : Number(raw);
+      return Number.isFinite(stored) ? Math.min(440, Math.max(260, stored)) : 288;
     } catch {
-      return 280;
+      return 288;
     }
   });
   const [searchModalOpen, setSearchModalOpen] = useState(false);
@@ -1542,7 +1546,7 @@ export default function Sidebar({
               <div className="w-7 h-7 bg-transparent rounded-lg flex items-center justify-center p-1 shrink-0">
                 <StormLogo className="w-full h-full text-zinc-900 dark:text-white" />
               </div>
-              <h2 className="text-lg font-medium tracking-tight text-zinc-900/90 dark:text-white/90">Twinkle</h2>
+              <h2 className="font-serif text-[22px] font-medium leading-none tracking-[-0.01em] text-zinc-900 dark:text-zinc-50">Twinkle</h2>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <motion.button
@@ -1750,7 +1754,7 @@ export default function Sidebar({
                   <div className="w-7 h-7 bg-transparent rounded-lg flex items-center justify-center p-1 shrink-0">
                     <StormLogo className="w-full h-full text-zinc-900 dark:text-white" />
                   </div>
-                  <h2 className="text-lg font-medium tracking-tight text-zinc-900/90 dark:text-white/90">Twinkle</h2>
+                  <h2 className="font-serif text-[22px] font-medium leading-none tracking-[-0.01em] text-zinc-900 dark:text-zinc-50">Twinkle</h2>
                 </div>
 
                 <div className="flex items-center gap-0.5 shrink-0">
