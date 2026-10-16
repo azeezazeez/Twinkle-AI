@@ -576,18 +576,139 @@ function SessionList({
       </div>
 
       {/* Session list */}
-      <div className="group/recents relative z-20 px-3 pb-1 shrink-0">
+      <div className="group/recents relative z-40 flex items-center justify-between gap-2 px-3 pb-1 shrink-0">
         <button
           type="button"
           onClick={() => setRecentsCollapsed(collapsed => !collapsed)}
           aria-label={recentsCollapsed ? 'Expand Recents' : 'Collapse Recents'}
           aria-expanded={!recentsCollapsed}
           title={recentsCollapsed ? 'Expand Recents' : 'Collapse Recents'}
-          className="flex w-full items-center justify-between rounded-md py-1 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
         >
           <span className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Recents</span>
-          <ChevronDown className={`h-3.5 w-3.5 text-zinc-400 opacity-0 group-hover/recents:opacity-100 group-focus-within/recents:opacity-100 transition-all ${recentsCollapsed ? '-rotate-90' : 'rotate-0'}`} />
+          <ChevronDown className={`h-3.5 w-3.5 text-zinc-400 transition-transform ${recentsCollapsed ? '-rotate-90' : 'rotate-0'}`} />
         </button>
+        {sessions.length > 0 && (
+          <div className="flex shrink-0 items-center gap-0.5">
+            <div className="relative">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setHeaderTooltip(null);
+                  setSortMenuOpen(open => !open);
+                }}
+                onMouseEnter={(e) => { if (!sortMenuOpen) showHeaderTooltip('Sort chats', e.currentTarget); }}
+                onMouseLeave={() => setHeaderTooltip(null)}
+                aria-label="Sort chats"
+                aria-haspopup="menu"
+                aria-expanded={sortMenuOpen}
+                className={`inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 ${sortMenuOpen ? 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200' : 'text-zinc-400'}`}
+              >
+                <ListFilter className="h-3.5 w-3.5" strokeWidth={1.8} />
+              </button>
+              {sortMenuOpen && (
+                <>
+                  <button
+                    type="button"
+                    aria-label="Close sort menu"
+                    className="fixed inset-0 z-40 cursor-default"
+                    onClick={() => setSortMenuOpen(false)}
+                  />
+                  <div role="menu" aria-label="Sort chats by" className="absolute right-0 top-7 z-50 w-48 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+                    <div className="px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Sort by</div>
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={sortMode === 'alphabetical'}
+                      onClick={(e) => { e.stopPropagation(); setSortMode('alphabetical'); setSortMenuOpen(false); }}
+                      className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                    >
+                      <span>Alphabetical order (A–Z)</span>
+                      {sortMode === 'alphabetical' && <Check className="h-3.5 w-3.5" />}
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={sortMode === 'date'}
+                      onClick={(e) => { e.stopPropagation(); setSortMode('date'); setSortMenuOpen(false); }}
+                      className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                    >
+                      <span>Order by Date</span>
+                      {sortMode === 'date' && <Check className="h-3.5 w-3.5" />}
+                    </button>
+                    {sortMode === 'date' && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setDateSortOrder(current => current === 'newest' ? 'oldest' : 'newest'); setSortMenuOpen(false); }}
+                        className="mt-1 flex w-full items-center justify-between rounded-lg border-t border-zinc-100 px-2.5 pt-2 pb-1.5 text-left text-[11px] text-zinc-500 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800"
+                      >
+                        <span>{dateSortOrder === 'newest' ? 'Newest first' : 'Oldest first'}</span>
+                        <ArrowUpDown className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="flex items-center justify-center">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onNewSession();
+                }}
+                onMouseEnter={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  setNewChatTooltipPosition({ top: Math.max(8, rect.top - 42), left: rect.left - 68 });
+                }}
+                onMouseLeave={() => setNewChatTooltipPosition(null)}
+                title="New chat"
+                aria-label="New chat"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+              >
+                <Pencil className="h-3.5 w-3.5" strokeWidth={1.8} />
+              </button>
+              {newChatTooltipPosition && typeof document !== 'undefined' && createPortal(
+                <div
+                  className="pointer-events-none fixed rounded-full bg-[#111111] px-3.5 py-2 text-[14px] font-bold [font-family:inherit] text-white whitespace-nowrap shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
+                  style={{ top: newChatTooltipPosition.top, left: newChatTooltipPosition.left, zIndex: 2147483647 }}
+                >
+                  New chat
+                </div>,
+                document.body
+              )}
+            </div>
+            {headerTooltip && typeof document !== 'undefined' && createPortal(
+              <div
+                className="pointer-events-none fixed -translate-x-1/2 rounded-full bg-[#111111] px-3.5 py-2 text-[14px] font-bold [font-family:inherit] text-white whitespace-nowrap shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
+                style={{ top: headerTooltip.top, left: headerTooltip.left, zIndex: 2147483647 }}
+              >
+                {headerTooltip.label}
+              </div>,
+              document.body
+            )}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setHeaderTooltip(null);
+                onClose();
+                onClearAll();
+              }}
+              onMouseEnter={(e) => showHeaderTooltip('Clear all', e.currentTarget)}
+              onMouseLeave={() => setHeaderTooltip(null)}
+              aria-label="Clear all chats"
+              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+            >
+              {deletingAll ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.8} />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
+              )}
+            </button>
+          </div>
+        )}
       </div>
       {!recentsCollapsed && <div
         className="relative z-30 flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 pb-4"
@@ -610,127 +731,6 @@ function SessionList({
                 <span className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">
                   {group.label}
                 </span>
-                {group === grouped[0] && sessions.length > 0 && (
-                  <div className="flex items-center gap-1">
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setHeaderTooltip(null);
-                          setSortMenuOpen(open => !open);
-                        }}
-                        onMouseEnter={(e) => { if (!sortMenuOpen) showHeaderTooltip('Sort chats', e.currentTarget); }}
-                        onMouseLeave={() => setHeaderTooltip(null)}
-                        aria-label="Sort chats"
-                        aria-haspopup="menu"
-                        aria-expanded={sortMenuOpen}
-                        className={`inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 ${sortMenuOpen ? 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200' : 'text-zinc-400'}`}
-                      >
-                        <ListFilter className="h-3.5 w-3.5" strokeWidth={1.8} />
-                      </button>
-                      {sortMenuOpen && (
-                        <>
-                          <button
-                            type="button"
-                            aria-label="Close sort menu"
-                            className="fixed inset-0 z-40 cursor-default"
-                            onClick={() => setSortMenuOpen(false)}
-                          />
-                          <div role="menu" aria-label="Sort chats by" className="absolute right-0 top-7 z-50 w-48 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
-                            <div className="px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Sort by</div>
-                            <button
-                              type="button"
-                              role="menuitemradio"
-                              aria-checked={sortMode === 'alphabetical'}
-                              onClick={(e) => { e.stopPropagation(); setSortMode('alphabetical'); setSortMenuOpen(false); }}
-                              className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                            >
-                              <span>Alphabetical order (A–Z)</span>
-                              {sortMode === 'alphabetical' && <Check className="h-3.5 w-3.5" />}
-                            </button>
-                            <button
-                              type="button"
-                              role="menuitemradio"
-                              aria-checked={sortMode === 'date'}
-                              onClick={(e) => { e.stopPropagation(); setSortMode('date'); setSortMenuOpen(false); }}
-                              className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                            >
-                              <span>Order by Date</span>
-                              {sortMode === 'date' && <Check className="h-3.5 w-3.5" />}
-                            </button>
-                            {sortMode === 'date' && (
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); setDateSortOrder(current => current === 'newest' ? 'oldest' : 'newest'); setSortMenuOpen(false); }}
-                                className="mt-1 flex w-full items-center justify-between rounded-lg border-t border-zinc-100 px-2.5 pt-2 pb-1.5 text-left text-[11px] text-zinc-500 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800"
-                              >
-                                <span>{dateSortOrder === 'newest' ? 'Newest first' : 'Oldest first'}</span>
-                                <ArrowUpDown className="h-3 w-3" />
-                              </button>
-                            )}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                    <div className="flex items-center justify-center">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onNewSession();
-                        }}
-                        onMouseEnter={(e) => {
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          setNewChatTooltipPosition({ top: Math.max(8, rect.top - 42), left: rect.left - 68 });
-                        }}
-                        onMouseLeave={() => setNewChatTooltipPosition(null)}
-                        title="New chat"
-                        aria-label="New chat"
-                        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-                      >
-                        <Pencil className="h-3.5 w-3.5" strokeWidth={1.8} />
-                      </button>
-                      {newChatTooltipPosition && typeof document !== 'undefined' && createPortal(
-                        <div
-                          className="pointer-events-none fixed rounded-full bg-[#111111] px-3.5 py-2 text-[14px] font-bold [font-family:inherit] text-white whitespace-nowrap shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
-                          style={{ top: newChatTooltipPosition.top, left: newChatTooltipPosition.left, zIndex: 2147483647 }}
-                        >
-                          New chat
-                        </div>,
-                        document.body
-                      )}
-                    </div>
-                    {headerTooltip && typeof document !== 'undefined' && createPortal(
-                      <div
-                        className="pointer-events-none fixed -translate-x-1/2 rounded-full bg-[#111111] px-3.5 py-2 text-[14px] font-bold [font-family:inherit] text-white whitespace-nowrap shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
-                        style={{ top: headerTooltip.top, left: headerTooltip.left, zIndex: 2147483647 }}
-                      >
-                        {headerTooltip.label}
-                      </div>,
-                      document.body
-                    )}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setHeaderTooltip(null);
-                        onClose();
-                        onClearAll();
-                      }}
-                      onMouseEnter={(e) => showHeaderTooltip('Clear all', e.currentTarget)}
-                      onMouseLeave={() => setHeaderTooltip(null)}
-                      aria-label="Clear all chats"
-                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-                    >
-                      {deletingAll ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.8} />
-                      ) : (
-                        <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
-                      )}
-                    </button>
-                  </div>
-                )}
               </div>
 
               <div className="space-y-0.5">
