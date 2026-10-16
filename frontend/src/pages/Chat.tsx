@@ -3459,20 +3459,27 @@ const chooseModel = useCallback((modelId: string) => {
   };
 
   const createNewSession = () => {
-    // New Chat is a local draft until the first message is sent. Do not create
-    // a backend session here; sendMessage creates it and adds the UUID to URL.
+
     if (creatingNewSessionRef.current) return;
 
-    // Only start a new chat if the current one has actually been used. On a
-    // blank draft there is nothing to leave behind, so keep it as is (and keep
-    // the same greeting) instead of resetting it.
     const isBlankDraft = currentSessionId === null && messages.length === 0 && !isTyping;
-    if (isBlankDraft) {
-      setMobileOpen(false);
-      setModalType('none');
-      window.setTimeout(() => inputRef.current?.focus(), 0);
-      return;
-    }
+   
+if (isBlankDraft) {
+  const nextGreeting = getRandomChatGreeting(
+    user?.name || user?.username || '',
+    chatGreetingRef.current
+  );
+
+  chatGreetingRef.current = nextGreeting;
+  setChatGreeting(nextGreeting);
+  setEmptyChatPrompt(current => getNextEmptyChatPrompt(current));
+
+  setMobileOpen(false);
+  setModalType('none');
+  window.setTimeout(() => inputRef.current?.focus(), 0);
+  return;
+}
+
     creatingNewSessionRef.current = true;
 
     requestGenerationRef.current += 1;
