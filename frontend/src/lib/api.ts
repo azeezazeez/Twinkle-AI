@@ -1751,6 +1751,31 @@ export async function createLiveToken(
   return { ...fresh };
 }
 
+/** Cancels any voice preview that is currently playing or loading. */
+export function stopGeminiVoicePreview(): void {
+  voicePreviewGeneration += 1;
+  const stop = activeVoicePreviewStop;
+  activeVoicePreviewStop = null;
+  try {
+    stop?.();
+  } catch {
+    /* already stopped */
+  }
+}
+
+/** Warms the Live token so the first voice preview starts quickly. */
+export async function prefetchGeminiVoice(
+  voiceName: string,
+  _text?: string,
+  language = 'auto'
+): Promise<void> {
+  try {
+    await createLiveToken(voiceName, language);
+  } catch {
+    /* best effort: the preview itself will report a real error */
+  }
+}
+
 /**
  * Plays a short Gemini 3.8 Live greeting using the selected model voice.
  * The Live token is reused for multiple previews and the previous preview
