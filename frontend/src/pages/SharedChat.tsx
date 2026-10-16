@@ -5,6 +5,7 @@ import { chatApi } from '../lib/api';
 import type { SharedChatResponse } from '../types';
 import StormLogo from '../components/StormLogo';
 import ReactMarkdown from 'react-markdown';
+import AttachmentTile from '../components/AttachmentTile';
 import remarkGfm from 'remark-gfm';
 
 const SharedChat = () => {
@@ -100,20 +101,20 @@ const SharedChat = () => {
 
                     <div className="min-w-0 flex-1 pt-1">
                       <p className="mb-2 text-xs font-medium text-zinc-400">{isUser ? 'You' : 'Twinkle AI'}</p>
-                      <div className="prose prose-zinc max-w-none text-[15px] leading-7 dark:prose-invert">
+                      <div data-twinkle-user-content className="prose prose-zinc max-w-none text-[15px] leading-7 dark:prose-invert">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
                           {message.content || ''}
                         </ReactMarkdown>
                       </div>
 
                       {message.attachments?.length ? (
-                        <div className="mt-4 space-y-3">
+                        <div className="mt-4 flex flex-wrap gap-3">
                           {message.attachments.map((attachment, index) => (
-                            <img
+                            <AttachmentTile
                               key={`${message.id}-attachment-${index}`}
-                              src={attachment}
-                              alt="Shared attachment"
-                              className="max-h-[520px] max-w-full rounded-2xl border border-zinc-200 object-contain dark:border-zinc-700"
+                              name={`Attachment ${index + 1}`}
+                              imageSrc={attachment}
+                              onClick={() => window.open(attachment, '_blank', 'noopener')}
                             />
                           ))}
                         </div>
