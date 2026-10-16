@@ -51,14 +51,14 @@ public class OTPService {
 
             emailService.sendOTPEmail(normalizedEmail, otpCode);
 
-            log.info("Registration OTP sent successfully to {}", normalizedEmail);
+            log.info("Registration OTP sent successfully to {}", maskEmail(normalizedEmail));
             return otpCode;
 
         } catch (EmailService.EmailDeliveryException e) {
-            log.error("OTP email delivery failed for {}: {}", normalizedEmail, e.getMessage(), e);
+            log.error("OTP email delivery failed for {}: {}", maskEmail(normalizedEmail), e.getMessage(), e);
             throw new OTPDeliveryException("Unable to send OTP email", e);
         } catch (Exception e) {
-            log.error("OTP generation failed for {}: {}", normalizedEmail, e.getMessage(), e);
+            log.error("OTP generation failed for {}: {}", maskEmail(normalizedEmail), e.getMessage(), e);
             throw e;
         }
     }
@@ -84,14 +84,14 @@ public class OTPService {
             otpRepository.save(otp);
             emailService.sendPasswordResetOTP(normalizedEmail, otpCode);
 
-            log.info("Password reset OTP sent successfully to {}", normalizedEmail);
+            log.info("Password reset OTP sent successfully to {}", maskEmail(normalizedEmail));
             return otpCode;
 
         } catch (EmailService.EmailDeliveryException e) {
-            log.error("Password reset email delivery failed for {}: {}", normalizedEmail, e.getMessage(), e);
+            log.error("Password reset email delivery failed for {}: {}", maskEmail(normalizedEmail), e.getMessage(), e);
             throw new OTPDeliveryException("Unable to send password reset OTP", e);
         } catch (Exception e) {
-            log.error("Password reset OTP generation failed for {}: {}", normalizedEmail, e.getMessage(), e);
+            log.error("Password reset OTP generation failed for {}: {}", maskEmail(normalizedEmail), e.getMessage(), e);
             throw e;
         }
     }
@@ -114,7 +114,7 @@ public class OTPService {
         String normalizedEmail = normalizeEmail(email);
 
         if (otpCode == null || otpCode.trim().isEmpty()) {
-            log.warn("OTP validation failed: empty OTP for {}", normalizedEmail);
+            log.warn("OTP validation failed: empty OTP for {}", maskEmail(normalizedEmail));
             return false;
         }
 
@@ -125,30 +125,30 @@ public class OTPService {
                     .findByEmailAndOtpCodeAndVerifiedFalse(normalizedEmail, normalizedOtp);
 
             if (optionalOtp.isEmpty()) {
-                log.warn("Invalid OTP for {}", normalizedEmail);
+                log.warn("Invalid OTP for {}", maskEmail(normalizedEmail));
                 return false;
             }
 
             OTP otp = optionalOtp.get();
 
             if (otp.getExpiryTime() == null) {
-                log.warn("OTP has no expiry time for {}", normalizedEmail);
+                log.warn("OTP has no expiry time for {}", maskEmail(normalizedEmail));
                 return false;
             }
 
             if (otp.getExpiryTime().isBefore(LocalDateTime.now())) {
-                log.warn("Expired OTP for {}", normalizedEmail);
+                log.warn("Expired OTP for {}", maskEmail(normalizedEmail));
                 return false;
             }
 
             otp.setVerified(true);
             otpRepository.save(otp);
 
-            log.info("OTP verified successfully for {}", normalizedEmail);
+            log.info("OTP verified successfully for {}", maskEmail(normalizedEmail));
             return true;
 
         } catch (Exception e) {
-            log.error("OTP validation error for {}: {}", normalizedEmail, e.getMessage(), e);
+            log.error("OTP validation error for {}: {}", maskEmail(normalizedEmail), e.getMessage(), e);
             return false;
         }
     }
@@ -188,5 +188,13 @@ public class OTPService {
         public OTPDeliveryException(String message, Throwable cause) {
             super(message, cause);
         }
+    }
+
+    /** Keeps logs useful without storing full email addresses (a***@gmail.com). */
+    private static String maskEmail(String email) {
+        if (email == null) return "";
+        int at = email.indexOf('@');
+        if (at <= 1) return "***" + (at >= 0 ? email.substring(at) : "");
+        return email.charAt(0) + "***" + email.substring(at);
     }
 }
