@@ -6,7 +6,7 @@ import { applyPreferences } from './lib/preferences';
 
 applyPreferences();
 
-createRoot(document.getElementById('root')!).render(
+createRoot(document.getElementById('root')!).render( 
   <StrictMode>
     <App />
   </StrictMode>,
