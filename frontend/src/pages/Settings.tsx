@@ -4,9 +4,13 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom'; 
+import { createPortal } from 'react-dom';
+import SearchBar from '../components/SearchBar';
+import { useLanguage, type AppLanguage } from '../lib/i18n';
 import {
   ArrowLeft,
   BarChart3,
@@ -106,8 +110,6 @@ const APP_LANGUAGES = [
   { code: 'th', label: 'Thai', native: 'ไทย', prompt: 'Thai' },
   { code: 'fil', label: 'Filipino', native: 'Filipino', prompt: 'Filipino' },
 ] as const;
-
-const APP_LANGUAGE_KEY = 'twinkle_app_language';
 
 const VOICES: VoiceOption[] = [
   { name: 'Zephyr', description: 'Bright' },
@@ -396,6 +398,250 @@ function Btn({
     >
       {children}
     </button>
+  );
+}
+
+const INDIAN_LANGUAGE_CODES = new Set(['hi', 'te', 'ta', 'kn', 'ml', 'bn', 'mr', 'gu', 'pa', 'ur']);
+
+function LanguageSelect({ value, onChange }: { value: string; onChange: (code: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState(0);
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; width: number; maxHeight: number }>({
+    left: 0,
+    width: 300,
+    maxHeight: 360,
+  });
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  const selected = APP_LANGUAGES.find(item => item.code === value) ?? APP_LANGUAGES[0];
+
+  const groups = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const matches = APP_LANGUAGES.filter(
+      item =>
+        !q ||
+        item.label.toLowerCase().includes(q) ||
+        item.native.toLowerCase().includes(q) ||
+        item.code.toLowerCase() === q,
+    );
+    return [
+      { title: 'Automatic', items: matches.filter(item => item.code === 'auto') },
+      { title: 'Indian languages', items: matches.filter(item => INDIAN_LANGUAGE_CODES.has(item.code)) },
+      {
+        title: 'World languages',
+        items: matches.filter(item => item.code !== 'auto' && !INDIAN_LANGUAGE_CODES.has(item.code)),
+      },
+    ].filter(group => group.items.length > 0);
+  }, [query]);
+
+  const flat = useMemo(() => groups.flatMap(group => group.items), [groups]);
+
+  const place = useCallback(() => {
+    const el = buttonRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const margin = 12;
+    const width = Math.min(Math.max(rect.width, 300), window.innerWidth - margin * 2);
+    const left = Math.min(Math.max(margin, rect.right - width), window.innerWidth - width - margin);
+    const spaceBelow = window.innerHeight - rect.bottom - margin;
+    const spaceAbove = rect.top - margin;
+    if (spaceBelow >= 300 || spaceBelow >= spaceAbove) {
+      setPos({ top: rect.bottom + 8, left, width, maxHeight: Math.max(220, Math.min(420, spaceBelow - 8)) });
+    } else {
+      setPos({ bottom: window.innerHeight - rect.top + 8, left, width, maxHeight: Math.max(220, Math.min(420, spaceAbove - 8)) });
+    }
+  }, []);
+
+  const close = useCallback(() => {
+    setOpen(false);
+    setQuery('');
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    place();
+    setActive(Math.max(0, flat.findIndex(item => item.code === value)));
+    const t = window.setTimeout(() => searchRef.current?.focus(), 30);
+
+    const onPointer = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node;
+      if (panelRef.current?.contains(target) || buttonRef.current?.contains(target)) return;
+      close();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        close();
+        buttonRef.current?.focus();
+      }
+    };
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    document.addEventListener('mousedown', onPointer);
+    document.addEventListener('touchstart', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+      document.removeEventListener('mousedown', onPointer);
+      document.removeEventListener('touchstart', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  useEffect(() => {
+    setActive(0);
+  }, [query]);
+
+  useEffect(() => {
+    if (!open) return;
+    panelRef.current
+      ?.querySelector<HTMLElement>(`[data-index="${active}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [active, open]);
+
+  const choose = (code: string) => {
+    onChange(code);
+    close();
+    buttonRef.current?.focus();
+  };
+
+  const onSearchKey = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActive(i => Math.min(flat.length - 1, i + 1));
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActive(i => Math.max(0, i - 1));
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      if (flat[active]) choose(flat[active].code);
+    }
+  };
+
+  let runningIndex = -1;
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => (open ? close() : setOpen(true))}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label="Interface language"
+        className={`group flex min-w-[220px] items-center gap-3 rounded-2xl border bg-white px-3.5 py-2.5 text-left shadow-sm transition-all hover:border-zinc-400 hover:shadow dark:bg-zinc-950 dark:hover:border-zinc-600 ${
+          open
+            ? 'border-zinc-900 ring-4 ring-zinc-900/5 dark:border-zinc-300 dark:ring-white/10'
+            : 'border-zinc-200 dark:border-zinc-800'
+        }`}
+      >
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+          <Globe2 className="h-4 w-4" strokeWidth={1.8} />
+        </span>
+        <span data-no-translate className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            {selected.native}
+          </span>
+          {selected.native !== selected.label && (
+            <span className="block truncate text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+              {selected.label}
+            </span>
+          )}
+        </span>
+        <ChevronDown
+          className={`h-4 w-4 shrink-0 text-zinc-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+          strokeWidth={1.8}
+          aria-hidden="true"
+        />
+      </button>
+
+      {open &&
+        createPortal(
+          <div
+            ref={panelRef}
+            role="listbox"
+            aria-label="Choose language"
+            style={{
+              position: 'fixed',
+              top: pos.top,
+              bottom: pos.bottom,
+              left: pos.left,
+              width: pos.width,
+              maxHeight: pos.maxHeight,
+              zIndex: 1000,
+            }}
+            className="flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl shadow-black/15 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/60"
+          >
+            <div className="border-b border-zinc-100 p-2.5 dark:border-zinc-900">
+              <SearchBar
+                ref={searchRef}
+                value={query}
+                onChange={setQuery}
+                onKeyDown={onSearchKey}
+                placeholder="Search languages"
+              />
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5">
+              {flat.length === 0 && (
+                <p className="px-3 py-6 text-center text-sm text-zinc-500">No language found</p>
+              )}
+
+              {groups.map(group => (
+                <div key={group.title} className="mb-1">
+                  <p className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+                    {group.title}
+                  </p>
+                  {group.items.map(item => {
+                    runningIndex += 1;
+                    const index = runningIndex;
+                    const isSelected = item.code === value;
+                    const isActive = index === active;
+                    return (
+                      <button
+                        key={item.code}
+                        type="button"
+                        role="option"
+                        aria-selected={isSelected}
+                        data-index={index}
+                        data-no-translate
+                        onMouseEnter={() => setActive(index)}
+                        onClick={() => choose(item.code)}
+                        className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors ${
+                          isActive ? 'bg-zinc-100 dark:bg-zinc-900' : ''
+                        }`}
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                            {item.native}
+                          </span>
+                          {item.native !== item.label && (
+                            <span className="block truncate text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+                              {item.label}
+                            </span>
+                          )}
+                        </span>
+                        {item.code !== 'auto' && (
+                          <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+                            {item.code}
+                          </span>
+                        )}
+                        {isSelected && <Check className="h-4 w-4 shrink-0 text-zinc-900 dark:text-zinc-100" strokeWidth={2.4} />}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 
@@ -838,38 +1084,17 @@ export default function Settings({
   };
 
   // ── Language ─────────────────────────────────────────────────────────────
-  const [appLanguage, setAppLanguage] = useState(() => {
-    try {
-      const saved = localStorage.getItem(APP_LANGUAGE_KEY);
-      // English is Twinkle AI's default UI language. Only an explicit saved
-      // language choice overrides it.
-      if (!saved || saved === 'auto') return 'en';
-      return APP_LANGUAGES.some(item => item.code === saved) ? saved : 'en';
-    } catch {
-      return 'en';
-    }
-  });
+  // The language lives in the global LanguageProvider, so changing it here
+  // re-translates the whole website (sidebar, chat, login, every page).
+  const { language: appLanguage, setLanguage: setGlobalLanguage } = useLanguage();
   const selectedLanguage =
     APP_LANGUAGES.find(item => item.code === appLanguage) ?? APP_LANGUAGES[0];
 
   const changeAppLanguage = (code: string) => {
     const next = APP_LANGUAGES.find(item => item.code === code) ?? APP_LANGUAGES[0];
-    setAppLanguage(next.code);
-    try {
-      localStorage.setItem(APP_LANGUAGE_KEY, next.code);
-    } catch { /* best effort */ }
-    window.dispatchEvent(new CustomEvent('twinkle-language-change', { detail: next.code }));
+    setGlobalLanguage(next.code as AppLanguage);
     showToast(`Language set to ${next.label}`);
   };
-
-  useEffect(() => {
-    try {
-      document.documentElement.lang =
-        selectedLanguage.code === 'auto'
-          ? (navigator.language || 'en').split('-')[0]
-          : selectedLanguage.code;
-    } catch { /* ignore */ }
-  }, [selectedLanguage.code]);
 
   const liveTalkColor = getSavedLiveTalkColor();
 
@@ -1388,24 +1613,10 @@ export default function Settings({
                       title="Language"
                       desc="Choose the interface language and preferred language for Live Talk responses."
                     >
-                      <label className="relative flex min-w-[200px] items-center">
-                        <Globe2 className="pointer-events-none absolute left-3 h-4 w-4 text-zinc-400" />
-                        <select
-                          value={appLanguage}
-                          onChange={event => changeAppLanguage(event.target.value)}
-                          className="w-full appearance-none rounded-xl border border-zinc-200 bg-white py-2.5 pl-9 pr-10 text-sm font-semibold text-zinc-800 outline-none transition focus:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
-                          aria-label="Interface language"
-                        >
-                          {APP_LANGUAGES.map(language => (
-                            <option key={language.code} value={language.code}>
-                              {language.code !== 'auto' && language.native !== language.label
-                                ? `${language.label} · ${language.native}`
-                                : language.label}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown className="pointer-events-none absolute right-3 h-4 w-4 text-zinc-400" strokeWidth={1.8} aria-hidden="true" />
-                      </label>
+                      <LanguageSelect
+                        value={appLanguage}
+                        onChange={changeAppLanguage}
+                      />
                     </Row>
 
                     <Row title="Theme" desc={`Currently ${theme === 'system' ? 'following your device' : theme}.`}>
