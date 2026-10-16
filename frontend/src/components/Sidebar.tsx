@@ -480,8 +480,10 @@ function SessionList({
   const handleDelete = (id: number) => {
     // Close the context menu and mobile drawer immediately after Delete is clicked.
     // The parent callback can then handle the delete confirmation / actual deletion.
+    // Do NOT start a spinner here: this only opens the confirmation popup.
+    // Cancelling it used to leave the row spinning forever. The parent removes
+    // the chat optimistically as soon as the user confirms.
     setMenuOpenId(null);
-    setDeletingIds(previous => previous.includes(id) ? previous : [...previous, id]);
     onClose();
     onDeleteSession(id);
     setPinnedIds(prev => {
@@ -657,7 +659,6 @@ function SessionList({
                       onClick={(e) => {
                         e.stopPropagation();
                         onClose();
-                        setDeletingAll(true);
                         onClearAll();
                       }}
                       title="Clear all"
