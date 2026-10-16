@@ -1,10 +1,3 @@
-/**
- * Twinkle AI — OTP Verification
- *
- * Flow:
- * Email → OTP → Chat
- */
-
 import React, {
   useEffect,
   useRef,
