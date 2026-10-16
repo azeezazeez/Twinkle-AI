@@ -8,6 +8,7 @@ import com.ai.chatbot_backend.dto.UserResponse;
 import com.ai.chatbot_backend.service.OTPService;
 import com.ai.chatbot_backend.service.UserService;
 import com.ai.chatbot_backend.service.ChatHistoryService;
+import com.ai.chatbot_backend.service.RateLimitService;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
@@ -21,6 +22,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -39,6 +41,22 @@ public class AuthController {
     private final UserService userService;
     private final OTPService otpService;
     private final ChatHistoryService chatHistoryService;
+    private final RateLimitService rateLimitService;
+
+    // Failed-attempt lockouts (per account, in addition to the per-IP limits).
+    private static final int MAX_FAILED_ATTEMPTS = 5;
+    private static final Duration LOCKOUT = Duration.ofMinutes(15);
+
+    private ResponseEntity<Map<String, Object>> tooManyAttempts(String key) {
+        long minutes = Math.max(1, (rateLimitService.retryAfterSeconds(key) + 59) / 60);
+        return ResponseEntity
+                .status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", String.valueOf(rateLimitService.retryAfterSeconds(key)))
+                .body(errorResponse(
+                        "Too many failed attempts. Please try again in "
+                                + minutes + (minutes == 1 ? " minute." : " minutes.")
+                ));
+    }
 
 
     // ============================================================
@@ -50,6 +68,8 @@ public class AuthController {
             @RequestBody LoginRequest request,
             HttpServletRequest httpRequest
     ) {
+
+        String loginKey = null;
 
         try {
 
@@ -89,16 +109,27 @@ public class AuthController {
             // LOGIN
             // ----------------------------------------------------
 
+            loginKey = "login-fail:" +
+                    request.getUsername().trim().toLowerCase();
+
+            if (rateLimitService.isBlocked(loginKey, MAX_FAILED_ATTEMPTS)) {
+                return tooManyAttempts(loginKey);
+            }
+
             User user =
                     userService.login(request);
 
 
             if (user == null) {
 
+                rateLimitService.recordFailure(loginKey, LOCKOUT);
+
                 return unauthorized(
                         "Invalid credentials"
                 );
             }
+
+            rateLimitService.reset(loginKey);
 
 
             // ----------------------------------------------------
@@ -190,6 +221,11 @@ public class AuthController {
                                             "Please verify your email before logging in"
                                     )
                     )) {
+
+                if (loginKey != null &&
+                        message.equalsIgnoreCase("Invalid credentials")) {
+                    rateLimitService.recordFailure(loginKey, LOCKOUT);
+                }
 
                 return unauthorized(
                         message
@@ -637,11 +673,20 @@ public class AuthController {
                 );
             }
 
+            String otpKey = "otp-fail:" + email;
+
+            if (rateLimitService.isBlocked(otpKey, MAX_FAILED_ATTEMPTS)) {
+                return tooManyAttempts(otpKey);
+            }
+
             boolean valid = otpService.validateOtp(email, otpCode);
 
             if (!valid) {
+                rateLimitService.recordFailure(otpKey, LOCKOUT);
                 return badRequest("Invalid or expired OTP");
             }
+
+            rateLimitService.reset(otpKey);
 
             User user = userOptional.get();
 
@@ -1408,6 +1453,12 @@ public class AuthController {
             // VALIDATE RESET OTP
             // ----------------------------------------------------
 
+            String resetKey = "reset-fail:" + email;
+
+            if (rateLimitService.isBlocked(resetKey, MAX_FAILED_ATTEMPTS)) {
+                return tooManyAttempts(resetKey);
+            }
+
             boolean isValid =
                     otpService.validatePasswordResetOtp(
                             email,
@@ -1417,10 +1468,14 @@ public class AuthController {
 
             if (!isValid) {
 
+                rateLimitService.recordFailure(resetKey, LOCKOUT);
+
                 return badRequest(
                         "Invalid or expired OTP"
                 );
             }
+
+            rateLimitService.reset(resetKey);
 
 
             // ----------------------------------------------------
