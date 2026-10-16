@@ -8,6 +8,8 @@ import {
 } from 'react-router-dom';
 
 import {
+  Suspense,
+  lazy,
   useState,
   useEffect,
   useCallback,
@@ -23,11 +25,12 @@ import Login from './pages/Login';
 import VerifyOtp from './pages/VerifyOtp';
 import ForgotPassword from './pages/ForgotPassword';
 import Chat from './pages/Chat';
-import Profile from './pages/Profile';
-import Settings from './pages/Settings';
-import LiveTalkColor from './pages/LiveTalkColor';
-import SharedChat from './pages/SharedChat';
-import KnowledgeBase from './pages/KnowledgeBase';
+// Loaded only when the page is opened, so the first load is much smaller.
+const Profile = lazy(() => import('./pages/Profile'));
+const Settings = lazy(() => import('./pages/Settings'));
+const LiveTalkColor = lazy(() => import('./pages/LiveTalkColor'));
+const SharedChat = lazy(() => import('./pages/SharedChat'));
+const KnowledgeBase = lazy(() => import('./pages/KnowledgeBase'));
 
 import StormLogo from './components/StormLogo';
 
@@ -200,6 +203,13 @@ function AuthenticatedApp({
 
 
   return (
+    <Suspense
+      fallback={
+        <div className="flex h-full min-h-screen w-full items-center justify-center bg-[var(--bg-main)]">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-300 border-t-[#C6613F]" />
+        </div>
+      }
+    >
     <Routes>
 
       {/* =====================================================
@@ -406,6 +416,7 @@ function AuthenticatedApp({
       />
 
     </Routes>
+    </Suspense>
   );
 }
 
