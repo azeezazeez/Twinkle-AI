@@ -1351,7 +1351,6 @@ ${textToRead}` }] }], turnComplete: true },
   const [voiceInputActive, setVoiceInputActive] = useState(false);
   const [voiceCaptureStopped, setVoiceCaptureStopped] = useState(false);
 
-  const [typedSessionTitle, setTypedSessionTitle] = useState('');
 
   useEffect(() => {
     const handleLiveTalkColorChange = () => {
@@ -1367,54 +1366,18 @@ ${textToRead}` }] }], turnComplete: true },
     };
   }, []);
 
+  // The Sidebar types the new name in. This is only a safety net so the
+  // "typing" flag can never stay set if the Sidebar is collapsed/unmounted.
   useEffect(() => {
-    if (!typingSessionTitle) {
-      setTypedSessionTitle('');
-      return;
-    }
-    const { title } = typingSessionTitle;
-    // Split into user-perceived characters so Telugu/Hindi/Arabic/emoji never
-    // get cut in the middle of a letter while typing.
-    const chars: string[] = (() => {
-      try {
-        const Seg = (Intl as any).Segmenter;
-        if (Seg) return Array.from(new Seg(undefined, { granularity: 'grapheme' }).segment(title), (part: any) => part.segment as string);
-      } catch { /* fall through */ }
-      return Array.from(title);
-    })();
-    // Time-based reveal (about 45ms per letter) so it reads as real typing, but
-    // always finishes, even if timers are throttled in a background tab.
-    const started = performance.now();
-    const duration = Math.min(1800, Math.max(500, chars.length * 45));
-    setTypedSessionTitle(chars[0] ?? '');
-    let frame = 0;
-    const tick = () => {
-      const progress = Math.min(1, (performance.now() - started) / duration);
-      const count = Math.max(1, Math.ceil(chars.length * progress));
-      setTypedSessionTitle(chars.slice(0, count).join(''));
-      if (progress >= 1) {
-        setTypingSessionTitle(null);
-        return;
-      }
-      frame = window.requestAnimationFrame(tick);
-    };
-    frame = window.requestAnimationFrame(tick);
-    // Hard failsafe (also covers background tabs where rAF is paused).
-    const failsafe = window.setTimeout(() => {
-      window.cancelAnimationFrame(frame);
-      setTypingSessionTitle(null);
-    }, duration + 400);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.clearTimeout(failsafe);
-    };
+    if (!typingSessionTitle) return;
+    const timer = window.setTimeout(() => setTypingSessionTitle(null), 3500);
+    return () => window.clearTimeout(timer);
   }, [typingSessionTitle]);
 
-  const sidebarSessions = sessions.map(session =>
-    typingSessionTitle?.id === session.id
-      ? { ...session, sessionName: typedSessionTitle }
-      : { ...session, sessionName: polishChatTitle(session.sessionName, session.sessionName || 'New Chat') }
-  );
+  const sidebarSessions = sessions.map(session => ({
+    ...session,
+    sessionName: polishChatTitle(session.sessionName, session.sessionName || 'New Chat'),
+  }));
   const sessionToDelete = sessions.find(session => session.id === sessionIdToDelete);
   const deleteDataWeight = (() => {
     const targetMessages = sessionIdToDelete === currentSessionId ? messages : [];
@@ -3960,6 +3923,8 @@ if (isBlankDraft) {
       <Sidebar
         user={user}
         sessions={sidebarSessions}
+        typingSessionId={typingSessionTitle?.id ?? null}
+        onTypingDone={() => setTypingSessionTitle(null)}
         currentSessionId={currentSessionId}
         respondingSessionId={isTyping ? activeResponseSessionRef.current : null}
         onSelectSession={(id) => {
