@@ -43,109 +43,219 @@ export const getLanguageInstruction = (language:AppLanguage) => {
   return names[language] ? ` Respond entirely in ${names[language]}. If the user explicitly asks to switch languages, follow that request.` : '';
 };
 
-const originalText = new WeakMap<Text, string>();
-const originalAttrs = new WeakMap<Element, Map<string, string>>();
-const skipTags = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'PRE', 'CODE', 'TEXTAREA']);
 
-let applying = false;
-
-const shouldSkipText = (node: Text): boolean => {
-  const parent = node.parentElement;
-  return (
-    !parent ||
-    skipTags.has(parent.tagName) ||
-    !!parent.closest('[data-twinkle-user-content]')
-  );
-};
-
-const getDictionary = (language: AppLanguage): Record<string, string> => {
-  const lang = resolve(language);
-  return lang === 'en'
-    ? T.en
-    : { ...T.en, ...(T[lang] || {}) };
-};
-
-/*
- * Important:
- * This translator deliberately avoids React re-rendering and never writes
- * a value to the DOM unless the value is actually different.
+/* ------------------------------------------------------------------ *
+ * Whole-site translation
  *
- * The previous version observed characterData + attributes and then wrote
- * the same values back on every MutationObserver pass. That can create an
- * endless mutation loop and make Chromium show "Page Unresponsive".
- */
+ * 1. Strings found in the static dictionary above are swapped instantly.
+ * 2. Every other piece of interface text is sent (in small batches) to the
+ *    backend /i18n/translate endpoint, cached in localStorage and swapped in
+ *    as soon as it arrives, so every page follows the selected language.
+ * 3. Chat messages / chat titles are marked with data-twinkle-user-content
+ *    and are never touched.
+ * ------------------------------------------------------------------ */
+
+const API_BASE = ((import.meta as any).env?.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
+const CACHE_PREFIX = 'twinkle_i18n_cache_v1_';
+const RTL_LANGUAGES = new Set(['ar', 'ur']);
+const BATCH_SIZE = 40;
+const MAX_TEXT_LENGTH = 180;
+const MAX_REQUESTS_PER_LANGUAGE = 600;
+
+type Tracked = { raw: string; out: string };
+
+const textState = new WeakMap<Text, Tracked>();
+const attrState = new WeakMap<Element, Map<string, Tracked>>();
+const skipTags = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'PRE', 'CODE', 'TEXTAREA', 'SVG', 'svg']);
+
+const dynamicCache: Record<string, Record<string, string>> = {};
+const pending = new Set<string>();
+const requestedCount: Record<string, number> = {};
+let activeLanguage: AppLanguage = 'en';
+let applying = false;
+let inFlight = false;
+let backoffUntil = 0;
+let saveTimer: number | null = null;
+
+const loadCache = (lang: string): Record<string, string> => {
+  if (dynamicCache[lang]) return dynamicCache[lang];
+  let stored: Record<string, string> = {};
+  try {
+    stored = JSON.parse(localStorage.getItem(CACHE_PREFIX + lang) || '{}') || {};
+  } catch {
+    stored = {};
+  }
+  dynamicCache[lang] = stored;
+  return stored;
+};
+
+const saveCacheSoon = (lang: string) => {
+  if (saveTimer !== null) window.clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(() => {
+    saveTimer = null;
+    try {
+      localStorage.setItem(CACHE_PREFIX + lang, JSON.stringify(dynamicCache[lang] || {}));
+    } catch {
+      /* storage may be full or blocked */
+    }
+  }, 400);
+};
+
+const translate = (key: string, language: AppLanguage): string => {
+  const lang = resolve(language);
+  if (lang === 'en') return key;
+  const trimmed = key.trim();
+  return (T[lang] && T[lang][trimmed]) || loadCache(lang)[trimmed] || key;
+};
+
+const looksTranslatable = (text: string): boolean => {
+  if (text.length < 2 || text.length > MAX_TEXT_LENGTH) return false;
+  if (!/\p{L}/u.test(text)) return false;
+  if (/^(https?:\/\/|www\.)\S+$/i.test(text)) return false;
+  if (/^[\w.+-]+@[\w-]+\.[\w.-]+$/.test(text)) return false;
+  return true;
+};
+
+const lookup = (lang: string, text: string): string | undefined => {
+  if (lang === 'en') return undefined;
+  const fromStatic = T[lang]?.[text];
+  if (fromStatic) return fromStatic;
+  return loadCache(lang)[text];
+};
+
+const queueMissing = (lang: string, text: string) => {
+  if (lang === 'en' || !looksTranslatable(text)) return;
+  if (lookup(lang, text) !== undefined) return;
+  pending.add(text);
+};
+
+async function flushPending(): Promise<void> {
+  const lang = resolve(activeLanguage);
+  if (lang === 'en' || inFlight || pending.size === 0) return;
+  if (Date.now() < backoffUntil) return;
+
+  const cache = loadCache(lang);
+  const batch: string[] = [];
+  for (const text of pending) {
+    if (cache[text] !== undefined) {
+      pending.delete(text);
+      continue;
+    }
+    if (batch.length < BATCH_SIZE) batch.push(text);
+  }
+  if (batch.length === 0) return;
+
+  requestedCount[lang] = (requestedCount[lang] || 0) + batch.length;
+  if (requestedCount[lang] > MAX_REQUESTS_PER_LANGUAGE) {
+    pending.clear();
+    return;
+  }
+
+  inFlight = true;
+  try {
+    const response = await fetch(`${API_BASE}/i18n/translate`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ language: lang, texts: batch }),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    const translations: Record<string, string> = data?.translations || {};
+
+    let changed = false;
+    for (const source of batch) {
+      pending.delete(source);
+      const target = translations[source];
+      if (typeof target === 'string' && target.trim()) {
+        cache[source] = target;
+        changed = true;
+      } else {
+        // Remember untranslatable strings so we do not ask again.
+        cache[source] = source;
+      }
+    }
+    if (data?.error) backoffUntil = Date.now() + 15000;
+    if (changed) saveCacheSoon(lang);
+  } catch {
+    batch.forEach(text => pending.delete(text));
+    backoffUntil = Date.now() + 15000;
+  } finally {
+    inFlight = false;
+  }
+
+  if (resolve(activeLanguage) === lang) {
+    scheduleTranslation(activeLanguage);
+    if (pending.size > 0) void flushPending();
+  }
+}
+
+const getStaticDictionary = (language: AppLanguage): Record<string, string> => {
+  const lang = resolve(language);
+  return lang === 'en' ? T.en : { ...T.en, ...(T[lang] || {}) };
+};
+
+const isSkippedElement = (element: Element): boolean =>
+  skipTags.has(element.tagName) || element.hasAttribute('data-twinkle-user-content') || element.hasAttribute('data-no-translate');
+
 function applyTranslations(language: AppLanguage): void {
   if (typeof document === 'undefined' || applying) return;
-
   applying = true;
 
   try {
-    const resolvedLanguage = resolve(language);
-    document.documentElement.lang = resolvedLanguage;
+    const lang = resolve(language);
+    document.documentElement.lang = lang;
+    document.documentElement.dir = RTL_LANGUAGES.has(lang) ? 'rtl' : 'ltr';
 
-    const dict = getDictionary(language);
+    const staticDict = getStaticDictionary(language);
+    const cache = lang === 'en' ? {} : loadCache(lang);
+    const pick = (text: string): string | undefined => staticDict[text] ?? cache[text];
 
     const walker = document.createTreeWalker(
       document.body,
-      NodeFilter.SHOW_TEXT,
+      NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
       {
-        acceptNode: (node) =>
-          shouldSkipText(node as Text)
-            ? NodeFilter.FILTER_REJECT
-            : NodeFilter.FILTER_ACCEPT,
+        acceptNode: (node) => {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            return isSkippedElement(node as Element) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        },
       }
     );
 
     const nodes: Text[] = [];
     let current: Node | null;
-
-    while ((current = walker.nextNode())) {
-      nodes.push(current as Text);
-    }
+    while ((current = walker.nextNode())) nodes.push(current as Text);
 
     for (const node of nodes) {
       const currentValue = node.nodeValue ?? '';
+      let state = textState.get(node);
 
-      let raw = originalText.get(node);
-
-      if (raw === undefined) {
-        raw = currentValue;
-        originalText.set(node, raw);
+      // React (or anything else) changed the text since we last wrote it.
+      if (!state || (currentValue !== state.out && currentValue !== state.raw)) {
+        state = { raw: currentValue, out: currentValue };
+        textState.set(node, state);
       }
 
+      const raw = state.raw;
       const trimmed = raw.trim();
+      let nextValue = raw;
 
-      if (!trimmed || trimmed.length > 180) {
-        if (currentValue !== raw) {
-          node.nodeValue = raw;
+      if (trimmed && trimmed.length <= MAX_TEXT_LENGTH) {
+        const translated = pick(trimmed);
+        if (translated && translated !== trimmed) {
+          const start = raw.indexOf(trimmed);
+          nextValue = start >= 0
+            ? raw.slice(0, start) + translated + raw.slice(start + trimmed.length)
+            : translated;
+        } else if (!translated) {
+          queueMissing(lang, trimmed);
         }
-        continue;
       }
 
-      const translated = dict[trimmed] ?? raw;
-
-      if (translated === raw) {
-        if (currentValue !== raw) {
-          node.nodeValue = raw;
-        }
-        continue;
-      }
-
-      const startIndex = raw.indexOf(trimmed);
-      const nextValue =
-        startIndex >= 0
-          ? raw.slice(0, startIndex) +
-            translated +
-            raw.slice(startIndex + trimmed.length)
-          : translated;
-
-      /*
-       * NEVER write the same value. This is the key protection against
-       * MutationObserver feedback loops.
-       */
-      if (currentValue !== nextValue) {
-        node.nodeValue = nextValue;
-      }
+      state.out = nextValue;
+      if (currentValue !== nextValue) node.nodeValue = nextValue;
     }
 
     const elements = document.querySelectorAll<HTMLElement>(
@@ -154,37 +264,41 @@ function applyTranslations(language: AppLanguage): void {
 
     for (const element of elements) {
       if (skipTags.has(element.tagName)) continue;
-      if (element.closest('[data-twinkle-user-content]')) continue;
+      if (element.closest('[data-twinkle-user-content], [data-no-translate]')) continue;
 
-      let attrs = originalAttrs.get(element);
-
+      let attrs = attrState.get(element);
       if (!attrs) {
-        attrs = new Map<string, string>();
-        originalAttrs.set(element, attrs);
+        attrs = new Map<string, Tracked>();
+        attrState.set(element, attrs);
       }
 
       for (const name of ['placeholder', 'title', 'aria-label'] as const) {
         const currentValue = element.getAttribute(name);
-
         if (currentValue == null) continue;
 
-        let raw = attrs.get(name);
-
-        if (raw === undefined) {
-          raw = currentValue;
-          attrs.set(name, raw);
+        let state = attrs.get(name);
+        if (!state || (currentValue !== state.out && currentValue !== state.raw)) {
+          state = { raw: currentValue, out: currentValue };
+          attrs.set(name, state);
         }
 
-        const nextValue = dict[raw] ?? raw;
+        const raw = state.raw;
+        const trimmed = raw.trim();
+        let nextValue = raw;
+        const translated = trimmed ? pick(trimmed) : undefined;
 
-        if (currentValue !== nextValue) {
-          element.setAttribute(name, nextValue);
-        }
+        if (translated && translated !== trimmed) nextValue = translated;
+        else if (!translated && trimmed) queueMissing(lang, trimmed);
+
+        state.out = nextValue;
+        if (currentValue !== nextValue) element.setAttribute(name, nextValue);
       }
     }
   } finally {
     applying = false;
   }
+
+  void flushPending();
 }
 
 const scheduleTranslation = (() => {
@@ -192,20 +306,11 @@ const scheduleTranslation = (() => {
 
   return (language: AppLanguage) => {
     if (typeof window === 'undefined') return;
-
-    if (frame !== null) {
-      window.cancelAnimationFrame(frame);
-    }
+    if (frame !== null) window.cancelAnimationFrame(frame);
 
     frame = window.requestAnimationFrame(() => {
       frame = null;
-      try {
-      document.documentElement.lang = resolve(language);
-    } catch {
-      // Ignore document language errors.
-    }
-
-    applyTranslations(language);
+      applyTranslations(language);
     });
   };
 })();
@@ -219,125 +324,86 @@ type Ctx = {
 
 const LanguageContext = createContext<Ctx | null>(null);
 
-export function LanguageProvider({
-  children,
-}: {
-  children: ReactNode;
-}) {
-  const [language, setLanguageState] =
-    useState<AppLanguage>(initial);
+export function LanguageProvider({ children }: { children: ReactNode }) {
+  const [language, setLanguageState] = useState<AppLanguage>(initial);
 
   const setLanguage = (nextLanguage: AppLanguage) => {
     setLanguageState(nextLanguage);
 
     try {
-      localStorage.setItem(
-        APP_LANGUAGE_KEY,
-        nextLanguage
-      );
-
-      document.documentElement.lang =
-        resolve(nextLanguage);
+      localStorage.setItem(APP_LANGUAGE_KEY, nextLanguage);
+      document.documentElement.lang = resolve(nextLanguage);
     } catch {
       // Storage/document access is best effort.
     }
 
-    window.dispatchEvent(
-      new CustomEvent<AppLanguage>(
-        'twinkle-language-change',
-        {
-          detail: nextLanguage,
-        }
-      )
-    );
+    window.dispatchEvent(new CustomEvent<AppLanguage>('twinkle-language-change', { detail: nextLanguage }));
   };
 
   useEffect(() => {
     const handleLanguageChange = (event: Event) => {
-      const nextLanguage =
-        (event as CustomEvent<AppLanguage>).detail;
-
-      if (
-        typeof nextLanguage === 'string' &&
-        nextLanguage !== language
-      ) {
+      const nextLanguage = (event as CustomEvent<AppLanguage>).detail;
+      if (typeof nextLanguage === 'string' && nextLanguage !== language) {
         setLanguageState(nextLanguage);
       }
     };
 
-    window.addEventListener(
-      'twinkle-language-change',
-      handleLanguageChange
-    );
+    window.addEventListener('twinkle-language-change', handleLanguageChange);
+    return () => window.removeEventListener('twinkle-language-change', handleLanguageChange);
+  }, [language]);
 
-    return () => {
-      window.removeEventListener(
-        'twinkle-language-change',
-        handleLanguageChange
-      );
+  // Keep the language in sync when it is changed from another tab.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === APP_LANGUAGE_KEY && event.newValue && event.newValue !== language) {
+        setLanguageState(event.newValue as AppLanguage);
+      }
     };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, [language]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
 
+    activeLanguage = language;
+    pending.clear();
     applyTranslations(language);
 
     /*
-     * Observe only DOM additions/replacements. Do NOT observe characterData
-     * or attributes because this translator itself changes those nodes.
-     * React-generated new content is translated on the next animation frame.
+     * Observe only DOM additions/replacements. Text/attribute writes made by
+     * the translator are never observed, so there is no feedback loop. New
+     * React content is translated on the next animation frame.
      */
     const observer = new MutationObserver((mutations) => {
       if (applying) return;
-
-      const hasAddedNodes = mutations.some(
-        (mutation) => mutation.addedNodes.length > 0
-      );
-
-      if (hasAddedNodes) {
+      if (mutations.some((mutation) => mutation.addedNodes.length > 0)) {
         scheduleTranslation(language);
       }
     });
 
-    observer.observe(document.body, {
-      subtree: true,
-      childList: true,
-    });
+    observer.observe(document.body, { subtree: true, childList: true });
 
-    return () => {
-      observer.disconnect();
-    };
+    return () => observer.disconnect();
   }, [language]);
 
   const value = useMemo(
     () => ({
       language,
       setLanguage,
-      t: (key: string) =>
-        translate(key, language),
-      languageInstruction:
-        getLanguageInstruction(language),
+      t: (key: string) => translate(key, language),
+      languageInstruction: getLanguageInstruction(language),
     }),
     [language]
   );
 
-  return (
-    <LanguageContext.Provider value={value}>
-      {children}
-    </LanguageContext.Provider>
-  );
+  return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
 }
 
 export const useLanguage = () => {
   const context = useContext(LanguageContext);
-
   if (!context) {
-    throw new Error(
-      'useLanguage must be used inside LanguageProvider'
-    );
+    throw new Error('useLanguage must be used inside LanguageProvider');
   }
-
   return context;
 };
-
