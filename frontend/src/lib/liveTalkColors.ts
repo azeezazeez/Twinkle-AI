@@ -1,170 +1,178 @@
-export type LiveTalkColor = {
-  id: string;
-  name: string;
-  background: string;
-  glow: string;
-  swatch: string;
-};
+import { useEffect, useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { ArrowLeft, Check } from 'lucide-react';
+import { motion } from 'motion/react';
+import {
+  LIVE_TALK_COLOR_KEY,
+  LIVE_TALK_COLORS,
+  getSavedLiveTalkColor,
+  toOrbPalette,
+} from '../lib/liveTalkColors';
+import FoggyOrb from '../components/FoggyOrb';
 
-export const LIVE_TALK_COLOR_KEY = 'twinkle_live_talk_color';
+export default function LiveTalkColor() {
+  const navigate = useNavigate();
+  const location = useLocation();
 
-export const LIVE_TALK_COLORS: LiveTalkColor[] = [
-  // Existing colors
-  {
-    id: 'purple',
-    name: 'Purple',
-    background: 'radial-gradient(circle at 35% 25%, #f5f3ff 0%, #ddd6fe 30%, #8b5cf6 62%, #5b21b6 100%)',
-    glow: 'rgba(91,33,182,.24)',
-    swatch: '#7c3aed',
-  },
-  {
-    id: 'blue',
-    name: 'Blue',
-    background: 'radial-gradient(circle at 35% 25%, #fef9c3 0%, #dff6ff 28%, #74c7ff 58%, #1479ed 100%)',
-    glow: 'rgba(20,121,237,.24)',
-    swatch: '#2563eb',
-  },
-  {
-    id: 'pink',
-    name: 'Pink',
-    background: 'radial-gradient(circle at 35% 25%, #fff1f7 0%, #fbcfe8 30%, #f472b6 62%, #be185d 100%)',
-    glow: 'rgba(190,24,93,.24)',
-    swatch: '#ec4899',
-  },
-  {
-    id: 'green',
-    name: 'Green',
-    background: 'radial-gradient(circle at 35% 25%, #f0fdf4 0%, #bbf7d0 30%, #4ade80 62%, #15803d 100%)',
-    glow: 'rgba(21,128,61,.24)',
-    swatch: '#16a34a',
-  },
-  {
-    id: 'orange',
-    name: 'Orange',
-    background: 'radial-gradient(circle at 35% 25%, #fff7ed 0%, #fed7aa 30%, #fb923c 62%, #ea580c 100%)',
-    glow: 'rgba(234,88,12,.24)',
-    swatch: '#f97316',
-  },
-  {
-    id: 'red',
-    name: 'Red',
-    background: 'radial-gradient(circle at 35% 25%, #fef2f2 0%, #fecaca 30%, #f87171 62%, #b91c1c 100%)',
-    glow: 'rgba(185,28,28,.24)',
-    swatch: '#ef4444',
-  },
-  {
-    id: 'cyan',
-    name: 'Cyan',
-    background: 'radial-gradient(circle at 35% 25%, #ecfeff 0%, #a5f3fc 30%, #22d3ee 62%, #0e7490 100%)',
-    glow: 'rgba(14,116,144,.24)',
-    swatch: '#06b6d4',
-  },
-  {
-    id: 'gold',
-    name: 'Gold',
-    background: 'radial-gradient(circle at 35% 25%, #fffbeb 0%, #fde68a 30%, #facc15 62%, #a16207 100%)',
-    glow: 'rgba(161,98,7,.24)',
-    swatch: '#eab308',
-  },
+  const [selectedColor, setSelectedColor] = useState(
+    () => getSavedLiveTalkColor().id
+  );
 
-  // Additional colors
-  {
-    id: 'indigo',
-    name: 'Indigo',
-    background: 'radial-gradient(circle at 35% 25%, #eef2ff 0%, #c7d2fe 30%, #6366f1 62%, #3730a3 100%)',
-    glow: 'rgba(55,48,163,.24)',
-    swatch: '#4f46e5',
-  },
-  {
-    id: 'violet',
-    name: 'Violet',
-    background: 'radial-gradient(circle at 35% 25%, #faf5ff 0%, #e9d5ff 30%, #a855f7 62%, #6b21a8 100%)',
-    glow: 'rgba(107,33,168,.24)',
-    swatch: '#9333ea',
-  },
-  {
-    id: 'teal',
-    name: 'Teal',
-    background: 'radial-gradient(circle at 35% 25%, #f0fdfa 0%, #99f6e4 30%, #2dd4bf 62%, #0f766e 100%)',
-    glow: 'rgba(15,118,110,.24)',
-    swatch: '#14b8a6',
-  },
-  {
-    id: 'emerald',
-    name: 'Emerald',
-    background: 'radial-gradient(circle at 35% 25%, #ecfdf5 0%, #a7f3d0 30%, #34d399 62%, #047857 100%)',
-    glow: 'rgba(4,120,87,.24)',
-    swatch: '#10b981',
-  },
-  {
-    id: 'lime',
-    name: 'Lime',
-    background: 'radial-gradient(circle at 35% 25%, #f7fee7 0%, #d9f99d 30%, #a3e635 62%, #4d7c0f 100%)',
-    glow: 'rgba(77,124,15,.24)',
-    swatch: '#84cc16',
-  },
-  {
-    id: 'rose',
-    name: 'Rose',
-    background: 'radial-gradient(circle at 35% 25%, #fff1f2 0%, #fecdd3 30%, #fb7185 62%, #be123c 100%)',
-    glow: 'rgba(190,18,60,.24)',
-    swatch: '#f43f5e',
-  },
-  {
-    id: 'fuchsia',
-    name: 'Fuchsia',
-    background: 'radial-gradient(circle at 35% 25%, #fdf4ff 0%, #f5d0fe 30%, #e879f9 62%, #a21caf 100%)',
-    glow: 'rgba(162,28,175,.24)',
-    swatch: '#d946ef',
-  },
-  {
-    id: 'sky',
-    name: 'Sky',
-    background: 'radial-gradient(circle at 35% 25%, #f0f9ff 0%, #bae6fd 30%, #38bdf8 62%, #0369a1 100%)',
-    glow: 'rgba(3,105,161,.24)',
-    swatch: '#0ea5e9',
-  },
-  {
-    id: 'slate',
-    name: 'Slate',
-    background: 'radial-gradient(circle at 35% 25%, #f8fafc 0%, #cbd5e1 30%, #64748b 62%, #334155 100%)',
-    glow: 'rgba(51,65,85,.24)',
-    swatch: '#64748b',
-  },
-  {
-    id: 'midnight',
-    name: 'Midnight',
-    background: 'radial-gradient(circle at 35% 25%, #e0e7ff 0%, #818cf8 30%, #4338ca 62%, #1e1b4b 100%)',
-    glow: 'rgba(30,27,75,.28)',
-    swatch: '#4338ca',
-  },
-  {
-    id: 'aqua',
-    name: 'Aqua',
-    background: 'radial-gradient(circle at 35% 25%, #ecfeff 0%, #a5f3fc 30%, #67e8f9 62%, #0891b2 100%)',
-    glow: 'rgba(8,145,178,.24)',
-    swatch: '#0891b2',
-  },
-  {
-    id: 'coral',
-    name: 'Coral',
-    background: 'radial-gradient(circle at 35% 25%, #fff7ed 0%, #fed7aa 30%, #fb7185 62%, #c2410c 100%)',
-    glow: 'rgba(194,65,12,.24)',
-    swatch: '#f97316',
-  },
-];
+  useEffect(() => {
+    const handleColorChange = (event: Event) => {
+      const custom = event as CustomEvent<string>;
 
-const FALLBACK = LIVE_TALK_COLORS[0];
+      const newId = custom.detail;
 
-export const getLiveTalkColor = (
-  id: string | null | undefined
-): LiveTalkColor =>
-  LIVE_TALK_COLORS.find(color => color.id === id) ?? FALLBACK;
+      if (
+        newId &&
+        LIVE_TALK_COLORS.some(color => color.id === newId)
+      ) {
+        setSelectedColor(newId);
+      } else {
+        setSelectedColor(getSavedLiveTalkColor().id);
+      }
+    };
 
-export const getSavedLiveTalkColor = (): LiveTalkColor => {
-  try {
-    return getLiveTalkColor(localStorage.getItem(LIVE_TALK_COLOR_KEY));
-  } catch {
-    return FALLBACK;
-  }
-};
+    window.addEventListener(
+      'twinkle-live-talk-color-change',
+      handleColorChange
+    );
+
+    return () => {
+      window.removeEventListener(
+        'twinkle-live-talk-color-change',
+        handleColorChange
+      );
+    };
+  }, []);
+
+  // Always derive the complete color object from the selected ID.
+  const selected =
+    LIVE_TALK_COLORS.find(color => color.id === selectedColor) ??
+    LIVE_TALK_COLORS[0];
+
+  const selectColor = (id: string) => {
+    const color = LIVE_TALK_COLORS.find(item => item.id === id);
+
+    if (!color) return;
+
+    // Update React state immediately.
+    setSelectedColor(color.id);
+
+    // Save selection.
+    try {
+      localStorage.setItem(LIVE_TALK_COLOR_KEY, color.id);
+    } catch {
+      // Best effort when browser storage is unavailable.
+    }
+
+    // Notify the rest of the application.
+    window.dispatchEvent(
+      new CustomEvent('twinkle-live-talk-color-change', {
+        detail: color.id,
+      })
+    );
+  };
+
+  return (
+    <div className="min-h-[100dvh] w-full bg-white dark:bg-zinc-950">
+      <main className="flex min-h-[100dvh] w-full flex-col px-4 py-5 sm:px-8 sm:py-8">
+        <button
+          type="button"
+          onClick={() => {
+            const from = (location.state as { from?: string } | null)?.from;
+
+            if (from) {
+              navigate(from);
+              return;
+            }
+
+            navigate('/settings', { replace: true });
+          }}
+          className="flex w-fit items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-900"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back
+        </button>
+
+        <div className="flex w-full flex-1 flex-col items-center justify-center pb-8 text-center">
+          <p className="text-sm font-medium text-zinc-400 dark:text-zinc-500">
+            Live Talk appearance
+          </p>
+
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-950 dark:text-white sm:text-4xl">
+            Choose your Live Talk color
+          </h1>
+
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500 dark:text-zinc-400 sm:text-base">
+            Choose the color of the Live Talk model.
+          </p>
+
+          {/* Selected color preview */}
+          <div className="mt-12 sm:mt-14">
+            <FoggyOrb
+              key={selected.id}
+              palette={toOrbPalette(selected)}
+              state="idle"
+              className="h-44 w-44 sm:h-56 sm:w-56"
+              label={`${selected.name} Live Talk preview`}
+            />
+          </div>
+
+          {/* Selected color name */}
+          <motion.p
+            key={`name-${selected.id}`}
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2 }}
+            className="mt-10 text-base font-semibold text-zinc-900 dark:text-white"
+          >
+            {selected.name}
+          </motion.p>
+
+          {/* Color choices */}
+          <div className="mt-8 grid max-w-[640px] grid-cols-4 gap-x-4 gap-y-5 sm:mt-10 sm:grid-cols-6 sm:gap-x-5">
+            {LIVE_TALK_COLORS.map(color => {
+              const isSelected = color.id === selected.id;
+
+              return (
+                <button
+                  key={color.id}
+                  type="button"
+                  onClick={() => selectColor(color.id)}
+                  aria-label={`Use ${color.name}`}
+                  aria-pressed={isSelected}
+                  title={color.name}
+                  className="group flex flex-col items-center gap-1.5 focus:outline-none"
+                >
+                  <span
+                    className={`relative flex h-11 w-11 items-center justify-center rounded-full transition group-focus-visible:ring-2 group-focus-visible:ring-zinc-400 ${
+                      isSelected
+                        ? 'scale-110 ring-2 ring-zinc-900 ring-offset-2 ring-offset-white dark:ring-white dark:ring-offset-zinc-950'
+                        : 'ring-1 ring-black/10 group-hover:scale-105 dark:ring-white/15'
+                    }`}
+                    style={{ background: color.swatch }}
+                  >
+                    {isSelected && <Check className="h-4 w-4 text-white drop-shadow" />}
+                  </span>
+                  <span
+                    className={`text-[11px] font-medium ${
+                      isSelected ? 'text-zinc-900 dark:text-white' : 'text-zinc-500 dark:text-zinc-400'
+                    }`}
+                  >
+                    {color.name}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <p className="mt-8 text-xs text-zinc-400 dark:text-zinc-500">
+            Your selection is saved automatically.
+          </p>
+        </div>
+      </main>
+    </div>
+  );
+}
