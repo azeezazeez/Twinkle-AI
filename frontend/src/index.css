@@ -876,14 +876,14 @@
   align-items: center;
   min-height: 28px;
   padding-left: 0.25rem;
-  color: #71717a;
-  font-size: 0.86rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
   line-height: 1.25;
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .dark .twinkle-thinking-text {
-  color: #a1a1aa;
+  color: var(--text-muted);
 }
 
 .twinkle-streaming-content {
@@ -1660,3 +1660,134 @@ body {
   .twinkle-composer-mic { margin-right: 2px !important; }
   .model-dropdown { right: 8px !important; width: calc(100vw - 16px) !important; max-width: calc(100vw - 16px) !important; }
 }
+
+
+/* =========================================================
+   CLAUDE PARITY LAYER
+   Metrics measured from claude.ai at 100% browser zoom.
+   Everything below is in px / rem (never vw-based font or shell sizes), so
+   Ctrl +/- (browser zoom) scales the whole UI exactly like claude.ai does:
+   sizes grow/shrink together and the layout switches to the compact/mobile
+   breakpoints at the same zoom levels.
+   ========================================================= */
+:root {
+  --twinkle-sidebar-width: 288px;
+  --twinkle-chat-content-width: 768px;   /* max-w-3xl */
+  --twinkle-composer-width: 736px;       /* 768 - 2 x 16px gutter */
+  --twinkle-composer-home-width: 640px;  /* new-chat composer */
+  --twinkle-accent: #D97757;
+}
+
+html { font-size: 16px; }
+
+body {
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* ---- Sidebar surface (Claude's warm sidebar tone) ---- */
+.twinkle-sidebar { background-color: #F5F4ED !important; }
+.dark .twinkle-sidebar { background-color: #1F1E1D !important; }
+.twinkle-sidebar .twinkle-newchat-box { width: 20px !important; height: 20px !important; flex: 0 0 20px !important; }
+.twinkle-sidebar .twinkle-newchat-icon { width: 18px !important; height: 18px !important; }
+
+/* ---- Chat column: 768px max with 16px gutters (736px of text) ---- */
+.twinkle-message-scroll-area > div {
+  max-width: var(--twinkle-chat-content-width) !important;
+  padding-inline: 16px !important;
+}
+.twinkle-message-scroll-area [data-twinkle-message] .rounded-2xl { border-radius: 16px; }
+.twinkle-message-scroll-area [data-twinkle-message] .twinkle-user-bubble { border-radius: 12px; }
+
+/* ---- Composer: same shell as claude.ai ---- */
+.twinkle-composer-shell,
+.chat-composer-shell {
+  width: min(100%, var(--twinkle-composer-width)) !important;
+  max-width: var(--twinkle-composer-width) !important;
+}
+.twinkle-composer-empty-state .twinkle-composer-shell,
+.twinkle-composer-empty-state .chat-composer-shell {
+  width: min(100%, var(--twinkle-composer-home-width)) !important;
+  max-width: var(--twinkle-composer-home-width) !important;
+}
+
+.twinkle-composer-row {
+  grid-template-columns: 32px minmax(0, 1fr) auto auto 32px !important;
+  min-height: 0 !important;
+  padding: 0 10px 10px 10px !important;
+  border-radius: 20px !important;
+}
+.twinkle-composer-prompt {
+  min-height: 56px !important;
+  padding: 16px 6px 8px 6px !important;
+}
+.twinkle-composer-textarea {
+  min-height: 24px !important;
+  max-height: 200px !important;
+  font-size: 16px !important;
+  line-height: 1.5 !important;
+}
+.twinkle-composer-plus,
+.twinkle-composer-mic {
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+}
+.twinkle-composer-plus svg { width: 20px !important; height: 20px !important; }
+.twinkle-composer-mic svg  { width: 18px !important; height: 18px !important; }
+.twinkle-composer-mic { margin: 0 4px 0 2px !important; }
+.twinkle-composer-submit {
+  width: 32px !important;
+  min-width: 32px !important;
+  height: 32px !important;
+  flex: 0 0 32px !important;
+  margin: 0 !important;
+  border-radius: 8px !important;
+}
+.twinkle-composer-model > button { max-width: min(30vw, 220px); }
+.twinkle-composer-model > button > span { max-width: min(22vw, 160px); }
+
+/* Mobile keeps the same compact controls. */
+@media (max-width: 640px) {
+  .twinkle-composer-row {
+    grid-template-columns: 32px minmax(0, 1fr) auto auto 32px !important;
+    min-height: 0 !important;
+    padding: 0 8px 8px 8px !important;
+  }
+  .twinkle-composer-prompt { min-height: 52px !important; padding: 14px 6px 6px 6px !important; }
+  .twinkle-composer-submit { width: 32px !important; min-width: 32px !important; height: 32px !important; flex-basis: 32px !important; }
+}
+
+/* ---- Tooltips: Claude's small dark rounded-lg label ---- */
+.twinkle-tooltip-trigger::after {
+  bottom: calc(100% + 6px);
+  border-radius: 8px;
+  background: #1F1E1D;
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 500;
+  letter-spacing: 0;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+.dark .twinkle-tooltip-trigger::after { background: #F5F4EE; color: #1F1E1D; }
+
+/* ---- Thinking indicator: Claude's muted text colour, no gradients ---- */
+.twinkle-thinking-label { color: var(--text-muted) !important; background: none !important; -webkit-text-fill-color: currentColor !important; }
+.twinkle-floating-thinking-dot { background: var(--text-muted); }
+
+@keyframes twinkle-logo-pulse {
+  0%, 100% { transform: scale(0.88) rotate(0deg); opacity: 0.7; }
+  50%      { transform: scale(1.04) rotate(90deg); opacity: 1; }
+}
+.twinkle-logo-pulse { animation: twinkle-logo-pulse 2.2s ease-in-out infinite; transform-origin: center; }
+@media (prefers-reduced-motion: reduce) { .twinkle-logo-pulse { animation: none; } }
+
+/* ---- Edit-message card ---- */
+.twinkle-edit-card textarea { box-shadow: none; }
+
+/* ---- Account menu polish ---- */
+.twinkle-account-menu { backdrop-filter: saturate(1.1); }
