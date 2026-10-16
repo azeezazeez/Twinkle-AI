@@ -58,7 +58,6 @@ function ChatRoute({
     <Chat
       user={user}
       onLogout={onLogout}
-      onProjects={() => {}}
       onProfile={() =>
         navigate('/profile')
       }
@@ -687,15 +686,7 @@ export default function App() {
   return (
     <LanguageProvider>
 
-      <BrowserRouter
-        future={{
-          v7_startTransition:
-            true,
-
-          v7_relativeSplatPath:
-            true,
-        }}
-      >
+      <BrowserRouter>
 
         <AuthenticatedApp
           user={user}
