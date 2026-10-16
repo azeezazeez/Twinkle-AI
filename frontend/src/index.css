@@ -5,27 +5,50 @@
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Claude-style warm neutral palette. Every existing zinc-* / black class in
+     the app picks these up automatically in both light and dark mode. */
+  --color-black: #1F1E1D;
+  --color-zinc-50: #F7F6F1;
+  --color-zinc-100: #F0EEE6;
+  --color-zinc-200: #E6E3D8;
+  --color-zinc-300: #D6D2C4;
+  --color-zinc-400: #A8A396;
+  --color-zinc-500: #7C786D;
+  --color-zinc-600: #5E5B53;
+  --color-zinc-700: #4A4945;
+  --color-zinc-800: #3D3D3A;
+  --color-zinc-900: #30302E;
+  --color-zinc-950: #1F1E1D;
+
+  /* Claude accent (terracotta) */
+  --color-accent: #C6613F;
+  --color-accent-hover: #D97757;
 }
 
 @layer base {
   :root {
-    --brand-primary: #000000;
-    --brand-secondary: #000000;
-    --bg-main: #FFFFFF;
-    --surface: #F9FAFB;
-    --text-main: #111111;
-    --text-muted: #666666;
-    --border: #E5E5E5;
+    --brand-primary: #C6613F;
+    --brand-secondary: #D97757;
+    --bg-main: #FAF9F5;
+    --surface: #F0EEE6;
+    --text-main: #1F1E1D;
+    --text-muted: #6B6860;
+    --border: #E6E3D8;
   }
 
   .dark {
-    --brand-primary: #FFFFFF;
-    --brand-secondary: #FFFFFF;
-    --bg-main: #0A0A0A;
-    --surface: #171717;
-    --text-main: #F9F9F9;
-    --text-muted: #A1A1A1;
-    --border: #292929;
+    --brand-primary: #D97757;
+    --brand-secondary: #C6613F;
+    --bg-main: #262624;
+    --surface: #30302E;
+    --text-main: #F5F4EE;
+    --text-muted: #A8A396;
+    --border: #3D3D3A;
+  }
+
+  ::selection {
+    background: rgba(217, 119, 87, 0.28);
   }
 
   html,
