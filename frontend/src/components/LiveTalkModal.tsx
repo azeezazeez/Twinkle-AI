@@ -11,6 +11,13 @@ type Props = {
   onClose: () => void; 
   /** Called after the final Live Talk data has been persisted. */
   onSessionComplete?: (sessionId: number, sessionName?: string, publicId?: string) => void;
+  /** Fired the instant Live Talk ends, with the local transcript, so the chat can be shown before saving finishes. */
+  onSessionPreview?: (info: {
+    sessionId: number | null;
+    publicId?: string;
+    sessionName?: string;
+    turns: Array<{ role: 'user' | 'assistant'; content: string }>;
+  }) => void;
 };
 
 type WakeLockSentinelLike = {
@@ -120,7 +127,7 @@ const decodeLiveMessage = async (data: unknown): Promise<any> => {
   );
 };
 
-export default function LiveTalkModal({ open, onClose, onSessionComplete }: Props) {
+export default function LiveTalkModal({ open, onClose, onSessionComplete, onSessionPreview }: Props) {
   const socketRef = useRef<WebSocket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -142,6 +149,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
   const liveTitleGeneratedRef = useRef(false);
   const lastSavedSessionNameRef = useRef<string | null>(null);
   const livePublicIdRef = useRef<string | null>(null);
+  const turnsRef = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
   const userTurnRef = useRef('');
   const assistantTurnRef = useRef('');
   const endingRef = useRef(false);
@@ -177,6 +185,29 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
   const [transcript, setTranscript] = useState('');
   const [error, setError] = useState('');
 
+  // Creates the persistent chat session once. It is started when Live Talk
+  // opens (in parallel with connecting), so the first saved turn is a single
+  // request instead of "create session, then save".
+  const ensureSession = useCallback(async (): Promise<number> => {
+    if (liveSessionIdRef.current != null) return liveSessionIdRef.current;
+    if (!liveSessionPromiseRef.current) {
+      liveSessionPromiseRef.current = (async () => {
+        const response = (await chatApi.createSession()) as any;
+        const id = Number(response?.id ?? response?.sessionId);
+        if (!Number.isFinite(id)) {
+          throw new Error('Live Talk could not create a chat session.');
+        }
+        liveSessionIdRef.current = id;
+        const publicId = String(response?.publicId ?? response?.public_id ?? '');
+        if (publicId) livePublicIdRef.current = publicId;
+        return id;
+      })().finally(() => {
+        liveSessionPromiseRef.current = null;
+      });
+    }
+    return liveSessionPromiseRef.current;
+  }, []);
+
   const persistCompletedTurn = useCallback(async () => {
     const userText = userTurnRef.current.trim();
     const assistantText = assistantTurnRef.current.trim();
@@ -188,26 +219,13 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     userTurnRef.current = '';
     assistantTurnRef.current = '';
 
+    // Keep a local copy so the chat can be displayed instantly when Live Talk ends.
+    if (userText) turnsRef.current.push({ role: 'user', content: userText });
+    if (assistantText) turnsRef.current.push({ role: 'assistant', content: assistantText });
+
     const save = async () => {
       try {
-        if (liveSessionIdRef.current == null) {
-          if (!liveSessionPromiseRef.current) {
-            liveSessionPromiseRef.current = (async () => {
-              const response = (await chatApi.createSession()) as any;
-              const id = Number(response?.id ?? response?.sessionId);
-              if (!Number.isFinite(id)) {
-                throw new Error('Live Talk could not create a chat session.');
-              }
-              liveSessionIdRef.current = id;
-              const publicId = String(response?.publicId ?? response?.public_id ?? '');
-              if (publicId) livePublicIdRef.current = publicId;
-              return id;
-            })().finally(() => {
-              liveSessionPromiseRef.current = null;
-            });
-          }
-          await liveSessionPromiseRef.current;
-        }
+        await ensureSession();
 
         const sessionId = liveSessionIdRef.current;
         if (sessionId == null) return;
@@ -250,7 +268,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     await current;
 
     return liveSessionIdRef.current;
-  }, []);
+  }, [ensureSession]);
 
   useEffect(() => {
     if (!open) return;
@@ -868,9 +886,11 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     liveTitleGeneratedRef.current = false;
     lastSavedSessionNameRef.current = null;
     livePublicIdRef.current = null;
+    turnsRef.current = [];
+    void ensureSession().catch(error => console.warn('Live Talk session pre-create failed:', error));
     void connect();
     return () => cleanup();
-  }, [open, connect, cleanup]);
+  }, [open, connect, cleanup, ensureSession]);
 
   const handleClose = () => {
     if (endingRef.current) return;
@@ -881,6 +901,31 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     const hasFinalTurn =
       Boolean(userTurnRef.current.trim()) ||
       Boolean(assistantTurnRef.current.trim());
+
+    // Nothing was said: discard the pre-created empty session and just close.
+    if (turnsRef.current.length === 0 && !hasFinalTurn) {
+      void (async () => {
+        try {
+          const id = liveSessionIdRef.current ?? (await liveSessionPromiseRef.current?.catch(() => null));
+          if (id) await chatApi.deleteSession(id);
+        } catch { /* best effort */ }
+      })();
+      cleanup();
+      onClose();
+      return;
+    }
+
+    // Show the conversation immediately from the local transcript; the saved
+    // copy replaces it as soon as the final save finishes.
+    const previewTurns = [...turnsRef.current];
+    if (userTurnRef.current.trim()) previewTurns.push({ role: 'user', content: userTurnRef.current.trim() });
+    if (assistantTurnRef.current.trim()) previewTurns.push({ role: 'assistant', content: assistantTurnRef.current.trim() });
+    onSessionPreview?.({
+      sessionId: existingSessionId,
+      publicId: livePublicIdRef.current || undefined,
+      sessionName: lastSavedSessionNameRef.current || undefined,
+      turns: previewTurns,
+    });
 
     // Persist the final partial turn, if any, and ALWAYS wait for saves that
     // are still in flight. Previously, ending the call while the first turn was
