@@ -16,7 +16,7 @@ import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw';
 
 import {
   Copy, Check, Edit2, Pencil, Upload, Volume2, VolumeX, Share2, CheckCircle2, LoaderCircle,
-  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, Mic, AudioLines,
+  X, RotateCcw, RotateCw, Download, ChevronDown, Eye, Zap, Brain, Plus, FileText, Mic, AudioLines,
 } from 'lucide-react';
 
 import ReactMarkdown from 'react-markdown';
@@ -635,20 +635,14 @@ const ResponseStatusText = ({ hasFiles = false }: { hasFiles?: boolean }) => {
       <AnimatePresence mode="wait" initial={false}>
         <motion.span
           key={index}
-          className="text-sm font-semibold bg-gradient-to-r from-fuchsia-500 via-violet-500 to-sky-500 bg-clip-text text-transparent"
-          initial={{ opacity: 0, y: 5 }}
-          animate={{
-            opacity: [0.65, 1, 0.75],
-            y: 0,
-            backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'],
-          }}
-          exit={{ opacity: 0, y: -5, transition: { duration: 0.16 } }}
+          className="twinkle-thinking-label text-[14px] font-normal text-zinc-500 dark:text-zinc-400"
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: [0.55, 1, 0.55], y: 0 }}
+          exit={{ opacity: 0, y: -4, transition: { duration: 0.16 } }}
           transition={{
-            y: { duration: 0.22, ease: 'easeOut' },
-            opacity: { duration: 2, repeat: Infinity, ease: 'easeInOut' },
-            backgroundPosition: { duration: 2, repeat: Infinity, ease: 'easeInOut' },
+            y: { duration: 0.2, ease: 'easeOut' },
+            opacity: { duration: 1.8, repeat: Infinity, ease: 'easeInOut' },
           }}
-          style={{ backgroundSize: '200% 200%' }}
         >
           {phrases[index]}
         </motion.span>
@@ -1340,10 +1334,11 @@ ${textToRead}` }] }], turnComplete: true },
   const [desktopSidebarExpanded, setDesktopSidebarExpanded] = useState(false);
   const [desktopSidebarWidth, setDesktopSidebarWidth] = useState<number>(() => {
     try {
-      const stored = Number(localStorage.getItem('Twinkle_sidebar_width'));
-      return Number.isFinite(stored) ? Math.min(440, Math.max(280, stored)) : 360;
+      const raw = localStorage.getItem('Twinkle_sidebar_width');
+      const stored = raw === null ? NaN : Number(raw);
+      return Number.isFinite(stored) ? Math.min(440, Math.max(260, stored)) : 288;
     } catch {
-      return 360;
+      return 288;
     }
   });
   const [liveTalkOpen, setLiveTalkOpen] = useState(false);
@@ -2191,8 +2186,8 @@ const chooseModel = useCallback((modelId: string) => {
       const greeting = emptyGreetingRef.current;
       if (!greeting) return;
       const rect = greeting.getBoundingClientRect();
-      const composerHeight = window.innerWidth <= 640 ? 132 : 140;
-      const gap = 22;
+      const composerHeight = window.innerWidth <= 640 ? 120 : 112;
+      const gap = 32;
       const maxTop = Math.max(16, window.innerHeight - composerHeight - 12);
       setEmptyComposerTop(Math.round(Math.min(rect.bottom + gap, maxTop)));
     };
@@ -2745,6 +2740,16 @@ const chooseModel = useCallback((modelId: string) => {
     setPreviewUrl(null);
     setPreviewText(null);
   };
+
+  useEffect(() => {
+    if (!previewFile) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeFilePreview();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewFile, previewUrl]);
 
   // File handlers (kept but no UI to trigger them)
   const handleFileSelection = async (files: FileList | null) => {
@@ -3951,7 +3956,7 @@ if (isBlankDraft) {
       />
       <main
         className="relative ml-0 flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent transition-[margin] duration-300 ease-out lg:ml-[var(--desktop-sidebar-offset)]"
-        style={{ '--desktop-sidebar-offset': `${desktopSidebarExpanded ? desktopSidebarWidth : 60}px` } as React.CSSProperties}
+        style={{ '--desktop-sidebar-offset': `${desktopSidebarExpanded ? desktopSidebarWidth : 52}px` } as React.CSSProperties}
       >
         <div className="absolute right-6 top-4 z-[9998]">
           <button
@@ -4035,36 +4040,30 @@ if (isBlankDraft) {
         >
           <div className={`relative mx-auto box-border w-[calc(100%-1rem)] max-w-[800px] px-0 sm:w-[calc(100%-2rem)] md:w-[calc(100%-3rem)] ${messages.length === 0 && !isTyping ? "pt-0 pb-0" : "pt-[92px] md:pt-8 pb-8 md:pb-10"}`}>
             {messages.length === 0 && !isTyping ? (
-              <div ref={emptyGreetingRef} className="flex -translate-y-[32px] flex-col items-center justify-center min-h-0 w-full text-center px-2 max-w-3xl mx-auto gap-3">
-                <motion.div
-                  initial={{ scale: 0.82, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  className="mb-0"
+              <div
+                ref={emptyGreetingRef}
+                className="twinkle-greeting mx-auto flex w-full min-w-0 -translate-y-[32px] items-center justify-center gap-3 px-2 text-left"
+              >
+                <motion.span
+                  initial={{ scale: 0.8, opacity: 0, rotate: -24 }}
+                  animate={{ scale: 1, opacity: 1, rotate: 0 }}
+                  transition={{ duration: 0.45, ease: 'easeOut' }}
+                  className="twinkle-greeting-logo flex shrink-0 items-center justify-center text-[#D97757]"
+                  aria-hidden="true"
                 >
-                  <StormLogo className="twinkle-chat-logo h-7 w-7 md:h-8 md:w-8 text-zinc-800 dark:text-zinc-100" />
-                </motion.div>
+                  <StormLogo className="twinkle-chat-logo h-9 w-9 sm:h-10 sm:w-10" />
+                </motion.span>
                 <motion.h2
                   key={chatGreeting}
-                  initial={{ opacity: 0, y: 8 }}
+                  initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="whitespace-normal text-balance font-serif text-[clamp(1.5rem,3vw,2rem)] font-normal tracking-tight text-zinc-900 dark:text-zinc-100"
+                  className="twinkle-greeting-text min-w-0 font-serif text-[1.875rem] font-normal leading-[1.15] tracking-[-0.01em] text-zinc-900 sm:text-[2.375rem] dark:text-zinc-100"
                 >
-                  {(() => {
-                    // Render a trailing emoji in its own span so it is sized and
-                    // aligned consistently with the text.
-                    const match = chatGreeting.match(/^(.*?)\s*((?:\p{Extended_Pictographic}\uFE0F?(?:\u200D\p{Extended_Pictographic}\uFE0F?)*)+)\s*$/u);
-                    if (!match) return chatGreeting;
-                    return (
-                      <>
-                        {match[1]}
-                        <span className="ml-1.5 inline-block align-[-0.06em] text-[1.12em] leading-none" aria-hidden="true">{match[2]}</span>
-                      </>
-                    );
-                  })()}
+                  {chatGreeting.replace(/\s*(?:\p{Extended_Pictographic}\uFE0F?(?:\u200D\p{Extended_Pictographic}\uFE0F?)*)+\s*$/u, '')}
                 </motion.h2>
               </div>
             ) : (
-              <div className="space-y-5 md:space-y-7 pb-6 pt-2 font-medium text-[16px] md:text-[17px]">
+              <div className="twinkle-message-list space-y-6 pb-6 pt-2 font-normal text-[16px]">
                 {messages.map((msg, index) => {
                   const isEditing = editingMessage?.id === msg.id;
                   const shouldSpin = isTyping && msg.role === 'assistant' && index === messages.length - 1;
@@ -4091,12 +4090,6 @@ if (isBlankDraft) {
                             : 'items-start'
                         }`}
                       >
-                        {msg.role === 'assistant' && (
-                          <div className="absolute -left-10 top-1 flex h-7 w-7 shrink-0 items-center justify-center md:-left-11 md:h-8 md:w-8">
-                            <StormLogo className="w-6 h-6 text-black dark:text-white" />
-                          </div>
-                        )}
-
                         {msg.role === 'user' && attachedImages.length > 0 && (
                           <div className="w-full flex justify-end -mt-1">
                             <div className="flex flex-wrap justify-end gap-2.5 max-w-[92%] sm:max-w-[88%]">
@@ -4144,40 +4137,51 @@ if (isBlankDraft) {
                           <div
                             className={`min-w-0 max-w-full ${
                               msg.role === 'user'
-                                ? 'w-fit max-w-[92%] sm:max-w-[88%] px-3.5 py-3 sm:px-4 sm:py-3.5 rounded-2xl shadow-sm border overflow-hidden bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 rounded-tr-none'
-                                : 'w-full rounded-2xl border border-zinc-200/80 dark:border-zinc-700/80 bg-white/70 dark:bg-zinc-900/40 px-4 py-3.5 md:px-5 md:py-4 shadow-sm text-zinc-900 dark:text-zinc-100'
+                                ? (isEditing
+                                    ? 'twinkle-edit-card w-full rounded-2xl border border-zinc-300 bg-white p-3 shadow-[0_2px_10px_rgba(0,0,0,0.06)] dark:border-zinc-600 dark:bg-zinc-900'
+                                    : 'twinkle-user-bubble w-fit max-w-[85%] sm:max-w-[75%] rounded-xl bg-zinc-100 px-4 py-2.5 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100')
+                                : 'twinkle-assistant-body w-full px-0 py-0 text-zinc-900 dark:text-zinc-100'
                             }`}
                           >
-                            <div className="text-sm md:text-base leading-relaxed markdown-body twinkle-response-content max-w-none min-w-0 w-full break-words [overflow-wrap:anywhere]">
+                            <div className="text-[16px] leading-[1.7] markdown-body twinkle-response-content max-w-none min-w-0 w-full break-words [overflow-wrap:anywhere]">
                               {isEditing ? (
-                                <div className="flex flex-col gap-3 w-full min-w-0 p-1">
+                                <div className="flex w-full min-w-0 flex-col gap-3">
                                   <textarea
                                     value={editInput}
                                     onChange={(e) => setEditInput(e.target.value)}
                                     onKeyDown={(e) => {
-                                      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                      if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                                         e.preventDefault();
-                                        handleSaveEdit();
+                                        if (!isTyping && editInput.trim()) void handleSaveEdit();
                                       }
                                       if (e.key === 'Escape') handleCancelEdit();
                                     }}
-                                    className="w-full max-w-full border rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 resize-none min-h-[100px] bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-700"
+                                    ref={(el) => {
+                                      if (el) {
+                                        el.style.height = 'auto';
+                                        el.style.height = `${Math.min(el.scrollHeight, 320)}px`;
+                                      }
+                                    }}
+                                    rows={1}
+                                    aria-label="Edit message"
+                                    className="block w-full min-w-0 max-w-full resize-none overflow-y-auto bg-transparent p-1 text-[16px] font-normal leading-[1.6] text-zinc-900 outline-none dark:text-zinc-100"
                                     autoFocus
                                   />
-                                  <div className="flex flex-wrap items-center justify-end gap-2">
-                                    <span className="text-[9px] text-zinc-400 mr-auto">Ctrl + Enter to send · Esc to cancel</span>
+                                  <div className="flex items-center justify-end gap-2">
                                     <button
+                                      type="button"
                                       onClick={handleCancelEdit}
-                                      className="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+                                      className="inline-flex h-8 items-center justify-center rounded-lg border border-zinc-300 bg-transparent px-3 text-[14px] font-medium text-zinc-800 transition-colors hover:bg-zinc-100 active:scale-[0.98] dark:border-zinc-600 dark:text-zinc-100 dark:hover:bg-zinc-800"
                                     >
                                       Cancel
                                     </button>
                                     <button
-                                      onClick={handleSaveEdit}
+                                      type="button"
+                                      onClick={() => void handleSaveEdit()}
                                       disabled={!editInput.trim() || isTyping}
-                                      className="px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest shadow-lg disabled:opacity-40 bg-black text-white hover:bg-zinc-700"
+                                      className="twinkle-primary-btn inline-flex h-8 items-center justify-center rounded-lg bg-zinc-900 px-3 text-[14px] font-medium text-white transition-colors hover:bg-zinc-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
                                     >
-                                      Send
+                                      Save
                                     </button>
                                   </div>
                                 </div>
@@ -4188,7 +4192,7 @@ if (isBlankDraft) {
                                     h1({ children, ...props }: any) {
                                       return (
                                         <h1
-                                          className="mt-5 mb-3 text-2xl md:text-3xl font-black tracking-tight text-zinc-950 dark:text-zinc-50"
+                                          className="mt-6 mb-2 text-[1.5rem] font-semibold leading-snug tracking-tight text-zinc-950 dark:text-zinc-50"
                                           {...props}
                                         >
                                           {children}
@@ -4198,7 +4202,7 @@ if (isBlankDraft) {
                                     h2({ children, ...props }: any) {
                                       return (
                                         <h2
-                                          className="mt-5 mb-3 text-xl md:text-2xl font-black tracking-tight text-zinc-950 dark:text-zinc-50"
+                                          className="mt-6 mb-2 text-[1.25rem] font-semibold leading-snug tracking-tight text-zinc-950 dark:text-zinc-50"
                                           {...props}
                                         >
                                           {children}
@@ -4208,7 +4212,7 @@ if (isBlankDraft) {
                                     h3({ children, ...props }: any) {
                                       return (
                                         <h3
-                                          className="mt-4 mb-2 text-lg md:text-xl font-black tracking-tight text-zinc-950 dark:text-zinc-50"
+                                          className="mt-5 mb-2 text-[1.125rem] font-semibold leading-snug tracking-tight text-zinc-950 dark:text-zinc-50"
                                           {...props}
                                         >
                                           {children}
@@ -4216,7 +4220,7 @@ if (isBlankDraft) {
                                       );
                                     },
                                     p({ children, ...props }: any) {
-                                      return <p className="my-2.5 leading-7 break-words [overflow-wrap:anywhere] first:mt-0 last:mb-0" {...props}>{children}</p>;
+                                      return <p className="my-3 leading-[1.7] break-words [overflow-wrap:anywhere] first:mt-0 last:mb-0" {...props}>{children}</p>;
                                     },
                                     ul({ children, ...props }: any) {
                                       return <ul className="my-3 list-disc space-y-1.5 pl-6 leading-7 marker:text-zinc-400" {...props}>{children}</ul>;
@@ -4225,7 +4229,7 @@ if (isBlankDraft) {
                                       return <ol className="my-3 list-decimal space-y-1.5 pl-6 leading-7 marker:text-zinc-500" {...props}>{children}</ol>;
                                     },
                                     blockquote({ children, ...props }: any) {
-                                      return <blockquote className="my-3 border-l-3 border-violet-400 pl-4 text-zinc-600 dark:text-zinc-300" {...props}>{children}</blockquote>;
+                                      return <blockquote className="my-3 border-l-[3px] border-zinc-300 pl-4 text-zinc-600 dark:text-zinc-300" {...props}>{children}</blockquote>;
                                     },
                                     table({ children, ...props }: any) {
                                       return (
@@ -4311,7 +4315,7 @@ if (isBlankDraft) {
                                     },
                                     pre({ children, ...props }: any) {
                                       return (
-                                        <div className="my-4 w-full max-w-full min-w-0 overflow-hidden rounded-xl border border-zinc-200/40 dark:border-zinc-500/20 shadow-lg bg-gradient-to-br from-zinc-50/80 to-violet-50/60 dark:from-zinc-950/50 dark:to-violet-950/40">
+                                        <div className="my-4 w-full max-w-full min-w-0 overflow-hidden rounded-xl border border-zinc-200/40 dark:border-zinc-500/20 shadow-lg bg-gradient-to-br from-zinc-50/80 to-zinc-100/60 dark:from-zinc-950/50 dark:to-zinc-800/60">
                                           <div className="flex items-center gap-2 px-3 sm:px-4 py-2 border-b border-zinc-200/30 dark:border-zinc-500/15 bg-zinc-100/40 dark:bg-zinc-900/20">
                                             <div className="w-1.5 h-1.5 rounded-full bg-zinc-400 dark:bg-zinc-1000 shrink-0" />
                                             <span className="text-[10px] font-black uppercase tracking-widest text-zinc-600 dark:text-zinc-300 dark:text-zinc-900 dark:text-zinc-100">Code</span>
@@ -4352,17 +4356,17 @@ if (isBlankDraft) {
                           {/* Message action buttons.
                               Always visible so touch devices do not depend on hover. */}
                           <div
-                            className={`flex flex-wrap items-center gap-1 mt-1 px-1 ${
+                            className={`twinkle-message-actions flex flex-wrap items-center gap-1 mt-1 ${
                               msg.role === 'user' ? 'justify-end' : 'justify-start'
-                            }`}
+                            } ${isEditing ? 'hidden' : ''}`}
                           >
                             {msg.role === 'assistant' && (
-                              <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-[0.18em] mr-auto pl-1">
-                                Twinkle
+                              <span className="mr-auto flex items-center text-[#D97757]" aria-hidden="true">
+                                <StormLogo className="h-5 w-5" />
                               </span>
                             )}
 
-                            <span className="text-[9px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest whitespace-nowrap mr-1">
+                            <span className="text-[12px] font-normal text-zinc-500 dark:text-zinc-400 whitespace-nowrap mr-1">
                               {msg.timestamp
                                 ? new Date(msg.timestamp).toLocaleTimeString('en-IN', {
                                     timeZone: 'Asia/Kolkata',
@@ -4392,6 +4396,12 @@ if (isBlankDraft) {
                                       <Upload className="w-4 h-4 md:w-3.5 md:h-3.5" />
                                     </button>
                                     {!isEditing && !isTyping && (
+                                      <button type="button" onClick={() => void handleRetryMessage(msg)} data-tooltip="Retry" aria-label="Retry message"
+                                        className="twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-300 transition-all touch-manipulation">
+                                        <RotateCw className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                                      </button>
+                                    )}
+                                    {!isEditing && !isTyping && (
                                       <button type="button" onClick={() => handleStartEdit(msg)} data-tooltip="Edit message" aria-label="Edit message"
                                         className="twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-300 transition-all touch-manipulation">
                                         <Pencil className="w-4 h-4 md:w-3.5 md:h-3.5" />
@@ -4404,7 +4414,7 @@ if (isBlankDraft) {
                                       data-tooltip={speakingMessageId === msg.id ? 'Stop reading' : 'Read aloud'}
                                       aria-label={speakingMessageId === msg.id ? 'Stop reading aloud' : 'Read response aloud'}
                                       aria-pressed={speakingMessageId === msg.id}
-                                      className={`twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all touch-manipulation ${speakingMessageId === msg.id ? 'text-violet-600 dark:text-violet-400' : 'text-zinc-500 dark:text-zinc-300'}`}>
+                                      className={`twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all touch-manipulation ${speakingMessageId === msg.id ? 'text-zinc-900 dark:text-zinc-50' : 'text-zinc-500 dark:text-zinc-300'}`}>
                                       {speakingMessageId === msg.id ? <VolumeX className="w-4 h-4 md:w-3.5 md:h-3.5" /> : <Volume2 className="w-4 h-4 md:w-3.5 md:h-3.5" />}
                                     </button>
                                     <button type="button" onClick={async () => {
@@ -4423,6 +4433,15 @@ if (isBlankDraft) {
                                       className="twinkle-tooltip-trigger hidden sm:inline-flex p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-300 transition-all touch-manipulation">
                                       <Upload className="w-4 h-4 md:w-3.5 md:h-3.5" />
                                     </button>
+                                    {!isTyping && (
+                                      <button type="button" onClick={() => {
+                                        const previousUserMessage = [...messages.slice(0, index)].reverse().find(m => m.role === 'user');
+                                        if (previousUserMessage) void handleRetryMessage(previousUserMessage);
+                                      }} data-tooltip="Retry" aria-label="Retry response"
+                                        className="twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-300 transition-all touch-manipulation">
+                                        <RotateCw className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                                      </button>
+                                    )}
                                   </>
                                 )}
                               </div>
@@ -4443,19 +4462,19 @@ if (isBlankDraft) {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -4 }}
                     transition={{ duration: 0.22, ease: 'easeOut' }}
-                    className="!m-0 flex w-full items-start gap-2.5 border-0 bg-transparent p-0 shadow-none rounded-none md:gap-3"
+                    className="!m-0 flex w-full items-center gap-2 border-0 bg-transparent p-0 shadow-none rounded-none"
                     style={{ background: 'transparent', border: 0, boxShadow: 'none' }}
                     role="status"
                     aria-live="polite"
                     aria-label="Twinkle AI is thinking"
                   >
-                    <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center md:h-9 md:w-9" aria-hidden="true">
-                      <StormLogo className="twinkle-chat-logo h-6 w-6 text-zinc-800 dark:text-zinc-100 md:h-7 md:w-7" />
+                    <div className="flex h-6 w-6 shrink-0 items-center justify-center" aria-hidden="true">
+                      <StormLogo className="twinkle-chat-logo twinkle-logo-pulse h-5 w-5 text-[#D97757]" />
                     </div>
-                    <div className="flex min-h-[40px] items-center border-0 bg-transparent py-2 shadow-none rounded-none">
+                    <div className="flex min-h-[24px] items-center border-0 bg-transparent shadow-none rounded-none">
                       <ResponseStatusText hasFiles={responseHasFiles} />
                       <motion.span
-                        className="ml-1 inline-flex gap-0.5 text-sm font-semibold text-violet-500"
+                        className="ml-0.5 inline-flex gap-0.5 text-[14px] font-normal text-zinc-500 dark:text-zinc-400"
                         aria-hidden="true"
                       >
                         {[0, 1, 2].map((dot) => (
@@ -4496,8 +4515,7 @@ if (isBlankDraft) {
             {showScrollBottom && !isAtBottom && messages.length > 0 && (
               <button
                 type="button"
-              className="group absolute left-1/2 top-[-3.25rem] z-[80] flex h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full border border-zinc-200 bg-white shadow-[0_4px_14px_rgba(0,0,0,0.12)] dark:border-zinc-700 dark:bg-zinc-900"
-                style={{ color: liveTalkColor.swatch }}
+              className="group absolute left-1/2 top-[-3rem] z-[80] flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-500 shadow-[0_2px_8px_rgba(0,0,0,0.1)] transition-colors hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
                 aria-label="Scroll to latest message"
                 data-tooltip="Scroll to latest message"
                 onClick={() => {
@@ -4514,7 +4532,7 @@ if (isBlankDraft) {
                         <motion.span
                           key={dot}
                           className="block shrink-0 rounded-full"
-                          style={{ width: 6, height: 6, backgroundColor: 'currentColor', opacity: 1 }}
+                          style={{ width: 5, height: 5, backgroundColor: 'currentColor', opacity: 1 }}
                           animate={{ y: [0, -3, 0], opacity: [0.55, 1, 0.55] }}
                           transition={{ duration: 0.8, repeat: Infinity, ease: 'easeInOut', delay: dot * 0.16 }}
                         />
@@ -4531,7 +4549,7 @@ if (isBlankDraft) {
             )}
 
 
-            <div className={`relative left-[1px] z-[60] flex w-full min-w-0 flex-col overflow-visible rounded-[24px] border border-zinc-200/90 bg-white shadow-[0_2px_18px_rgba(0,0,0,0.08)] transition-all dark:border-zinc-700/90 dark:bg-zinc-900 dark:shadow-black/20 ${justFinished ? 'animate-blink' : ''}`}>
+            <div className={`relative left-[1px] z-[60] flex w-full min-w-0 flex-col overflow-visible rounded-[20px] border border-zinc-200/90 bg-white shadow-[0_0.25rem_1.25rem_rgba(0,0,0,0.035),0_0_0_0.5px_rgba(0,0,0,0.04)] transition-all dark:border-zinc-700/90 dark:bg-zinc-900 dark:shadow-black/20 ${justFinished ? 'animate-blink' : ''}`}>
               {/* File preview strip (kept for consistency but never shown without UI trigger) */}
               <AnimatePresence>
                 {filePreviews.length > 0 && (
@@ -4588,7 +4606,7 @@ if (isBlankDraft) {
                         onChange={(e) => setInput(e.target.value)}
                         rows={1}
                         aria-label="Ask Anything"
-                        className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent p-0 text-[15px] font-medium leading-[1.35] text-zinc-900 outline-none placeholder:italic placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[38px] max-h-[200px] sm:text-[16px] sm:min-h-[40px]"
+                        className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent p-0 text-[16px] font-normal leading-[1.5] text-zinc-900 outline-none placeholder:italic placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[38px] max-h-[200px] sm:text-[16px] sm:min-h-[40px]"
                         placeholder={voiceSpeechDetected ? '' : 'Listening…'}
                         onInput={(e) => {
                           const t = e.target as HTMLTextAreaElement;
@@ -4673,7 +4691,7 @@ if (isBlankDraft) {
                       }}
                       placeholder="Ask Anything"
                       rows={1}
-                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent p-0 text-[15px] font-medium leading-[1.35] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[38px] max-h-[200px] transition-[height] duration-150 sm:text-[16px] sm:min-h-[40px]"
+                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent p-0 text-[16px] font-normal leading-[1.5] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[38px] max-h-[200px] transition-[height] duration-150 sm:text-[16px] sm:min-h-[40px]"
                       onInput={(e) => {
                         const t = e.target as HTMLTextAreaElement;
                         t.style.height = 'auto';
@@ -4720,7 +4738,7 @@ if (isBlankDraft) {
                       
                          className="twinkle-tooltip-trigger group relative inline-flex h-8 min-w-0 max-w-full shrink items-center gap-1 rounded-lg border-0 bg-transparent px-1 text-black shadow-none outline-none transition-colors hover:bg-zinc-100/70 dark:bg-transparent dark:text-white dark:hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50 sm:shrink-0 sm:gap-1.5 sm:px-2"
 >
-                            <span key={activeModel.id} className="whitespace-nowrap text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:text-sm">
+                            <span key={activeModel.id} className="whitespace-nowrap text-[14px] font-normal tracking-normal text-zinc-600 dark:text-zinc-300">
                                 {activeModel.name}
                                        </span>
                                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
@@ -4886,8 +4904,8 @@ if (isBlankDraft) {
               className="twinkle-chat-disclaimer twinkle-chat-disclaimer-fixed !mt-1.5 !mb-0"
               aria-live="polite"
             >
-              <p className="text-center text-[10px] leading-relaxed font-medium text-zinc-500/70 dark:text-zinc-400/70 sm:text-[11px]">
-                <strong className="font-semibold">Twinkle is AI and can make mistakes.</strong>
+              <p className="text-center text-[12px] leading-relaxed font-normal text-zinc-500 dark:text-zinc-400">
+                Twinkle is AI and can make mistakes. Please double-check responses.
               </p>
             </div>
             )}
@@ -4903,46 +4921,117 @@ if (isBlankDraft) {
       />
 
       <AnimatePresence>
-        {previewFile && previewUrl && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[12000] flex items-center justify-center bg-black/70 p-3 sm:p-6 backdrop-blur-sm"
-            onMouseDown={(e) => { if (e.target === e.currentTarget) closeFilePreview(); }}
-          >
+        {previewFile && previewUrl && (() => {
+          const isImagePreview = previewFile.type.startsWith('image/');
+          const isPdfPreview = previewFile.type === 'application/pdf';
+          const hasRichPreview = isPdfPreview || previewText !== null;
+          const previewSize = `${(previewFile.size / 1024).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} KB`;
+
+          if (isImagePreview) {
+            return (
+              <motion.div
+                key="twinkle-image-preview"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                className="fixed inset-0 z-[12000] flex items-center justify-center bg-black/60 p-4"
+                onMouseDown={(e) => { if (e.target === e.currentTarget) closeFilePreview(); }}
+                role="dialog"
+                aria-modal="true"
+                aria-label={previewFile.name}
+              >
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.97 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.97 }}
+                  transition={{ duration: 0.15 }}
+                  className="relative flex max-w-full flex-col items-center"
+                >
+                  <img
+                    src={previewUrl}
+                    alt={previewFile.name}
+                    className="block h-auto max-h-[min(640px,calc(100vh-112px))] w-auto max-w-[min(640px,calc(100vw-32px))] rounded-xl bg-white object-contain shadow-2xl dark:bg-zinc-900"
+                  />
+                  <p className="mt-3 max-w-[min(640px,calc(100vw-32px))] truncate text-[16px] font-normal text-white" data-no-translate>{previewFile.name}</p>
+                  <button
+                    type="button"
+                    onClick={closeFilePreview}
+                    aria-label="Close preview"
+                    className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-white transition-colors hover:bg-black/75 sm:-right-12 sm:top-0 sm:bg-transparent sm:hover:bg-white/15"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </motion.div>
+              </motion.div>
+            );
+          }
+
+          return (
             <motion.div
-              initial={{ opacity: 0, scale: 0.96, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 10 }}
-              className="relative flex h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-white shadow-2xl dark:bg-zinc-900"
+              key="twinkle-file-preview"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="fixed inset-0 z-[12000] flex items-center justify-center bg-black/50 p-4"
+              onMouseDown={(e) => { if (e.target === e.currentTarget) closeFilePreview(); }}
+              role="dialog"
+              aria-modal="true"
+              aria-label={previewFile.name}
             >
-              <div className="flex shrink-0 items-center gap-3 border-b border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-600 dark:text-zinc-300">
-                  {previewFile.type.startsWith('image/') ? <Eye className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.97, y: 6 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.97, y: 6 }}
+                transition={{ duration: 0.15 }}
+                className={`relative flex max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-[0_12px_48px_rgba(0,0,0,0.18)] dark:border-zinc-700 dark:bg-zinc-900 ${
+                  hasRichPreview
+                    ? 'h-[min(760px,calc(100vh-32px))] w-[880px]'
+                    : 'h-[468px] max-h-[calc(100vh-32px)] w-[520px]'
+                }`}
+              >
+                <div className="flex shrink-0 items-start justify-between gap-3 px-6 pb-3 pt-5">
+                  <h2 className="min-w-0 flex-1 truncate text-[20px] font-medium leading-8 text-zinc-900 dark:text-zinc-100" data-no-translate title={previewFile.name}>
+                    {previewFile.name}
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={closeFilePreview}
+                    aria-label="Close preview"
+                    className="-mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-bold text-zinc-900 dark:text-zinc-100">{previewFile.name}</p>
-                  <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">{previewFile.type === 'application/pdf' ? 'PDF preview' : previewFile.type.startsWith('image/') ? 'Image preview' : /\.docx$/i.test(previewFile.name) ? 'DOCX preview' : 'Document preview'}</p>
-                </div>
-                <button type="button" onClick={closeFilePreview} aria-label="Close preview" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100">
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-              <div className="min-h-0 flex-1 overflow-auto bg-zinc-100 p-3 dark:bg-zinc-950 sm:p-5">
-                {previewFile.type.startsWith('image/') ? (
-                  <div className="flex min-h-full items-center justify-center"><img src={previewUrl} alt={previewFile.name} className="max-h-full max-w-full rounded-xl object-contain shadow-lg" /></div>
-                ) : previewFile.type === 'application/pdf' ? (
-                  <PdfPreview src={previewUrl} fileName={previewFile.name} />
-                ) : previewText !== null ? (
-                  <pre className="mx-auto min-h-full max-w-4xl whitespace-pre-wrap break-words rounded-xl bg-white p-5 font-mono text-xs leading-relaxed text-zinc-800 shadow-sm dark:bg-zinc-900 dark:text-zinc-200">{previewText}</pre>
+
+                {hasRichPreview ? (
+                  <div className="min-h-0 flex-1 overflow-auto px-6 pb-6">
+                    {isPdfPreview ? (
+                      <PdfPreview src={previewUrl} fileName={previewFile.name} />
+                    ) : (
+                      <pre className="min-h-full whitespace-pre-wrap break-words rounded-xl bg-zinc-50 p-4 font-mono text-[13px] leading-relaxed text-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">{previewText}</pre>
+                    )}
+                  </div>
                 ) : (
-                  <div className="flex min-h-full items-center justify-center"><div className="max-w-md rounded-2xl bg-white p-8 text-center shadow-sm dark:bg-zinc-900"><FileText className="mx-auto mb-4 h-12 w-12 text-zinc-900 dark:text-zinc-100" /><h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100">{previewFile.name}</h3><p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">This document is attached and ready for AI analysis. The browser cannot render this legacy Office format directly.</p></div></div>
+                  <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 pb-10 text-center">
+                    <p className="text-[14px] font-normal text-zinc-600 dark:text-zinc-400">
+                      Preview isn’t available for <span data-no-translate>{previewFile.name}</span> ({previewSize}).
+                    </p>
+                    <a
+                      href={previewUrl}
+                      download={previewFile.name}
+                      className="inline-flex h-8 items-center justify-center gap-2 rounded-lg border border-zinc-300 bg-white px-3 text-[14px] font-medium text-zinc-900 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:bg-transparent dark:text-zinc-100 dark:hover:bg-zinc-800"
+                    >
+                      <Download className="h-4 w-4" />
+                      Download
+                    </a>
+                  </div>
                 )}
-              </div>
+              </motion.div>
             </motion.div>
-          </motion.div>
-        )}
+          );
+        })()}
       </AnimatePresence>
 
       <ShareChatModal
