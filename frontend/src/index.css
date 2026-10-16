@@ -1,0 +1,1638 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  :root {
+    --brand-primary: #000000;
+    --brand-secondary: #000000;
+    --bg-main: #FFFFFF;
+    --surface: #F9FAFB;
+    --text-main: #111111;
+    --text-muted: #666666;
+    --border: #E5E5E5;
+  }
+
+  .dark {
+    --brand-primary: #FFFFFF;
+    --brand-secondary: #FFFFFF;
+    --bg-main: #0A0A0A;
+    --surface: #171717;
+    --text-main: #F9F9F9;
+    --text-muted: #A1A1A1;
+    --border: #292929;
+  }
+
+  html,
+  body,
+  #root {
+    width: 100%;
+    min-height: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+  }
+
+  body {
+    @apply font-sans transition-colors duration-300;
+    background-color: var(--bg-main);
+    color: var(--text-main);
+    overscroll-behavior-x: none;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font-family: inherit;
+  }
+
+  /* Consistent hand cursor for interactive controls across the whole app. */
+  button,
+  a,
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="option"],
+  summary,
+  label[for],
+  [data-clickable="true"] {
+    cursor: pointer;
+  }
+
+  /* Disabled controls should not look interactive. */
+  button:disabled,
+  [role="button"][aria-disabled="true"],
+  [data-clickable="true"][aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+}
+
+/* =========================================================
+   GLASS
+   ========================================================= */
+
+.glass {
+  @apply backdrop-blur-xl border;
+  background-color: rgba(255, 255, 255, 0.7);
+  border-color: rgba(0, 0, 0, 0.05);
+}
+
+.dark .glass {
+  background-color: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
+/* =========================================================
+   UTILITIES
+   ========================================================= */
+
+.scroll-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scroll-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.text-gradient {
+  @apply bg-clip-text text-transparent;
+  background-image: linear-gradient(to right, #000000, #000000);
+}
+
+.dark .text-gradient {
+  background-image: linear-gradient(to right, #ffffff, #ffffff);
+}
+
+/* =========================================================
+   MODEL SELECTOR
+   ========================================================= */
+
+.model-selector-container,
+.model-selector {
+  position: relative;
+  z-index: 1000;
+  overflow: visible !important;
+}
+
+.model-dropdown {
+  position: absolute;
+  z-index: 99999 !important;
+  right: 0;
+  left: auto;
+  bottom: calc(100% + 8px);
+  width: 360px;
+  max-width: calc(100vw - 24px);
+  max-height: min(420px, calc(100dvh - 120px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  isolation: isolate;
+  transform-origin: bottom right;
+  border-radius: 18px;
+}
+
+.model-dropdown::-webkit-scrollbar {
+  width: 6px;
+}
+
+.model-dropdown::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.model-dropdown::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(107, 114, 128, 0.35);
+}
+
+.dark .model-dropdown::-webkit-scrollbar-thumb {
+  background: rgba(161, 161, 170, 0.3);
+}
+
+.model-dropdown button,
+.model-dropdown [role="option"] {
+  border-radius: 10px;
+}
+
+/* =========================================================
+   HORIZONTAL CHAT COMPOSER
+   ========================================================= */
+
+.twinkle-composer-row {
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  padding: 0 10px 0 8px !important;
+}
+
+.twinkle-composer-actions {
+  display: contents !important;
+}
+
+/* Desktop / laptop / tablet: keep the composer as one true horizontal row.
+   The action-row spacer must not participate in the flex layout here; the
+   prompt itself is the flexible element between the + button and controls. */
+.twinkle-composer-actions > .min-w-0.flex-1 {
+  display: none !important;
+}
+
+.twinkle-composer-prompt {
+  order: 2;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-self: center !important;
+}
+
+.twinkle-composer-textarea {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 24px !important;
+  margin: 0 !important;
+  line-height: 1.35 !important;
+}
+
+.twinkle-composer-plus { order: 1; }
+.twinkle-composer-model { order: 3; }
+.twinkle-composer-mic { order: 4; }
+.twinkle-composer-submit {
+  order: 5;
+  flex: 0 0 44px !important;
+  width: 44px !important;
+  min-width: 44px !important;
+  height: 44px !important;
+  margin-left: 8px !important;
+  margin-right: 0 !important;
+  position: relative !important;
+  z-index: 30 !important;
+}
+
+/* =========================================================
+   CHAT LAYERS
+   ========================================================= */
+
+.chat-messages,
+.chat-container,
+.messages-container {
+  position: relative;
+  z-index: 1;
+}
+
+.chat-input,
+.chat-composer,
+.input-container {
+  position: relative;
+  z-index: 10;
+}
+
+.chat-container,
+.chat-messages,
+.chat-footer,
+.chat-input-container {
+  overflow-x: visible;
+}
+
+/* =========================================================
+   SIDEBAR / NAVBAR LAYERS
+   ========================================================= */
+
+/* The opened sidebar must sit above both the navbar and search/content layers. */
+.sidebar,
+.chat-sidebar,
+.sidebar-container,
+[data-sidebar="true"] {
+  z-index: 100000 !important;
+}
+
+/* Keep sidebar overlays above every normal application layer. */
+.sidebar-overlay,
+[data-sidebar-overlay="true"] {
+  z-index: 99999 !important;
+}
+
+/* =========================================================
+   TWINKLE MONOCHROME UI
+   ========================================================= */
+
+/* Known accent utility classes are deliberately forced to grayscale. */
+[class*="text-indigo-"], [class*="text-purple-"], [class*="text-red-"],
+[class*="text-emerald-"], [class*="text-blue-"], [class*="text-orange-"],
+[class*="text-yellow-"], [class*="text-green-"], [class*="text-pink-"] {
+  color: #000000 !important;
+}
+
+.dark [class*="text-indigo-"], .dark [class*="text-purple-"], .dark [class*="text-red-"],
+.dark [class*="text-emerald-"], .dark [class*="text-blue-"], .dark [class*="text-orange-"],
+.dark [class*="text-yellow-"], .dark [class*="text-green-"], .dark [class*="text-pink-"] {
+  color: #ffffff !important;
+}
+
+[class*="bg-indigo-"], [class*="bg-purple-"], [class*="bg-red-"],
+[class*="bg-emerald-"], [class*="bg-blue-"], [class*="bg-orange-"],
+[class*="bg-yellow-"], [class*="bg-green-"], [class*="bg-pink-"] {
+  background-color: #000000 !important;
+}
+
+.dark [class*="bg-indigo-"], .dark [class*="bg-purple-"], .dark [class*="bg-red-"],
+.dark [class*="bg-emerald-"], .dark [class*="bg-blue-"], .dark [class*="bg-orange-"],
+.dark [class*="bg-yellow-"], .dark [class*="bg-green-"], .dark [class*="bg-pink-"] {
+  background-color: #ffffff !important;
+}
+
+[class*="border-indigo-"], [class*="border-purple-"], [class*="border-red-"],
+[class*="border-emerald-"], [class*="border-blue-"], [class*="border-orange-"],
+[class*="border-yellow-"], [class*="border-green-"], [class*="border-pink-"] {
+  border-color: #000000 !important;
+}
+
+.dark [class*="border-indigo-"], .dark [class*="border-purple-"], .dark [class*="border-red-"],
+.dark [class*="border-emerald-"], .dark [class*="border-blue-"], .dark [class*="border-orange-"],
+.dark [class*="border-yellow-"], .dark [class*="border-green-"], .dark [class*="border-pink-"] {
+  border-color: #ffffff !important;
+}
+
+[class*="from-indigo-"], [class*="from-purple-"], [class*="from-red-"],
+[class*="from-emerald-"], [class*="from-blue-"], [class*="from-orange-"],
+[class*="from-yellow-"], [class*="from-green-"], [class*="from-pink-"] {
+  --tw-gradient-from: #000000 !important;
+  --tw-gradient-to: rgb(0 0 0 / 0) !important;
+}
+
+[class*="to-indigo-"], [class*="to-purple-"], [class*="to-red-"],
+[class*="to-emerald-"], [class*="to-blue-"], [class*="to-orange-"],
+[class*="to-yellow-"], [class*="to-green-"], [class*="to-pink-"] {
+  --tw-gradient-to: #000000 !important;
+}
+
+.dark [class*="from-indigo-"], .dark [class*="from-purple-"], .dark [class*="from-red-"],
+.dark [class*="from-emerald-"], .dark [class*="from-blue-"], .dark [class*="from-orange-"],
+.dark [class*="from-yellow-"], .dark [class*="from-green-"], .dark [class*="from-pink-"] {
+  --tw-gradient-from: #ffffff !important;
+  --tw-gradient-to: rgb(255 255 255 / 0) !important;
+}
+
+.dark [class*="to-indigo-"], .dark [class*="to-purple-"], .dark [class*="to-red-"],
+.dark [class*="to-emerald-"], .dark [class*="to-blue-"], .dark [class*="to-orange-"],
+.dark [class*="to-yellow-"], .dark [class*="to-green-"], .dark [class*="to-pink-"] {
+  --tw-gradient-to: #ffffff !important;
+}
+
+/* Auth feedback colors: keep error messages red and success messages green. */
+[role="alert"][class*="text-red-"] {
+  color: #dc2626 !important;
+}
+
+.dark [role="alert"][class*="text-red-"] {
+  color: #f87171 !important;
+}
+
+[role="status"][class*="text-emerald-"] {
+  color: #16a34a !important;
+}
+
+.dark [role="status"][class*="text-emerald-"] {
+  color: #4ade80 !important;
+}
+
+.chat-messages a,
+.messages-container a {
+  color: #2563eb !important;
+  text-decoration: underline !important;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.dark .chat-messages a,
+.dark .messages-container a {
+  color: #60a5fa !important;
+}
+
+/* =========================================================
+   MOBILE
+   ========================================================= */
+
+@media (max-width: 640px) {
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100dvh;
+    min-height: 100dvh;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  body {
+    min-height: 100dvh;
+  }
+
+  .chat-container {
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+    max-height: 100dvh !important;
+    overflow: hidden !important;
+  }
+
+  .chat-messages,
+  .messages-container {
+    min-height: 0;
+    overflow-x: hidden !important;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .chat-input,
+  .chat-composer,
+  .input-container {
+    position: fixed !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    z-index: 9000 !important;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .model-selector-container,
+  .model-selector {
+    position: static !important;
+    z-index: 9999 !important;
+    overflow: visible !important;
+  }
+
+  .model-dropdown {
+    position: fixed !important;
+    z-index: 100000 !important;
+    bottom: calc(86px + env(safe-area-inset-bottom, 0px)) !important;
+    right: 12px !important;
+    left: auto !important;
+    width: min(360px, calc(100vw - 24px)) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: calc(100dvh - 170px - env(safe-area-inset-bottom, 0px)) !important;
+    min-height: 0 !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    border-radius: 18px !important;
+    transform-origin: bottom right;
+  }
+
+  .model-dropdown::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .model-dropdown::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .model-dropdown::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: rgba(107, 114, 128, 0.35);
+  }
+
+  .dark .model-dropdown::-webkit-scrollbar-thumb {
+    background: rgba(161, 161, 170, 0.3);
+  }
+
+  .model-dropdown button,
+  .model-dropdown [role="option"] {
+    width: 100%;
+    min-height: 64px;
+    border-radius: 12px;
+    touch-action: manipulation;
+  }
+
+  .model-dropdown button > *,
+  .model-dropdown [role="option"] > * {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 380px) {
+  .model-dropdown {
+    right: 8px !important;
+    left: auto !important;
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px) !important;
+    max-height: calc(100dvh - 155px - env(safe-area-inset-bottom, 0px)) !important;
+    border-radius: 16px !important;
+  }
+
+  .model-dropdown button,
+  .model-dropdown [role="option"] {
+    min-height: 60px;
+  }
+}
+
+@media (max-width: 640px) and (max-height: 650px) {
+  .model-dropdown {
+    max-height: calc(100dvh - 145px - env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+/* Reference-style sidebar typography */
+.sidebar-reference,
+.sidebar-reference button,
+.sidebar-reference input {
+  -webkit-font-smoothing: antialiased;
+  font-weight: 500;
+}
+
+/* Slightly stronger sidebar typography for readability. */
+.sidebar-reference .font-medium {
+  font-weight: 550 !important;
+}
+
+.sidebar-reference .font-semibold {
+  font-weight: 650 !important;
+}
+
+.sidebar-reference .font-bold {
+  font-weight: 700 !important;
+}
+
+/* Model selector labels use the lighter weight shown in the reference. */
+.model-dropdown .font-bold,
+.model-dropdown .font-black {
+  font-weight: 500 !important;
+}
+
+/* Mobile sidebar trigger: always stays above the chat canvas. */
+.mobile-sidebar-trigger {
+  z-index: 9000;
+}
+
+
+/* =========================================================
+   MOBILE REFERENCE LAYOUT
+   Desktop layout remains untouched.
+   ========================================================= */
+@media (max-width: 640px) {
+  .twinkle-mobile-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 64px;
+    z-index: 9500;
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    background: rgba(255,255,255,.94);
+    border-bottom: 1px solid rgba(228,228,231,.7);
+    backdrop-filter: blur(18px);
+  }
+  .dark .twinkle-mobile-header {
+    background: rgba(10,10,10,.94);
+    border-bottom-color: rgba(39,39,42,.8);
+  }
+  .twinkle-mobile-header-menu {
+    width: 38px;
+    height: 38px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 8px;
+    border-radius: 10px;
+    color: #18181b;
+  }
+  .dark .twinkle-mobile-header-menu { color: #f4f4f5; }
+  .twinkle-menu-line {
+    display: block;
+    width: 21px;
+    height: 1.7px;
+    border-radius: 99px;
+    background: currentColor;
+  }
+  .twinkle-menu-line-short { width: 14px; }
+  .twinkle-mobile-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 2px;
+    padding: 8px 9px;
+    border-radius: 10px;
+    color: #18181b;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -.02em;
+  }
+  .dark .twinkle-mobile-title { color: #f4f4f5; }
+  .twinkle-mobile-header-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .twinkle-mobile-header-icon,
+  .twinkle-mobile-sidebar-icon {
+    width: 38px;
+    height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    color: #18181b;
+    transition: background .15s ease;
+  }
+  .twinkle-mobile-header-icon:hover,
+  .twinkle-mobile-sidebar-icon:hover { background: rgba(0,0,0,.05); }
+  .dark .twinkle-mobile-header-icon,
+  .dark .twinkle-mobile-sidebar-icon { color: #f4f4f5; }
+  .dark .twinkle-mobile-header-icon:hover,
+  .dark .twinkle-mobile-sidebar-icon:hover { background: rgba(255,255,255,.06); }
+
+  .twinkle-mobile-sidebar-header {
+    min-height: 70px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 12px 10px 16px;
+    flex-shrink: 0;
+    border-bottom: 1px solid rgba(228,228,231,.55);
+  }
+  .dark .twinkle-mobile-sidebar-header { border-bottom-color: rgba(39,39,42,.8); }
+
+  .chat-messages {
+    padding-top: 64px !important;
+  }
+  /* Mobile-only two-row composer. Desktop/tablet layout stays unchanged. */
+  .twinkle-composer-row {
+    flex-wrap: wrap !important;
+    align-items: stretch !important;
+    gap: 0 !important;
+    padding: 4px 8px 6px !important;
+  }
+
+  /* Row 1: full-width Ask Anything input. */
+  .twinkle-composer-prompt {
+    order: 1 !important;
+    flex: 0 0 100% !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    min-height: 54px !important;
+    padding: 7px 6px 3px !important;
+  }
+
+  .twinkle-composer-textarea {
+    order: initial !important;
+    display: block !important;
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 40px !important;
+    max-height: 100px !important;
+    padding: 0 !important;
+    font-size: 16px !important;
+    line-height: 1.35 !important;
+  }
+
+  /* Row 2: + is fixed at the far left; model/mic/Live Talk are fixed as a group at the far right. */
+  .twinkle-composer-actions {
+    order: 2 !important;
+    display: flex !important;
+    width: 100% !important;
+    flex: 0 0 100% !important;
+    min-width: 0 !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 2px !important;
+    padding: 2px 2px 0 !important;
+  }
+
+  /* Do not use the old spacer on mobile. It can collapse and pull + next to the model. */
+  .twinkle-composer-actions > .min-w-0.flex-1 {
+    display: none !important;
+  }
+
+  /* + is always at the far left of the mobile action row. */
+  .twinkle-composer-plus {
+    order: 1 !important;
+    flex: 0 0 40px !important;
+    width: 40px !important;
+    margin: 0 !important;
+  }
+
+  /* Model/mic/Live Talk form one right-aligned control group. */
+  .twinkle-composer-model {
+    order: 3 !important;
+    flex: 0 0 auto !important;
+    margin-left: auto !important;
+  }
+
+  .twinkle-composer-mic {
+    order: 4 !important;
+    flex: 0 0 auto !important;
+  }
+
+  .twinkle-composer-submit {
+    order: 5 !important;
+    flex: 0 0 auto !important;
+    margin-right: 0 !important;
+  }
+
+  .chat-input, .chat-composer, .input-container {
+    padding-left: 22px !important;
+    padding-right: 22px !important;
+    padding-bottom: max(8px, env(safe-area-inset-bottom)) !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .twinkle-mobile-sidebar-header {
+    min-height: 64px;
+  }
+  .twinkle-mobile-header {
+    height: 60px;
+  }
+  .chat-messages { padding-top: 60px !important; }
+  .chat-input, .chat-composer, .input-container {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+}
+
+/* =========================================================
+   SIDEBAR CLEAN BACKGROUND
+   ========================================================= */
+
+@media (min-width: 641px) {
+  .sidebar,
+  .chat-sidebar,
+  .sidebar-container,
+  [data-sidebar="true"] {
+    background-color: #ffffff;
+  }
+
+  .dark .sidebar,
+  .dark .chat-sidebar,
+  .dark .sidebar-container,
+  .dark [data-sidebar="true"] {
+    background-color: #0a0a0a;
+  }
+}
+
+/* Auth feedback alignment and explicit colors. */
+.auth-feedback {
+  width: 100%;
+  text-align: center;
+  display: block;
+}
+
+.auth-error-feedback,
+[role="alert"][class*="text-red-"] {
+  color: #dc2626 !important;
+  text-align: center !important;
+}
+
+.dark .auth-error-feedback,
+.dark [role="alert"][class*="text-red-"] {
+  color: #f87171 !important;
+  text-align: center !important;
+}
+
+.auth-success-feedback,
+[role="status"][class*="text-emerald-"] {
+  color: #16a34a !important;
+  text-align: center !important;
+}
+
+.dark .auth-success-feedback,
+.dark [role="status"][class*="text-emerald-"] {
+  color: #4ade80 !important;
+  text-align: center !important;
+}
+
+
+@keyframes twinkle-thinking-dot {
+  0%, 100% {
+    opacity: 0.35;
+    transform: scale(0.82);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+
+/* ChatGPT/Claude-style compact hover cards for icon controls. */
+.twinkle-tooltip-trigger {
+  position: relative;
+}
+
+.twinkle-tooltip-trigger::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translate(-50%, 4px);
+  z-index: 100000;
+  pointer-events: none;
+  white-space: nowrap;
+  border-radius: 999px;
+  background: #111111;
+  color: #ffffff;
+  padding: 7px 12px;
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  box-shadow: 0 8px 24px rgba(0,0,0,.16);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .14s ease, transform .14s ease, visibility .14s ease;
+}
+
+.twinkle-tooltip-trigger:hover::after,
+.twinkle-tooltip-trigger:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+}
+
+/* Never show a tooltip with no text, or while the model picker is open. */
+.twinkle-tooltip-trigger:not([data-tooltip])::after,
+.twinkle-tooltip-trigger[aria-expanded="true"]::after {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .twinkle-tooltip-trigger::after {
+    display: none;
+  }
+}
+
+
+/* =========================================================
+   TWINKLE INTERACTION / RESPONSE POLISH
+   ========================================================= */
+
+/* Search and New Chat controls remain visually fixed on hover. */
+.group\/search,
+.group\/newchat {
+  transform: none !important;
+  animation: none !important;
+}
+
+.group\/search svg,
+.twinkle-search-icon,
+.twinkle-newchat-icon {
+  transform: none !important;
+  transition: none !important;
+  animation: none !important;
+}
+
+.twinkle-newchat-box {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  transform: none !important;
+  transition: none !important;
+  overflow: hidden;
+}
+
+/* Quiet in-flow thinking label. It never floats above the composer. */
+.twinkle-thinking-text {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  padding-left: 0.25rem;
+  color: #71717a;
+  font-size: 0.86rem;
+  line-height: 1.25;
+  font-weight: 500;
+}
+
+.dark .twinkle-thinking-text {
+  color: #a1a1aa;
+}
+
+.twinkle-streaming-content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  min-height: 1.5em;
+}
+
+/* Fade the scrolling conversation cleanly into the fixed composer. */
+.twinkle-message-scroll-area {
+  position: relative;
+  isolation: isolate;
+  /* Fade the last part of the scroll viewport instead of drawing a visible
+     horizontal overlay. The composer remains completely opaque above it. */
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 calc(100% - 112px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 calc(100% - 112px),
+    transparent 100%
+  );
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}
+
+/* Floating thinking indicator at the composer boundary. */
+.twinkle-floating-thinking {
+  position: absolute;
+  left: 50%;
+  top: -56px;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 44px;
+  height: 44px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(228, 228, 231, 0.95);
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.08);
+}
+
+.twinkle-floating-thinking-away {
+  position: fixed;
+  left: 50%;
+  top: auto;
+  bottom: 112px;
+  transform: translateX(-50%);
+  z-index: 8995;
+}
+
+.twinkle-floating-thinking-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: #71717a;
+  animation: twinkle-floating-dot-breathe 1.15s ease-in-out infinite;
+}
+
+.twinkle-floating-thinking-dot:nth-child(2) { animation-delay: 0.16s; }
+.twinkle-floating-thinking-dot:nth-child(3) { animation-delay: 0.32s; }
+
+@keyframes twinkle-floating-dot-breathe {
+  0%, 100% { opacity: 0.45; transform: scale(0.82); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+.dark .twinkle-floating-thinking {
+  border-color: rgba(228, 228, 231, 0.95);
+  background: #ffffff;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.12);
+}
+
+.chat-messages-bottom-mask {
+  display: none !important;
+}
+
+/* Markdown separators are content formatting, not a chat boundary. Hide the
+   horizontal rule so the composer-boundary smoke remains the only visual
+   transition at the bottom of the conversation. */
+.twinkle-response-content hr {
+  display: none;
+}
+
+/* =========================================================
+   RESPONSE VISUALS
+   ========================================================= */
+.twinkle-response-image {
+  width: fit-content;
+  max-width: 100%;
+  margin: 1rem 0;
+  overflow: hidden;
+  border: 1px solid #e4e4e7;
+  border-radius: 14px;
+  background: #fafafa;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.04);
+}
+
+.twinkle-response-image img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+}
+
+.twinkle-response-image figcaption {
+  padding: 0.45rem 0.7rem;
+  border-top: 1px solid #ededee;
+  color: #71717a;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+
+/* The disclaimer belongs to the end of the scrolling conversation.
+   It is therefore visible above the composer only when the user reaches the
+   actual end of the chat, instead of being pinned over every scroll position. */
+.twinkle-chat-disclaimer {
+  position: relative;
+  width: 100%;
+  min-height: 20px;
+  margin-top: 1.25rem;
+  padding: 0 0 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.dark .twinkle-equation-block {
+  border-color: #3f3f46;
+  background: linear-gradient(180deg, #27272a 0%, #18181b 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 4px 14px rgba(0,0,0,0.18);
+}
+
+.dark .twinkle-equation-symbol {
+  background: #f4f4f5;
+  color: #18181b;
+}
+
+.dark .twinkle-equation-value {
+  color: #f4f4f5;
+}
+
+.dark .twinkle-table-wrap {
+  border-color: #3f3f46;
+  background: #18181b;
+}
+
+.dark .twinkle-response-th {
+  background: #27272a;
+  border-color: #3f3f46;
+}
+
+.dark .twinkle-response-td {
+  border-color: #27272a;
+}
+
+.dark .twinkle-response-image {
+  border-color: #3f3f46;
+  background: #18181b;
+}
+
+.dark .twinkle-response-image figcaption {
+  border-color: #3f3f46;
+  color: #a1a1aa;
+}
+
+@media (max-width: 767px) {
+  .twinkle-equation-block {
+    margin-left: -0.1rem;
+    margin-right: -0.1rem;
+    width: calc(100% + 0.2rem);
+  }
+
+  .twinkle-response-table {
+    min-width: 460px;
+  }
+}
+
+/* =========================================================
+   STREAMING DOTS -> HOVER TO SCROLL DOWN
+   ========================================================= */
+.twinkle-floating-thinking {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 0;
+  cursor: pointer;
+  color: #71717a;
+  transition: width 160ms ease, height 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.twinkle-floating-thinking:hover {
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.12);
+}
+
+.twinkle-floating-thinking-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.twinkle-floating-thinking-arrow {
+  display: none;
+  width: 22px;
+  height: 22px;
+  color: #18181b;
+  transition: transform 160ms ease;
+}
+
+.twinkle-floating-thinking:hover .twinkle-floating-thinking-dots {
+  display: none;
+}
+
+.twinkle-floating-thinking:hover .twinkle-floating-thinking-arrow {
+  display: block;
+}
+
+.twinkle-floating-thinking:hover .twinkle-floating-thinking-arrow {
+  transform: translateY(1px);
+}
+
+.dark .twinkle-floating-thinking-arrow {
+  color: #18181b;
+}
+
+/* =========================================================
+   FINAL RESPONSE LAYOUT FIXES
+   ========================================================= */
+
+/* No artificial horizontal separators inside normal assistant responses. */
+.twinkle-response-content hr,
+.twinkle-response-content h1,
+.twinkle-response-content h2,
+.twinkle-response-content h3 {
+  border-bottom: 0 !important;
+}
+
+/* Tables are the visual structure for genuinely tabular answers. */
+.twinkle-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  margin: 1rem 0 1.25rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid #e4e4e7;
+  border-radius: 12px;
+  background: #ffffff;
+  -webkit-overflow-scrolling: touch;
+}
+
+.twinkle-response-table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: auto;
+  font-size: 0.94rem;
+  line-height: 1.55;
+}
+
+.twinkle-response-th,
+.twinkle-response-td {
+  padding: 0.72rem 0.85rem;
+  text-align: left;
+  vertical-align: top;
+  border-right: 1px solid #e4e4e7;
+  border-bottom: 1px solid #e4e4e7;
+}
+
+.twinkle-response-th {
+  background: #f7f7f8;
+  color: #18181b;
+  font-weight: 700;
+  white-space: normal;
+}
+
+.twinkle-response-td {
+  color: #27272a;
+  font-weight: 500;
+  background: #ffffff;
+}
+
+.twinkle-response-th:last-child,
+.twinkle-response-td:last-child {
+  border-right: 0;
+}
+
+.twinkle-response-table tbody tr:last-child .twinkle-response-td {
+  border-bottom: 0;
+}
+
+/* The disclaimer is rendered only at the actual bottom and sits immediately
+   above the composer. It is not part of the scrolling message content. */
+.twinkle-chat-disclaimer-fixed {
+  position: relative;
+  width: 100%;
+  min-height: 24px;
+  margin: 0 0 7px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 61;
+}
+
+.dark .twinkle-table-wrap {
+  border-color: #3f3f46;
+  background: #18181b;
+}
+
+.dark .twinkle-response-th {
+  color: #f4f4f5;
+  background: #27272a;
+  border-color: #3f3f46;
+}
+
+.dark .twinkle-response-td {
+  color: #e4e4e7;
+  background: #18181b;
+  border-color: #3f3f46;
+}
+
+
+/* Twinkle AI responsive chat layout: fluid viewport, readable message width,
+   safe-area-aware composer, and compact touch-friendly mobile spacing. */
+.chat-messages-bottom-mask {
+  pointer-events: none;
+}
+
+/* Keep chat content readable on wide monitors without forcing fixed widths. */
+[data-twinkle-message] {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+[data-twinkle-message] pre,
+[data-twinkle-message] table,
+[data-twinkle-message] img,
+[data-twinkle-message] video {
+  max-width: 100%;
+}
+
+[data-twinkle-message] pre {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Prevent iOS Safari from zooming into focused form fields. */
+.chat-composer input,
+.chat-composer textarea,
+textarea,
+input {
+  font-size: max(16px, 1em);
+}
+
+@media (max-width: 1024px) {
+  [data-twinkle-message] {
+    gap: 0.625rem;
+  }
+}
+
+@media (max-width: 768px) {
+  html,
+  body,
+  #root {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: clip;
+  }
+
+  [data-twinkle-message] {
+    padding-inline: 0;
+  }
+
+  .chat-messages-bottom-mask {
+    max-width: 100vw;
+  }
+}
+
+@media (max-width: 480px) {
+  [data-twinkle-message] pre {
+    font-size: 0.8125rem;
+  }
+
+  [data-twinkle-message] table {
+    display: block;
+    overflow-x: auto;
+  }
+}
+
+@media (max-height: 640px) and (max-width: 768px) {
+  .chat-messages-bottom-mask {
+    opacity: 0.6;
+  }
+}
+
+/* ChatGPT/Claude-inspired responsive shell dimensions for Twinkle AI. */
+:root {
+  --twinkle-sidebar-width: 270px;
+  --twinkle-chat-content-width: 800px;
+  --twinkle-chat-header-height: 60px;
+  --twinkle-page-gutter: 16px;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 0;
+  min-height: 100%;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+.twinkle-message-scroll-area {
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+}
+
+.twinkle-message-scroll-area > div {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Keep the chat transcript and composer at a comfortable reading width. */
+.twinkle-message-scroll-area [data-twinkle-message],
+[data-twinkle-message] {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+[data-twinkle-message] pre,
+[data-twinkle-message] table {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Touch targets and viewport-safe composer on phones/tablets. */
+@media (max-width: 1024px) {
+  :root {
+    --twinkle-page-gutter: 14px;
+  }
+}
+
+@media (max-width: 768px) {
+  html,
+  body,
+  #root {
+    max-width: 100vw;
+    overflow-x: clip;
+  }
+
+  .twinkle-message-scroll-area {
+    scrollbar-gutter: auto;
+  }
+
+  .twinkle-message-scroll-area > div {
+    padding-inline: var(--twinkle-page-gutter);
+  }
+
+  .twinkle-sidebar {
+    width: min(280px, calc(100vw - 16px));
+    max-width: calc(100vw - 16px);
+  }
+}
+
+@media (max-width: 480px) {
+  :root {
+    --twinkle-page-gutter: 12px;
+  }
+
+  .twinkle-message-scroll-area > div {
+    padding-inline: 12px;
+  }
+
+  button,
+  [role="button"] {
+    touch-action: manipulation;
+  }
+
+  [data-twinkle-message] pre {
+    font-size: 0.8125rem;
+  }
+}
+
+@media (max-height: 640px) and (max-width: 768px) {
+  .twinkle-message-scroll-area {
+    scroll-padding-bottom: 100px;
+  }
+}
+
+
+/* =========================================================
+   TWINKLE CHAT + SIDEBAR VISUAL OVERRIDES
+   These rules deliberately use !important for layout-critical
+   properties so older Tailwind utilities cannot stretch the chat.
+   ========================================================= */
+:root {
+  --twinkle-sidebar-width: 270px;
+  --twinkle-chat-content-width: 800px;
+}
+
+/* Keep the transcript centered instead of stretching assistant cards
+   across the entire browser window. */
+.twinkle-message-scroll-area {
+  width: 100% !important;
+  min-width: 0 !important;
+  overflow-x: hidden !important;
+}
+.twinkle-message-scroll-area > div {
+  width: 100% !important;
+  max-width: var(--twinkle-chat-content-width) !important;
+  margin-inline: auto !important;
+  padding-inline: clamp(12px, 2vw, 24px) !important;
+}
+.twinkle-message-scroll-area [data-twinkle-message] {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+.twinkle-message-scroll-area [data-twinkle-message] > div {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+.twinkle-message-scroll-area [data-twinkle-message] > div > div:not(.shrink-0) {
+  overflow-wrap: anywhere;
+}
+
+/* Tidy, consistent chat cards and user bubbles. */
+.twinkle-message-scroll-area [data-twinkle-message] .rounded-2xl {
+  border-radius: 18px;
+}
+.twinkle-message-scroll-area [data-twinkle-message] pre,
+.twinkle-message-scroll-area [data-twinkle-message] table,
+.twinkle-message-scroll-area [data-twinkle-message] img,
+.twinkle-message-scroll-area [data-twinkle-message] video {
+  max-width: 100% !important;
+}
+.twinkle-message-scroll-area [data-twinkle-message] pre,
+.twinkle-message-scroll-area [data-twinkle-message] table {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Composer aligns to the same reading width as the conversation. */
+.twinkle-composer-shell,
+.chat-composer-shell {
+  width: min(100%, var(--twinkle-chat-content-width)) !important;
+  margin-inline: auto !important;
+}
+.twinkle-composer-row {
+  min-width: 0 !important;
+}
+.twinkle-composer-textarea {
+  min-width: 0 !important;
+  font-size: 16px !important;
+}
+
+/* Sidebar sizing and control rhythm. */
+.twinkle-sidebar {
+  box-sizing: border-box;
+  overscroll-behavior: contain;
+}
+.twinkle-sidebar button {
+  -webkit-tap-highlight-color: transparent;
+}
+.twinkle-sidebar .twinkle-newchat-box {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+}
+.twinkle-sidebar .twinkle-newchat-icon {
+  width: 17px !important;
+  height: 17px !important;
+}
+.twinkle-sidebar .twinkle-search-icon {
+  width: 18px !important;
+  height: 18px !important;
+}
+
+@media (max-width: 768px) {
+  .twinkle-message-scroll-area > div {
+    max-width: 100% !important;
+    padding-inline: 12px !important;
+  }
+  .twinkle-message-scroll-area [data-twinkle-message] .rounded-2xl {
+    border-radius: 16px;
+  }
+  .twinkle-composer-row {
+    padding-inline: 8px !important;
+  }
+}
+
+
+@keyframes twinkle-breathe { 0%, 100% { transform: scale(.72); opacity: .55; } 50% { transform: scale(1.22); opacity: 1; } }
+
+
+/* Gentle letter-by-letter wave used for the long-response Thinking indicator. */
+@keyframes twinkle-thinking-wave {
+  0%, 60%, 100% { transform: translateY(0); opacity: .62; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
+.twinkle-thinking-wave { display: inline-flex; align-items: center; white-space: pre; }
+.twinkle-thinking-wave-letter { display: inline-block; animation: twinkle-thinking-wave 1.15s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .twinkle-thinking-wave-letter { animation: none; } }
+
+
+/* Three animated dots shown inside the assistant's circular thinking indicator. */
+.twinkle-thinking-dot {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background: #fff;
+  opacity: .35;
+  animation: twinkle-thinking-bounce 1s ease-in-out infinite;
+}
+.twinkle-thinking-dot-1 { transform: translateX(-6px); animation-delay: 0ms; }
+.twinkle-thinking-dot-2 { transform: translateY(-1px); animation-delay: 140ms; }
+.twinkle-thinking-dot-3 { transform: translateX(6px); animation-delay: 280ms; }
+@keyframes twinkle-thinking-bounce {
+  0%, 60%, 100% { opacity: .35; scale: .85; translate: 0 0; }
+  30% { opacity: 1; scale: 1.15; translate: 0 -3px; }
+}
+@media (prefers-reduced-motion: reduce) { .twinkle-thinking-dot { animation: none; opacity: 1; } }
+
+
+/* =========================================================
+   AUTHORITATIVE COMPOSER LAYOUT
+   Keep the composer centered in the visible chat column, with one grid layout.
+   ========================================================= */
+.twinkle-composer-shell,
+.chat-composer-shell {
+  display: block !important;
+  width: min(100%, var(--twinkle-chat-content-width, 800px)) !important;
+  max-width: var(--twinkle-chat-content-width, 800px) !important;
+  min-width: 0 !important;
+  margin-inline: auto !important;
+  box-sizing: border-box !important;
+}
+
+.twinkle-composer-row {
+  display: grid !important;
+  grid-template-columns: 36px minmax(0, 1fr) auto auto 44px !important;
+  grid-template-areas: "prompt prompt prompt prompt prompt" "plus spacer model mic submit" !important;
+  align-items: center !important;
+  gap: 0 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 112px !important;
+  padding: 10px 12px 8px 10px !important;
+  box-sizing: border-box !important;
+  border-radius: 22px !important;
+}
+
+.twinkle-composer-prompt {
+  grid-area: prompt !important;
+  align-self: stretch !important;
+  display: flex !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 52px !important;
+  padding: 4px 2px 8px !important;
+  align-items: flex-start !important;
+}
+
+.twinkle-composer-textarea {
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 32px !important;
+  max-height: 200px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  font-size: 16px !important;
+  line-height: 1.45 !important;
+  box-sizing: border-box !important;
+}
+
+.twinkle-composer-plus { grid-area: plus !important; align-self: center !important; min-width: 0 !important; margin: 0 !important; }
+.twinkle-composer-actions { display: contents !important; }
+.twinkle-composer-actions > .min-w-0.flex-1 { display: block !important; grid-area: spacer !important; min-width: 0 !important; }
+.twinkle-composer-model { grid-area: model !important; align-self: center !important; display: inline-flex !important; min-width: 0 !important; margin: 0 8px 0 0 !important; }
+.twinkle-composer-model > button { max-width: min(22vw, 180px); min-width: 0; }
+.twinkle-composer-model > button > span { max-width: min(16vw, 125px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.twinkle-composer-mic { grid-area: mic !important; align-self: center !important; min-width: 0 !important; margin: 0 6px 0 2px !important; }
+.twinkle-composer-submit { grid-area: submit !important; align-self: center !important; position: relative !important; z-index: 30 !important; flex: 0 0 44px !important; width: 44px !important; min-width: 44px !important; height: 44px !important; margin: 0 !important; }
+
+/* The composer is fixed to the viewport. Apply the sidebar offset exactly once on desktop. */
+.twinkle-composer-position {
+  left: 0 !important;
+  right: 0 !important;
+  width: 100% !important;
+  max-width: none !important;
+  box-sizing: border-box !important;
+}
+@media (min-width: 1024px) {
+  .twinkle-composer-position {
+    left: var(--desktop-sidebar-offset, 60px) !important;
+    right: 0 !important;
+    width: calc(100% - var(--desktop-sidebar-offset, 60px)) !important;
+  }
+}
+
+/* Empty chat uses a measured top position based on the greeting's actual rendered bottom edge. */
+.twinkle-composer-empty-state {
+  top: 50%;
+  bottom: auto !important;
+}
+
+/* Dropdown stays attached to the model selector and within the viewport. */
+.twinkle-composer-model { position: relative; }
+.model-dropdown {
+  position: absolute !important;
+  right: 0 !important;
+  left: auto !important;
+  bottom: calc(100% + 8px) !important;
+  width: min(360px, calc(100vw - 24px)) !important;
+  max-width: calc(100vw - 24px) !important;
+  max-height: min(420px, calc(100dvh - 120px)) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  z-index: 99999 !important;
+  box-sizing: border-box !important;
+}
+
+@media (max-width: 640px) {
+  .twinkle-composer-row {
+    grid-template-columns: 32px minmax(0, 1fr) auto auto 40px !important;
+    min-height: 104px !important;
+    padding: 8px 8px 7px !important;
+  }
+  .twinkle-composer-prompt { min-height: 50px !important; padding: 4px 2px 6px !important; }
+  .twinkle-composer-model { margin-right: 4px !important; }
+  .twinkle-composer-model > button { max-width: min(28vw, 132px); }
+  .twinkle-composer-model > button > span { max-width: min(19vw, 88px); }
+  .twinkle-composer-mic { margin-inline: 1px 4px !important; }
+  .twinkle-composer-submit { width: 40px !important; min-width: 40px !important; height: 40px !important; flex-basis: 40px !important; }
+  .model-dropdown {
+    position: fixed !important;
+    right: 12px !important;
+    left: auto !important;
+    bottom: calc(86px + env(safe-area-inset-bottom, 0px)) !important;
+    width: min(360px, calc(100vw - 24px)) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: calc(100dvh - 170px - env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+@media (max-width: 380px) {
+  .twinkle-composer-row { grid-template-columns: 30px minmax(0, 1fr) auto auto 38px !important; padding-inline: 6px !important; }
+  .twinkle-composer-model { margin-right: 2px !important; }
+  .twinkle-composer-model > button { max-width: 104px; }
+  .twinkle-composer-model > button > span { max-width: 64px; }
+  .twinkle-composer-mic { margin-right: 2px !important; }
+  .model-dropdown { right: 8px !important; width: calc(100vw - 16px) !important; max-width: calc(100vw - 16px) !important; }
+}

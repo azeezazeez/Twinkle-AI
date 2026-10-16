@@ -1,0 +1,4792 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
+import React from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { createPortal, flushSync } from 'react-dom';
+import { User, Session, Message } from '../types';
+import Sidebar from '../components/Sidebar'; 
+import { chatApi, authApi, createLiveToken, startLiveTokenKeepWarm, warmLiveToken } from '../lib/api'; 
+import { motion, AnimatePresence } from 'motion/react'; 
+import StormLogo from '../components/StormLogo';
+import ConfirmationModal from '../components/ConfirmationModal';
+import ShareChatModal from '../components/ShareChatModal';
+import LiveTalkModal from '../components/LiveTalkModal';
+import { getSavedLiveTalkColor } from '../lib/liveTalkColors';
+import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw'; 
+
+import {
+  Copy, Check, Edit2, Pencil, Upload, Volume2, VolumeX, Share2, CheckCircle2, LoaderCircle,
+  X, RotateCcw, ChevronDown, Eye, Zap, Brain, Plus, FileText, Mic, AudioLines,
+} from 'lucide-react';
+
+import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown'; 
+import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import oneDark from 'react-syntax-highlighter/dist/esm/styles/prism/one-dark';
+
+
+
+const decodeGeminiLiveMessage = async (data: unknown): Promise<any> => {
+  if (typeof data === 'string') return JSON.parse(data);
+  if (data instanceof Blob) return JSON.parse(await data.text());
+  if (data instanceof ArrayBuffer) {
+    return JSON.parse(new TextDecoder().decode(new Uint8Array(data)));
+  }
+  if (ArrayBuffer.isView(data)) {
+    const view = data as ArrayBufferView;
+    return JSON.parse(new TextDecoder().decode(new Uint8Array(view.buffer, view.byteOffset, view.byteLength)));
+  }
+  throw new Error('Unsupported Gemini Live message.');
+};
+
+const pcm16ToBase64 = (buffer: ArrayBuffer): string => {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + chunkSize, bytes.length)));
+  }
+  return btoa(binary);
+};
+
+/**
+ * Normalize the LaTeX delimiters commonly emitted by chat models into the
+ * $ / $$ delimiters understood by remark-math. Fenced code blocks are left
+ * untouched so source code containing backslashes is never interpreted as math.
+ */
+const normalizeMathDelimiters = (value: string): string => {
+  const renderExpression = (expression: string): string => {
+    let result = expression.trim();
+
+    const replacements: Array<[RegExp, string]> = [
+      [/\\hbar/g, 'ℏ'], [/\\hslash/g, 'ℏ'], [/\\partial/g, '∂'], [/\\nabla/g, '∇'],
+      [/\\infty/g, '∞'], [/\\alpha/g, 'α'], [/\\beta/g, 'β'], [/\\gamma/g, 'γ'],
+      [/\\Gamma/g, 'Γ'], [/\\delta/g, 'δ'], [/\\Delta/g, 'Δ'], [/\\epsilon/g, 'ε'],
+      [/\\varepsilon/g, 'ϵ'], [/\\zeta/g, 'ζ'], [/\\eta/g, 'η'], [/\\theta/g, 'θ'],
+      [/\\Theta/g, 'Θ'], [/\\iota/g, 'ι'], [/\\kappa/g, 'κ'], [/\\lambda/g, 'λ'],
+      [/\\Lambda/g, 'Λ'], [/\\mu/g, 'μ'], [/\\nu/g, 'ν'], [/\\xi/g, 'ξ'], [/\\Xi/g, 'Ξ'],
+      [/\\pi/g, 'π'], [/\\Pi/g, 'Π'], [/\\rho/g, 'ρ'], [/\\sigma/g, 'σ'], [/\\Sigma/g, 'Σ'],
+      [/\\tau/g, 'τ'], [/\\upsilon/g, 'υ'], [/\\phi/g, 'φ'], [/\\varphi/g, 'ϕ'],
+      [/\\Phi/g, 'Φ'], [/\\chi/g, 'χ'], [/\\psi/g, 'ψ'], [/\\Psi/g, 'Ψ'],
+      [/\\omega/g, 'ω'], [/\\Omega/g, 'Ω'],
+      [/\\pm/g, '±'], [/\\mp/g, '∓'], [/\\times/g, '×'], [/\\cdot/g, '·'],
+      [/\\leq/g, '≤'], [/\\geq/g, '≥'], [/\\neq/g, '≠'], [/\\approx/g, '≈'],
+      [/\\equiv/g, '≡'], [/\\propto/g, '∝'], [/\\sim/g, '∼'], [/\\to/g, '→'],
+      [/\\rightarrow/g, '→'], [/\\leftarrow/g, '←'], [/\\Rightarrow/g, '⇒'],
+      [/\\Leftrightarrow/g, '⇔'], [/\\in/g, '∈'], [/\\notin/g, '∉'], [/\\subset/g, '⊂'],
+      [/\\subseteq/g, '⊆'], [/\\cup/g, '∪'], [/\\cap/g, '∩'], [/\\forall/g, '∀'],
+      [/\\exists/g, '∃'], [/\\nexists/g, '∄'], [/\\emptyset/g, '∅'],
+      [/\\sum/g, 'Σ'], [/\\prod/g, 'Π'], [/\\int/g, '∫'], [/\\oint/g, '∮'],
+      [/\\sqrt\{([^{}]+)\}/g, '√($1)'],
+      [/\\mathbf\{([^{}]+)\}/g, '$1'], [/\\mathrm\{([^{}]+)\}/g, '$1'],
+      [/\\mathbb\{([^{}]+)\}/g, '$1'], [/\\mathcal\{([^{}]+)\}/g, '$1'],
+      [/\\mathsf\{([^{}]+)\}/g, '$1'], [/\\operatorname\{([^{}]+)\}/g, '$1'],
+      [/\\text\{([^{}]+)\}/g, '$1'], [/\\hat\{([^{}]+)\}/g, 'ˆ$1'],
+      [/\\bar\{([^{}]+)\}/g, '¯$1'], [/\\vec\{([^{}]+)\}/g, '⃗$1'],
+      [/\\langle/g, '⟨'], [/\\rangle/g, '⟩'], [/\\ket\{([^{}]+)\}/g, '|$1⟩'],
+      [/\\bra\{([^{}]+)\}/g, '⟨$1|'],
+    ];
+
+    replacements.forEach(([pattern, replacement]) => {
+      result = result.replace(pattern, replacement);
+    });
+
+    // Handle fractions from both delimited and raw model output.
+    for (let i = 0; i < 3; i += 1) {
+      result = result.replace(/\\(?:dfrac|tfrac|frac)\{([^{}]+)\}\{([^{}]+)\}/g, '($1)⁄($2)');
+    }
+
+    // Improve common powers/subscripts instead of leaving TeX braces on screen.
+    const superscripts: Record<string, string> = { '0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','+':'⁺','-':'⁻','=':'⁼','(':'⁽',')':'⁾','n':'ⁿ','i':'ⁱ' };
+    const subscripts: Record<string, string> = { '0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉','+':'₊','-':'₋','=':'₌','(':'₍',')':'₎','n':'ₙ','i':'ᵢ' };
+    const toSup = (v: string) => [...v].map(ch => superscripts[ch] ?? ch).join('');
+    const toSub = (v: string) => [...v].map(ch => subscripts[ch] ?? ch).join('');
+
+    result = result
+      .replace(/\^\{([^{}]+)\}/g, (_, v) => toSup(v))
+      .replace(/_\{([^{}]+)\}/g, (_, v) => toSub(v))
+      .replace(/\^([0-9n+-])/g, (_, v) => toSup(v))
+      .replace(/_([0-9n+-])/g, (_, v) => toSub(v))
+      .replace(/\\left/g, '')
+      .replace(/\\right/g, '')
+      .replace(/\\,/g, ' ')
+      .replace(/\\;/g, ' ')
+      .replace(/\\!/g, '')
+      .replace(/\\quad/g, '  ')
+      .replace(/\\qquad/g, '    ')
+      .replace(/\\\\/g, '\\n')
+      .replace(/\\([{}])/g, '$1')
+      .replace(/[{}]/g, '')
+      .replace(/[ \t]+/g, ' ')
+      .trim();
+
+    return result;
+  };
+
+  // Protect fenced code blocks so source code is never interpreted as math.
+  const parts = value.split(/(```[\s\S]*?```)/g);
+  return parts.map((part, index) => {
+    if (index % 2 === 1) return part;
+
+    // Delimited equations first, then raw TeX commands. The latter matters
+    // because many models emit equations without $...$ delimiters.
+    return part
+      .replace(/\\\[([\s\S]*?)\\\]/g, (_, expression) => renderExpression(expression))
+      .replace(/\\\(([\s\S]*?)\\\)/g, (_, expression) => renderExpression(expression))
+      .replace(/\$\$([\s\S]*?)\$\$/g, (_, expression) => renderExpression(expression))
+      .replace(/\$([^$\n]+)\$/g, (_, expression) => renderExpression(expression))
+      .replace(/\\(?:frac|dfrac|tfrac|sqrt|mathbf|mathrm|mathbb|mathcal|operatorname|text|hat|bar|vec|ket|bra|left|right|partial|nabla|hbar|hslash|infty|alpha|beta|gamma|delta|Delta|lambda|mu|pi|sigma|phi|psi|omega|theta|sum|prod|int|oint|times|cdot|pm|leq|geq|neq|approx|propto|equiv|to|rightarrow|leftarrow|Rightarrow|Leftrightarrow|langle|rangle)\b[^\n]*/g, match => renderExpression(match));
+  }).join('');
+};
+
+const isEquationLikeText = (value: string): boolean => {
+  const text = value.trim();
+  if (!text) return false;
+  const mathSignals = /[=≈≠≤≥→⇒∂∇ℏ∞∫∑ΣΠ√ψΨφΦλμσΩαβγθΔ]/;
+  const operatorSignals = /\b(?:Schrödinger equation|Hamiltonian|eigenvalue|wavefunction|probability density|expectation value|momentum|energy|operator)\b/i;
+  return (mathSignals.test(text) && /[A-Za-z0-9]/.test(text) && text.length <= 420) || (operatorSignals.test(text) && /[=()]/.test(text));
+};
+
+
+const PDFJS_MODULE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs';
+const PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
+
+const PdfPreview = ({
+  src,
+  fileName,
+}: {
+  src: string;
+  fileName: string;
+}) => {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+
+  useEffect(() => {
+    let cancelled = false;
+    let pdfDocument: any = null;
+
+    const renderPdf = async () => {
+      setStatus('loading');
+      try {
+        const pdfjs: any = await import(/* @vite-ignore */ PDFJS_MODULE_URL);
+        if (cancelled) return;
+        pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+
+        const loadingTask = pdfjs.getDocument({
+          url: src,
+          useWorkerFetch: true,
+          isEvalSupported: true,
+          disableAutoFetch: true,
+          disableStream: true,
+        });
+        pdfDocument = await loadingTask.promise;
+        if (cancelled || !hostRef.current) {
+          await pdfDocument?.destroy?.();
+          return;
+        }
+
+        const host = hostRef.current;
+        host.replaceChildren();
+        const isMobile = window.matchMedia('(max-width: 767px)').matches;
+        const pageCount = Math.min(Number(pdfDocument.numPages) || 1, isMobile ? 12 : 30);
+
+        for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+          if (cancelled || !hostRef.current) break;
+          const page = await pdfDocument.getPage(pageNumber);
+          const baseViewport = page.getViewport({ scale: 1 });
+          const availableWidth = Math.max(host.getBoundingClientRect().width - (isMobile ? 12 : 24), 280);
+          // Fit the PDF page to the actual modal content width. The preview host
+          // must remain measurable while loading; hiding it makes clientWidth zero.
+          const scale = Math.max(0.1, availableWidth / baseViewport.width);
+          const viewport = page.getViewport({ scale });
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d', { alpha: false });
+          if (!context) continue;
+
+          const outputScale = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2);
+          canvas.width = Math.ceil(viewport.width * outputScale);
+          canvas.height = Math.ceil(viewport.height * outputScale);
+          canvas.style.width = `${viewport.width}px`;
+          canvas.style.height = `${viewport.height}px`;
+          canvas.className = 'mx-auto mb-4 block h-auto max-w-full rounded-lg bg-white shadow-sm';
+
+          const label = document.createElement('div');
+          label.textContent = `Page ${pageNumber}`;
+          label.className = 'mb-1 text-center text-[10px] font-bold uppercase tracking-wider text-zinc-400';
+          host.appendChild(label);
+          host.appendChild(canvas);
+
+          context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+          await page.render({ canvasContext: context, viewport }).promise;
+        }
+
+        if (!cancelled) setStatus('ready');
+      } catch (error) {
+        console.error('PDF preview rendering failed:', error);
+        if (!cancelled) setStatus('error');
+      }
+    };
+
+    void renderPdf();
+    return () => {
+      cancelled = true;
+      try { void pdfDocument?.destroy?.(); } catch {}
+    };
+  }, [src]);
+
+  return (
+    <div className="relative min-h-full w-full">
+      {status === 'loading' && (
+        <div className="flex min-h-[50vh] items-center justify-center">
+          <div className="rounded-2xl bg-white px-5 py-4 text-center shadow-sm dark:bg-zinc-900">
+            <FileText className="mx-auto mb-2 h-8 w-8 text-zinc-400" />
+            <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">Loading PDF preview…</p>
+          </div>
+        </div>
+      )}
+      {status === 'error' && (
+        <div className="flex min-h-[50vh] items-center justify-center">
+          <div className="max-w-md rounded-2xl bg-white p-6 text-center shadow-sm dark:bg-zinc-900">
+            <FileText className="mx-auto mb-3 h-10 w-10 text-zinc-400" />
+            <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">PDF preview is unavailable</p>
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">The file is still attached and ready for AI analysis.</p>
+          </div>
+        </div>
+      )}
+      <div ref={hostRef} className="block w-full min-w-0" aria-label={`PDF preview for ${fileName}`} />
+    </div>
+  );
+};
+
+interface Props {
+  user: User;
+  onLogout: () => void;
+  onProfile?: () => void;
+  onSettings?: () => void;
+}
+
+const CodeBlock = ({ language, value }: { language: string; value: string }) => {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(value);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <div className="group/code relative my-6 overflow-hidden rounded-xl border border-white/20 dark:border-white/10 shadow-2xl backdrop-blur-xl bg-white/5 dark:bg-black/20 transition-all">
+      <div className="flex items-center justify-between px-4 py-2.5 bg-white/10 dark:bg-black/20 border-b border-white/10">
+        <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-zinc-1000" />
+          {language || 'code'}
+        </span>
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-[10px] font-black text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-600 dark:text-zinc-300 transition-all hover:scale-105 active:scale-95"
+        >
+          {copied ? <Check className="w-3 h-3 text-zinc-500" /> : <Copy className="w-3 h-3" />}
+          <span className="uppercase tracking-widest">{copied ? 'Copied' : 'Copy'}</span>
+        </button>
+      </div>
+      <div className="p-0 bg-[#282c34]">
+        <SyntaxHighlighter
+          style={oneDark}
+          language={language || 'text'}
+          PreTag="div"
+          customStyle={{
+            margin: 0,
+            padding: '1.25rem',
+            fontSize: '0.85rem',
+            background: 'transparent',
+            lineHeight: '1.6',
+          }}
+        >
+          {value}
+        </SyntaxHighlighter>
+      </div>
+    </div>
+  );
+};
+
+const SESSION_KEY = 'scout_current_session_id';
+const persistSessionId = (id: number | null) => {
+  if (id === null) localStorage.removeItem(SESSION_KEY);
+  else localStorage.setItem(SESSION_KEY, String(id));
+};
+const readPersistedSessionId = (): number | null => {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const parsed = parseInt(raw, 10);
+    return isNaN(parsed) ? null : parsed;
+  } catch {
+    return null;
+  }
+};
+
+const getInitialTheme = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const stored = localStorage.getItem('theme');
+  if (stored) return stored === 'dark';
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+};
+
+// Message sanitizers are function declarations so they are available to history/loading callbacks
+// regardless of module evaluation order.
+function normalizeTwinkleIdentity(content: string): string {
+  const normalized = content.trim();
+
+  // Replace the old default identity response with a clearer Twinkle AI
+  // introduction. Keep this narrowly scoped so documents mentioning Twinkle
+  // are not rewritten accidentally.
+  if (
+    /^I['’]m\s+Twinkle\s+AI,\s+a\s+helpful\s+assistant\s+designed\s+to\s+help\s+you\s+with\s+information,\s+analysis,\s+and\s+more\.?$/i.test(normalized)
+  ) {
+    return `Hi! I’m Twinkle AI, a professional AI assistant designed to help you understand information, solve problems, work with files, write and analyze content, develop software, and accomplish tasks efficiently.
+
+I adapt my responses to what you’re actually asking. I aim to provide clear, accurate, practical, and meaningful answers rather than following a rigid response template.
+
+You can ask me questions, give me a file or image to analyze, ask for help with coding or technical problems, request writing or explanations, or simply tell me what you’re trying to accomplish — I’ll help you figure out the best way forward.`;
+  }
+
+  return content;
+}
+
+function cleanMessageContent(content: unknown): string {
+    if (typeof content !== 'string') return '';
+
+    let cleaned = normalizeTwinkleIdentity(content)
+      // NEVER strip Markdown links here. Keeping the original [label](url)
+      // structure lets ReactMarkdown preserve clickability while the
+      // renderer below displays the complete URL as the visible text.
+      //
+      // Contact/project links are normalized onto separate lines so each
+      // link is easy to read in the document-style output.
+      .replace(/^([ \t]*(?:\[[^\]]+\]\((?:https?|mailto|tel):[^)]+\)[ \t]*\|[ \t]*)+\[[^\]]+\]\((?:https?|mailto|tel):[^)]+\)[ \t]*)$/gim, (line) =>
+        line.split(/\s*\|\s*/).join('\n')
+      )
+      .replace(/\s*\|\s*(?=(?:Email|Phone|Github|GitHub|LinkedIn|Portfolio)\s*:)/gi, '\n')
+      // Make document labels use the same heavy weight as **Technologies**.
+      .replace(/(^|\n)(\s*[-*]?\s*)(Github|GitHub|Live Link|Live link|Email|Phone|Technologies)\s*:/gim, '$1$2**$3:**')
+      // Keep project GitHub and Live Link entries on their own lines.
+      .replace(/\s+(\*\*(?:Github|GitHub):\*\*)\s*(https?:\/\/[^\s]+)/g, '\n$1 $2\n')
+      .replace(/\s+(\*\*(?:Live Link|Live link):\*\*)\s*(https?:\/\/[^\s]+)/g, '\n$1 $2')
+      // The resume subtitle should have the same heavy visual weight as
+      // labels such as Email/Technologies.
+      .replace(/^(Java Developer\s*[—-]\s*Java Backend Developer)\s*$/gim, '**$1**')
+      // Remove the internal attachment marker from persisted/live messages.
+      .replace(/\n?\n?\[Attached Files:.*?\]/g, '')
+      .trim();
+
+    // The upload flow can persist the internal "no question/instruction"
+    // formatting prompt as the user's message. It is an implementation
+    // detail and must never be rendered as chat content, including after
+    // the conversation is refreshed and messages are loaded from the API.
+    if (/^The user uploaded document\(s\) but did not provide a question or instruction\./i.test(cleaned)) {
+      return '';
+    }
+
+    // Remove generated helper sections that are not part of the document
+    // itself. This is intentionally done on the client too so old persisted
+    // messages are cleaned when they are loaded after refresh.
+    cleaned = cleaned
+      .replace(/\n?\s*#{1,6}\s*Additional Links\s*(?:\(Repeated in Source\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
+      .replace(/\n?\s*#{1,6}\s*Document Structure\s*(?:\(as extracted\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
+      // Remove only the extracted "Additional Section" and "Links & Contact"
+      // sections. Keep hyperlinks that belong to the actual document content.
+      .replace(/\n?\s*#{1,6}\s*Additional Section\s*(?:\(as in original document\))?\s*\n[\s\S]*?(?=\n\s*#{1,6}\s*Links\s*&\s*Contact\b|$)/gi, '\n')
+      .replace(/\n?\s*#{1,6}\s*Links\s*&\s*Contact\s*\n[\s\S]*$/gi, '\n')
+      .trim();
+
+    // Remove the dedicated Architecture section/bullet requested by the UI
+    // formatting rules, without removing legitimate architecture mentions
+    // inside normal project/experience descriptions.
+    cleaned = cleaned
+      .replace(/\n?\s*#{1,6}\s*Architecture\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
+      .replace(/^\s*[-*]\s*\*\*Architecture:\*\*.*(?:\n|$)/gim, '')
+      // Remove only the generated Document Navigation section.
+      .replace(/\n?\s*#{1,6}\s*Document\s+Navigation\s*\n[\s\S]*?(?=\n\s*#{1,6}\s+|$)/gi, '\n')
+      .trim();
+
+    // Extracted PDF text can contain the same standalone URLs twice (often a
+    // duplicate block at the end). Keep the first occurrence so links near
+    // the top of the document remain intact, and drop later duplicates.
+    const seenStandaloneLinks = new Set<string>();
+    cleaned = cleaned
+      .split('\n')
+      .filter(line => {
+        const value = line.trim();
+        if (!/^(?:https?:\/\/|mailto:|tel:)/i.test(value)) return true;
+
+        const normalized = value.replace(/[)>.,]+$/, '').replace(/\/$/, '').toLowerCase();
+        if (seenStandaloneLinks.has(normalized)) return false;
+        seenStandaloneLinks.add(normalized);
+        return true;
+      })
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+
+    return cleaned;
+  }
+
+
+const dedupeMessages = (items: Message[]): Message[] => {
+  const seenAssistant = new Set<string>();
+  const seenUser = new Set<string>();
+  const result: Message[] = [];
+
+  for (const message of items) {
+    const content = cleanMessageContent(message.content);
+    const normalized = content.replace(/\s+/g, ' ').trim();
+
+    if (message.role === 'assistant' && normalized) {
+      const key = normalized.toLowerCase();
+      if (seenAssistant.has(key)) continue;
+      seenAssistant.add(key);
+    }
+
+    // Do not collapse legitimate repeated user questions. Only assistant
+    // messages are deduplicated because a provider/session race can return
+    // the same generated answer more than once.
+    if (message.role === 'user' && !normalized) {
+      const key = `${message.id}`;
+      if (seenUser.has(key)) continue;
+      seenUser.add(key);
+    }
+
+    result.push(message);
+  }
+
+  return result;
+};
+
+/**
+ * Deterministic, rule-based chat title generator.
+ * No AI model is used for naming conversations.
+ */
+const generateProfessionalChatTitle = (message: string, hasFiles = false): string => {
+  const original = (message || '').trim();
+  if (!original) return hasFiles ? 'File Analysis' : 'New Chat';
+
+  const subject = original
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/\s+/g, ' ')
+    .replace(/^\s*(can|could|would|will)\s+you\s+(please\s+)?/i, '')
+    .replace(/^\s*please\s+/i, '')
+    .replace(/^\s*i\s+(want|need|would like)\s+(to\s+)?/i, '')
+    .replace(/^\s*help\s+me\s+(to\s+)?/i, '')
+    .replace(/^\s*(kindly|let's)\s+/i, '')
+    .trim();
+
+  const actions: Array<[RegExp, string]> = [
+    [/\b(simplify|make\s+(it|this|that)\s+(simple|simpler|easier)|make\s+.*\b(simple|simpler|easier)\b)\b/i, 'Simplify'],
+    [/\b(debug|fix|solve|resolve|repair)\b/i, 'Fix'],
+    [/\b(design|redesign|layout|style|stylize)\b/i, 'Design'],
+    [/\b(create|make|build|develop|generate|produce|prepare)\b/i, 'Create'],
+    [/\b(explain|describe|clarify|what\s+is|how\s+does|how\s+do)\b/i, 'Explain'],
+    [/\b(write|draft|compose)\b/i, 'Write'],
+    [/\b(convert|transform|turn)\b/i, 'Convert'],
+    [/\b(summarize|summarise|summary)\b/i, 'Summarize'],
+    [/\b(analyze|analyse|review|evaluate)\b/i, 'Analyze'],
+    [/\b(compare|comparison|difference|differences)\b/i, 'Compare'],
+    [/\b(remove|delete|erase)\b/i, 'Remove'],
+    [/\b(add|insert)\b/i, 'Add'],
+  ];
+
+  const artifacts: Array<[RegExp, string]> = [
+    [/\b(16\s*:\s*9|widescreen)\b/i, '16:9'],
+    [/\b(ppt|pptx|powerpoint)\b/i, 'PPT Presentation'],
+    [/\b(presentation|presentations|slides|slide\s+deck)\b/i, 'Presentation'],
+    [/\b(handwritten|hand\s*written).*\bposter\b|\bposter\b.*\b(handwritten|hand\s*written)\b/i, 'Handwritten Poster'],
+    [/\bposter\b/i, 'Poster'],
+    [/\bdrone\b.*\bchart\b|\bchart\b.*\bdrone\b/i, 'Drone Chart'],
+    [/\bchart\b|\bgraph\b|\bdiagram\b/i, 'Chart'],
+    [/\b(login|sign[- ]?in)\s+(page|screen|form)\b/i, 'Login Page'],
+    [/\b(image|picture|photo|illustration|visual)\b/i, 'Image'],
+    [/\bpdf\b/i, 'PDF'],
+    [/\b(code|program|script|function)\b/i, 'Code'],
+    [/\breact\b/i, 'React'],
+    [/\b(javascript|typescript)\b/i, 'JavaScript'],
+    [/\bjava\b/i, 'Java'],
+    [/\bpython\b/i, 'Python'],
+    [/\b(sql|database|db)\b/i, 'Database'],
+    [/\bapi\b/i, 'API'],
+  ];
+
+  const topics: Array<[RegExp, string]> = [
+    [/\btwinkle\s+(ai\s+)?project\b/i, 'Twinkle'],
+    [/\btwinkle\b/i, 'Twinkle'],
+    [/\bai\s+project\b/i, 'AI Project'],
+    [/\bmachine\s+learning\b/i, 'Machine Learning'],
+    [/\bartificial\s+intelligence\b/i, 'Artificial Intelligence'],
+    [/\bchatbot\b/i, 'Chatbot'],
+    [/\bauthentication\b/i, 'Authentication'],
+    [/\bportfolio\b/i, 'Portfolio'],
+    [/\bwebsite\b/i, 'Website'],
+    [/\bapp(?:lication)?\b/i, 'Application'],
+  ];
+
+  const findRule = (rules: Array<[RegExp, string]>) => {
+    for (const [pattern, value] of rules) {
+      if (pattern.test(subject)) return value;
+    }
+    return '';
+  };
+
+  const action = findRule(actions);
+  const artifact = findRule(artifacts);
+  const topic = findRule(topics);
+
+  if (artifact === '16:9') return /\bppt|powerpoint|presentation|slides?\b/i.test(subject) ? 'Set Presentation 16:9' : 'Set 16:9 Format';
+  if (topic === 'Twinkle' && artifact === 'Drone Chart') return 'Twinkle Drone Chart';
+  if (topic === 'Twinkle' && artifact === 'Chart') return 'Twinkle Chart Design';
+  if (topic === 'Twinkle' && artifact === 'Handwritten Poster') return action === 'Simplify' ? 'Simplify Twinkle Poster' : 'Twinkle Handwritten Poster';
+  if (topic === 'AI Project' && artifact === 'PPT Presentation') return 'Create AI Project Presentation';
+  if (action === 'Simplify' && artifact === 'Handwritten Poster') return 'Simplify Handwritten Poster';
+
+  if (action && topic && artifact) {
+    if (artifact === 'PPT Presentation' || artifact === 'Presentation') return `${action} ${topic} Presentation`;
+    if (artifact === 'Chart') return `${topic} Chart Design`;
+    return `${action} ${topic} ${artifact}`;
+  }
+  if (action && artifact) return `${action} ${artifact}`;
+  if (action && topic) return `${action} ${topic}`;
+  if (topic && artifact) return `${topic} ${artifact}`;
+  if (artifact) return `${action || 'View'} ${artifact}`;
+
+  const stopWords = new Set(['can','could','would','please','help','me','i','want','need','to','a','an','the','my','this','that','for','with','and','is','are','be','it','of','on','in','from','you','give']);
+  const words = subject.replace(/[^\p{L}\p{N}:#/+.-]+/gu, ' ').split(/\s+/).filter(word => word && !stopWords.has(word.toLowerCase()));
+  const fallback = words.slice(0, action ? 5 : 6).map(word => /^[A-Z0-9]+$/.test(word) ? word : word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+  if (!fallback) return hasFiles ? 'File Analysis' : 'New Chat';
+  return action ? `${action} ${fallback}`.split(/\s+/).slice(0, 6).join(' ') : fallback.split(/\s+/).slice(0, 6).join(' ');
+};
+
+const formatFileSize = (bytes: number): string => {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / 1048576).toFixed(1)}MB`;
+};
+
+const MAX_IMAGES_PER_MESSAGE = 3;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_TOTAL_IMAGE_BYTES = 15 * 1024 * 1024;
+const MAX_IMAGE_DIMENSION = 2048;
+
+const compressImage = async (file: File): Promise<File> => {
+  if (!file.type.startsWith('image/') || file.type === 'image/gif' || file.size <= MAX_IMAGE_BYTES) {
+    return file;
+  }
+
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+
+    image.onload = () => {
+      try {
+        const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(image.width, image.height));
+        const width = Math.max(1, Math.round(image.width * scale));
+        const height = Math.max(1, Math.round(image.height * scale));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('Could not prepare the image for upload.');
+
+        context.drawImage(image, 0, 0, width, height);
+
+        canvas.toBlob(
+          blob => {
+            URL.revokeObjectURL(objectUrl);
+            if (!blob) {
+              reject(new Error(`Could not compress ${file.name}.`));
+              return;
+            }
+
+            const baseName = file.name.replace(/\.[^.]+$/, '');
+            resolve(new File([blob], `${baseName}.jpg`, {
+              type: 'image/jpeg',
+              lastModified: file.lastModified,
+            }));
+          },
+          'image/jpeg',
+          0.82
+        );
+      } catch (error) {
+        URL.revokeObjectURL(objectUrl);
+        reject(error);
+      }
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error(`Could not read ${file.name} as an image.`));
+    };
+
+    image.src = objectUrl;
+  });
+};
+
+const fileToDataUrl = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      if (!result) {
+        reject(new Error(`Failed to read ${file.name}`));
+        return;
+      }
+      // Keep the exact browser-generated data URL. Do not add filename
+      // parameters: PDF/image viewers can reject non-standard data URLs.
+      resolve(result);
+    };
+    reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+
+const attachmentNameStorageKey = 'Twinkle-ai-attachment-names';
+
+const getAttachmentStorageId = (value: string): string => {
+  // Small deterministic hash so localStorage keys never contain the entire
+  // (potentially huge) base64 data URL.
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+};
+
+const getStoredAttachmentName = (dataUrl: string): string | null => {
+  if (!dataUrl) return null;
+  try {
+    const raw = localStorage.getItem(attachmentNameStorageKey);
+    if (!raw) return null;
+    const map = JSON.parse(raw);
+    const value = map?.[getAttachmentStorageId(dataUrl)];
+    return typeof value === 'string' && value.trim() ? value : null;
+  } catch {
+    return null;
+  }
+};
+
+const rememberAttachmentNames = (files: File[], dataUrls: string[]) => {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = localStorage.getItem(attachmentNameStorageKey);
+    const map = raw ? JSON.parse(raw) : {};
+    files.forEach((file, index) => {
+      const dataUrl = dataUrls[index];
+      if (dataUrl) {
+        map[getAttachmentStorageId(dataUrl)] = file.name;
+      }
+    });
+
+    // Prevent the small metadata store from growing forever.
+    const entries = Object.entries(map);
+    const limited = Object.fromEntries(entries.slice(-100));
+    localStorage.setItem(attachmentNameStorageKey, JSON.stringify(limited));
+  } catch {
+    // Filename persistence is best-effort and must never block sending.
+  }
+};
+
+const getAttachmentNameFromDataUrl = (
+  dataUrl: string,
+  index: number
+): string => {
+  // Read legacy filename parameters only for backwards compatibility.
+  const nameMatch = dataUrl.match(/(?:^|;)name=([^;,]+)/i);
+
+  if (nameMatch?.[1]) {
+    try {
+      return decodeURIComponent(nameMatch[1]);
+    } catch {
+      return nameMatch[1];
+    }
+  }
+
+  const mimeMatch = dataUrl.match(/^data:([^;,]+)/i);
+  const mime = mimeMatch?.[1]?.toLowerCase() || '';
+  const extensionMap: Record<string, string> = {
+    'application/pdf': 'pdf',
+    'application/msword': 'doc',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'application/vnd.ms-excel': 'xls',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+    'application/vnd.ms-powerpoint': 'ppt',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+    'text/plain': 'txt',
+    'text/csv': 'csv',
+    'application/json': 'json',
+    'application/xml': 'xml',
+    'text/xml': 'xml',
+    'text/markdown': 'md',
+  };
+
+  const extension =
+    extensionMap[mime] ||
+    mime.split('/')[1]?.split('+')[0] ||
+    'bin';
+
+  return getStoredAttachmentName(dataUrl) || `attachment-${index + 1}.${extension}`;
+};
+
+// Rebuild any persisted data URL as a File. This is used for
+// previewing and retrying attachments after the chat has been reloaded.
+const isValidAttachmentDataUrl = (dataUrl: unknown): dataUrl is string => {
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) return false;
+  return /^data:[^;,]+(?:;[^,]*)?;base64,[A-Za-z0-9+/=\s]+$/i.test(dataUrl);
+};
+
+const dataUrlToFile = async (
+  dataUrl: string,
+  index: number,
+  fallbackName?: string
+): Promise<File> => {
+  if (!isValidAttachmentDataUrl(dataUrl)) {
+    throw new Error('The saved attachment is invalid.');
+  }
+
+  const match = dataUrl.match(/^data:([^;,]+)(?:;[^,]*)?;base64,(.+)$/);
+  if (!match) {
+    throw new Error('The saved attachment is invalid.');
+  }
+
+  const mimeType = match[1] || 'application/octet-stream';
+  const base64 = match[2];
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+
+  const extensionMap: Record<string, string> = {
+    'application/pdf': 'pdf',
+    'application/msword': 'doc',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'application/vnd.ms-excel': 'xls',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+    'application/vnd.ms-powerpoint': 'ppt',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+    'text/plain': 'txt',
+    'text/csv': 'csv',
+    'application/json': 'json',
+    'application/xml': 'xml',
+    'text/xml': 'xml',
+    'text/markdown': 'md',
+  };
+
+  const extension =
+    extensionMap[mimeType] ||
+    mimeType.split('/')[1]?.split('+')[0] ||
+    'bin';
+
+  const safeName =
+    fallbackName?.trim() ||
+    getAttachmentNameFromDataUrl(dataUrl, index) ||
+    `attachment-${index + 1}.${extension}`;
+
+  return new File([bytes], safeName, {
+    type: mimeType,
+    lastModified: Date.now(),
+  });
+};
+
+interface ModelOption {
+  id: string;
+  name: string;
+  description: string;
+  icon: React.ElementType;
+  vision?: boolean;
+  documents?: boolean;
+}
+
+const MODEL_OPTIONS: ModelOption[] = [
+  { id: 'openai/gpt-oss-20b', name: 'Twinkle', description: 'Fast everyday conversations', icon: Zap },
+  { id: 'openai/gpt-oss-120b', name: 'Twinkle Pro', description: 'Advanced reasoning and coding', icon: Brain },
+  { id: 'gemini-3.8-flash', name: 'Twinkle Vision', description: 'Advanced image & file understanding', icon: Eye, vision: true, documents: true },
+];
+
+const MODEL_STORAGE_KEY = 'Twinkle_selected_model';
+
+const playModelSwitchSound = () => {
+  try {
+    const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextCtor) return;
+    const context = new AudioContextCtor();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(520, context.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(760, context.currentTime + 0.08);
+    gain.gain.setValueAtTime(0.0001, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.035, context.currentTime + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.11);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.12);
+    oscillator.onended = () => void context.close();
+  } catch {
+    // UI feedback sound is optional.
+  }
+};
+
+
+const EMPTY_CHAT_PROMPTS = [
+  "What's on your mind today?",
+  "What would you like to explore?",
+  "What can I help you with today?",
+  "What are you working on?",
+  "What would you like to create today?",
+  "What should we figure out together?",
+];
+
+const getNextEmptyChatPrompt = (current: string): string => {
+  if (EMPTY_CHAT_PROMPTS.length <= 1) return EMPTY_CHAT_PROMPTS[0];
+  const available = EMPTY_CHAT_PROMPTS.filter(prompt => prompt !== current);
+  return available[Math.floor(Math.random() * available.length)];
+};
+
+const EMPTY_CHAT_GREETINGS = [
+  'Good to see you, {name}',
+  'Welcome back.',
+  'Nice to see you.',
+  'Great to have you here.',
+  'Hello there.',
+  'Hey, {name}. Ready to dive in?',
+  'Good to have you here.',
+  'What would you like to explore?',
+  'What can we work on today?',
+  'Ready when you are.',
+  'Let’s make something great today.',
+  'What’s on your mind?',
+  'What shall we work on?',
+  'Where should we start?',
+  'Let’s get started.',
+  'What can I help you with?',
+  'Have something in mind?',
+  'What are we building today?',
+  'What would you like to accomplish?',
+  'Let’s figure it out together.',
+];
+
+const TIME_BASED_CHAT_GREETINGS = {
+  morning: [
+    'Good morning, {name}',
+    'Good morning.',
+    'A fresh morning, a fresh start.',
+    'Good morning. What shall we work on?',
+    'Hope your morning is going well.',
+    'Ready to make the most of your morning?',
+  ],
+  afternoon: [
+    'Good afternoon, {name}',
+    'Good afternoon.',
+    'Good afternoon. What can we work on?',
+    'Hope your afternoon is going well.',
+    'Ready for a productive afternoon?',
+    'What would you like to explore this afternoon?',
+  ],
+  evening: [
+    'Good evening, {name}',
+    'Good evening.',
+    'Good evening. What shall we work on?',
+    'Hope your evening is going well.',
+    'Ready to get something done this evening?',
+    'What would you like to explore this evening?',
+  ],
+};
+
+const getTimeOfDay = (): 'morning' | 'afternoon' | 'evening' => {
+  const hour = new Date().getHours();
+
+  if (hour < 12) return 'morning';
+  if (hour < 18) return 'afternoon';
+  return 'evening';
+};
+
+const getRandomChatGreeting = (userName = '', previousGreeting = ''): string => {
+  const name = userName.trim().split(/\s+/)[0];
+  const timeGreetings = TIME_BASED_CHAT_GREETINGS[getTimeOfDay()];
+  const namedGreetings = name
+    ? [`Good to see you, ${name}.`, `Hey ${name}, ready to dive in?`, `Welcome back, ${name}.`]
+    : [];
+  const choices = [...new Set([
+    ...namedGreetings,
+    ...timeGreetings,
+    ...EMPTY_CHAT_GREETINGS.filter(greeting => !greeting.includes('{name}')),
+    ...EMPTY_CHAT_PROMPTS,
+  ])].filter(greeting => greeting !== previousGreeting);
+  const available = choices.length ? choices : [...timeGreetings, ...EMPTY_CHAT_PROMPTS];
+  return available[Math.floor(Math.random() * available.length)];
+};
+
+const LongTailArrowDown = ({ className = '' }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 3V20" />
+    <path d="M5 13l7 7 7-7" />
+  </svg>
+);
+
+
+
+
+
+
+const VOICE_PCM_WORKLET_SOURCE = `
+class TwinkleVoiceCaptureProcessor extends AudioWorkletProcessor {
+  process(inputs) {
+    const input = inputs[0] && inputs[0][0];
+    if (!input || input.length === 0) return true;
+
+    const ratio = sampleRate / 16000;
+    const outputLength = Math.max(1, Math.floor(input.length / ratio));
+    const buffer = new ArrayBuffer(outputLength * 2);
+    const view = new DataView(buffer);
+
+    for (let i = 0; i < outputLength; i += 1) {
+      const sourceIndex = Math.min(input.length - 1, Math.floor(i * ratio));
+      const sample = Math.max(-1, Math.min(1, input[sourceIndex]));
+      view.setInt16(i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+    }
+
+    this.port.postMessage(buffer, [buffer]);
+    return true;
+  }
+}
+
+registerProcessor('twinkle-voice-capture', TwinkleVoiceCaptureProcessor);
+`;
+
+const downsamplePcm16k = (input: Float32Array, sampleRate: number): Int16Array => {
+  if (sampleRate === 16000) {
+    const output = new Int16Array(input.length);
+    for (let i = 0; i < input.length; i += 1) {
+      const sample = Math.max(-1, Math.min(1, input[i]));
+      output[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+    }
+    return output;
+  }
+
+  const ratio = sampleRate / 16000;
+  const length = Math.max(1, Math.round(input.length / ratio));
+  const output = new Int16Array(length);
+  let outputIndex = 0;
+  let inputIndex = 0;
+
+  while (outputIndex < length) {
+    const nextInputIndex = Math.min(input.length, Math.round((outputIndex + 1) * ratio));
+    let sum = 0;
+    let count = 0;
+    for (let i = inputIndex; i < nextInputIndex; i += 1) {
+      sum += input[i];
+      count += 1;
+    }
+    const sample = Math.max(-1, Math.min(1, count ? sum / count : input[Math.min(inputIndex, input.length - 1)] || 0));
+    output[outputIndex] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+    outputIndex += 1;
+    inputIndex = nextInputIndex;
+  }
+
+  return output;
+};
+
+const int16ToBase64 = (pcm: Int16Array): string => {
+  const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + chunkSize, bytes.length)));
+  }
+  return btoa(binary);
+};
+
+const getSpeechLanguage = (): string => {
+  try {
+    const code = localStorage.getItem('twinkle_app_language') || 'auto';
+    const map: Record<string, string> = {
+      en: 'English', hi: 'Hindi', te: 'Telugu', ta: 'Tamil', kn: 'Kannada',
+      ml: 'Malayalam', bn: 'Bengali', mr: 'Marathi', gu: 'Gujarati', pa: 'Punjabi',
+      ur: 'Urdu', ar: 'Arabic', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian',
+      pt: 'Portuguese', ru: 'Russian', ja: 'Japanese', ko: 'Korean', zh: 'Chinese',
+      tr: 'Turkish', vi: 'Vietnamese', id: 'Indonesian', th: 'Thai', fil: 'Filipino',
+    };
+    return code === 'auto' ? 'the language spoken by the user' : (map[code] || code);
+  } catch {
+    return 'the language spoken by the user';
+  }
+};
+
+export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
+  const navigate = useNavigate();
+  const { chatUuid } = useParams<{ chatUuid?: string }>();
+  const creatingNewSessionRef = useRef(false);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [typingSessionTitle, setTypingSessionTitle] = useState<{ id: number; title: string } | null>(null);
+  const [currentSessionId, setCurrentSessionId] = useState<number | null>(() => readPersistedSessionId());
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+
+  // Shared prompt links use an opaque, unique share ID and keep the prompt out of
+  // the readable query string. This is URL-safe encoding, not encryption.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const encodedPrompt = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('p');
+    if (params.has('share') && encodedPrompt) {
+      try {
+        const normalized = encodedPrompt.replace(/-/g, '+').replace(/_/g, '/');
+        const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+        const bytes = Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
+        const sharedPrompt = new TextDecoder().decode(bytes);
+        setInput(sharedPrompt);
+        window.history.replaceState({}, document.title, window.location.pathname);
+        requestAnimationFrame(() => inputRef.current?.focus());
+      } catch (error) {
+        console.error('Could not decode shared prompt link:', error);
+      }
+    }
+  }, []);
+  const [isTyping, setIsTyping] = useState(false);
+  const [responsePhase, setResponsePhase] = useState<'idle' | 'connecting' | 'thinking' | 'streaming'>('idle');
+  const [responseDataWeight, setResponseDataWeight] = useState<'light' | 'moderate' | 'heavy'>('light');
+  const [longPromptPending, setLongPromptPending] = useState(false);
+  const [showLongThinking, setShowLongThinking] = useState(false);
+  useEffect(() => {
+    if (!isTyping || responsePhase === 'idle' || responsePhase === 'streaming' || !longPromptPending) {
+      setShowLongThinking(false);
+      return;
+    }
+    setShowLongThinking(false);
+    const timeout = window.setTimeout(() => setShowLongThinking(true), 1800);
+    return () => window.clearTimeout(timeout);
+  }, [isTyping, responsePhase, longPromptPending]);
+  const [isDeletingChat, setIsDeletingChat] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [justFinished, setJustFinished] = useState(false);
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [copiedId, setCopiedId] = useState<number | string | null>(null);
+  const [speakingMessageId, setSpeakingMessageId] = useState<number | string | null>(null);
+
+  // Keep a Live token ready in the background so Read Aloud, the Mic and Live
+  // Talk start instantly instead of waiting for a token round trip each time.
+  useEffect(() => startLiveTokenKeepWarm(), []);
+  const speechSocketRef = useRef<WebSocket | null>(null);
+  const speechAudioContextRef = useRef<AudioContext | null>(null);
+  const speechNextStartRef = useRef(0);
+  const speechRequestRef = useRef(0);
+
+  const stopReadAloud = useCallback(() => {
+    speechRequestRef.current += 1;
+    try { speechSocketRef.current?.close(1000, 'Read aloud stopped'); } catch {}
+    speechSocketRef.current = null;
+    if (speechAudioContextRef.current) {
+      try { void speechAudioContextRef.current.close(); } catch {}
+    }
+    speechAudioContextRef.current = null;
+    speechNextStartRef.current = 0;
+    setSpeakingMessageId(null);
+  }, []);
+
+  // Read aloud uses Gemini Live audio output (not browser SpeechSynthesis).
+  // The temporary token is requested from the existing server-side token route.
+  const handleReadAloud = useCallback(async (message: Message) => {
+    if (speakingMessageId === message.id) {
+      stopReadAloud();
+      return;
+    }
+    stopReadAloud();
+    const requestId = ++speechRequestRef.current;
+    const textToRead = cleanMessageContent(message.content).trim();
+    if (!textToRead) return;
+
+    try {
+      // Prepare the audio pipeline while the Live token is being issued, so
+      // browser audio initialization overlaps network latency just like Live Talk.
+      const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextCtor) throw new Error('Web Audio is not supported in this browser.');
+      const audioContext: AudioContext = new AudioContextCtor();
+      speechAudioContextRef.current = audioContext;
+      if (audioContext.state === 'suspended') await audioContext.resume();
+      speechNextStartRef.current = audioContext.currentTime;
+
+      const { token, model } = await createLiveToken('Charon', getSpeechLanguage());
+      if (requestId !== speechRequestRef.current) return;
+
+      const socket = new WebSocket(
+        `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}`
+      );
+      speechSocketRef.current = socket;
+      setSpeakingMessageId(message.id);
+
+      socket.onopen = () => {
+        if (requestId !== speechRequestRef.current) { socket.close(); return; }
+        // Gemini Live requires setupComplete before clientContent is sent.
+        // Sending both frames immediately can race setup and leave Read Aloud silent.
+        socket.send(JSON.stringify({
+          setup: {
+            model: `models/${model || 'gemini-3.8-live'}`,
+            generationConfig: {
+              responseModalities: ['AUDIO'],
+              speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Charon' } } },
+            },
+            systemInstruction: { parts: [{ text: `Read the supplied text aloud exactly as written in ${getSpeechLanguage()}. Do not answer, summarize, or add any words.` }] },
+          },
+        }));
+      };
+
+      socket.onmessage = async event => {
+        if (requestId !== speechRequestRef.current) return;
+        try {
+          const payload = await decodeGeminiLiveMessage(event.data);
+          if (payload?.error) throw new Error(payload.error.message || 'Gemini audio generation failed.');
+          if (payload?.setupComplete || payload?.setup_complete) {
+            socket.send(JSON.stringify({
+              clientContent: { turns: [{ role: 'user', parts: [{ text: `Read this text aloud exactly as written. Do not add commentary:
+
+${textToRead}` }] }], turnComplete: true },
+            }));
+            return;
+          }
+          const parts = payload?.serverContent?.modelTurn?.parts || payload?.server_content?.model_turn?.parts || [];
+          for (const part of parts) {
+            const inline = part?.inlineData || part?.inline_data;
+            const data = inline?.data;
+            if (!data) continue;
+            const binary = atob(data);
+            const pcm = new Int16Array(Math.floor(binary.length / 2));
+            for (let i = 0; i < pcm.length; i++) pcm[i] = (binary.charCodeAt(i * 2) | (binary.charCodeAt(i * 2 + 1) << 8)) << 16 >> 16;
+            if (!pcm.length) continue;
+            const context = speechAudioContextRef.current;
+            if (!context) return;
+            const buffer = context.createBuffer(1, pcm.length, 24000);
+            const channel = buffer.getChannelData(0);
+            for (let i = 0; i < pcm.length; i++) channel[i] = pcm[i] / 32768;
+            const source = context.createBufferSource();
+            source.buffer = buffer;
+            source.connect(context.destination);
+            const startAt = Math.max(context.currentTime + 0.008, speechNextStartRef.current);
+            source.start(startAt);
+            speechNextStartRef.current = startAt + buffer.duration;
+          }
+          if (payload?.serverContent?.turnComplete || payload?.server_content?.turn_complete) {
+            window.setTimeout(() => {
+              if (requestId === speechRequestRef.current) stopReadAloud();
+            }, Math.max(0, (speechNextStartRef.current - (speechAudioContextRef.current?.currentTime || 0)) * 1000));
+          }
+        } catch (error) {
+          console.error('Gemini read aloud failed:', error);
+          if (requestId === speechRequestRef.current) {
+            stopReadAloud();
+            window.alert(error instanceof Error ? error.message : 'Read aloud could not generate audio. Please try again.');
+          }
+        }
+      };
+      socket.onerror = () => {
+        if (requestId === speechRequestRef.current) {
+          console.error('Gemini Live audio connection failed.');
+          stopReadAloud();
+          window.alert('Gemini read aloud could not connect. Please try again.');
+        }
+      };
+      socket.onclose = () => {
+        if (requestId === speechRequestRef.current && speechSocketRef.current === socket) {
+          speechSocketRef.current = null;
+        }
+      };
+    } catch (error) {
+      console.error('Gemini read aloud failed:', error);
+      if (requestId === speechRequestRef.current) {
+        stopReadAloud();
+        window.alert(error instanceof Error ? error.message : 'Gemini read aloud failed.');
+      }
+    }
+  }, [speakingMessageId, stopReadAloud]);
+
+  useEffect(() => () => {
+    try { speechSocketRef.current?.close(); } catch {}
+    if (speechAudioContextRef.current) void speechAudioContextRef.current.close().catch(() => undefined);
+  }, []);
+  const [editingMessage, setEditingMessage] = useState<{ id: string | number; content: string } | null>(null);
+  const [editInput, setEditInput] = useState('');
+  const [modalType, setModalType] = useState<'none' | 'delete-all' | 'delete-single'>('none');
+  const [sessionIdToDelete, setSessionIdToDelete] = useState<number | null>(null);
+  const [messageAttachments, setMessageAttachments] = useState<Record<string | number, string[]>>({});
+  const [shareSessionId, setShareSessionId] = useState<number | null>(null);
+  const [shareCutoffMessageId, setShareCutoffMessageId] = useState<number | string | null>(null);
+  const [sharePromptText, setSharePromptText] = useState('');
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareSuccessVisible, setShareSuccessVisible] = useState(false);
+
+  // Auto-dismiss the "Public link copied" notification after 5 seconds.
+  useEffect(() => {
+    if (!shareSuccessVisible) return;
+    const timer = window.setTimeout(() => setShareSuccessVisible(false), 5000);
+    return () => window.clearTimeout(timer);
+  }, [shareSuccessVisible]);
+  const [topShareBusy, setTopShareBusy] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [desktopSidebarExpanded, setDesktopSidebarExpanded] = useState(false);
+  const [desktopSidebarWidth, setDesktopSidebarWidth] = useState<number>(() => {
+    try {
+      const stored = Number(localStorage.getItem('Twinkle_sidebar_width'));
+      return Number.isFinite(stored) ? Math.min(440, Math.max(280, stored)) : 360;
+    } catch {
+      return 360;
+    }
+  });
+  const [liveTalkOpen, setLiveTalkOpen] = useState(false);
+  const [liveTalkColor, setLiveTalkColor] = useState(() => getSavedLiveTalkColor());
+  const [isProcessingFiles, setIsProcessingFiles] = useState(false);
+  const [voiceInputActive, setVoiceInputActive] = useState(false);
+  const [voiceCaptureStopped, setVoiceCaptureStopped] = useState(false);
+
+  const [typedSessionTitle, setTypedSessionTitle] = useState('');
+
+  useEffect(() => {
+    const handleLiveTalkColorChange = () => {
+      setLiveTalkColor(getSavedLiveTalkColor());
+    };
+
+    window.addEventListener('twinkle-live-talk-color-change', handleLiveTalkColorChange);
+    window.addEventListener('storage', handleLiveTalkColorChange);
+
+    return () => {
+      window.removeEventListener('twinkle-live-talk-color-change', handleLiveTalkColorChange);
+      window.removeEventListener('storage', handleLiveTalkColorChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!typingSessionTitle) {
+      setTypedSessionTitle('');
+      return;
+    }
+    setTypedSessionTitle('');
+    let index = 0;
+    const { title } = typingSessionTitle;
+    const interval = window.setInterval(() => {
+      index += 1;
+      setTypedSessionTitle(title.slice(0, index));
+      if (index >= title.length) {
+        window.clearInterval(interval);
+        setTypingSessionTitle(null);
+      }
+    }, 45);
+    return () => window.clearInterval(interval);
+  }, [typingSessionTitle]);
+
+  const sidebarSessions = sessions.map(session =>
+    typingSessionTitle?.id === session.id
+      ? { ...session, sessionName: typedSessionTitle }
+      : session
+  );
+  const sessionToDelete = sessions.find(session => session.id === sessionIdToDelete);
+  const deleteDataWeight = (() => {
+    const targetMessages = sessionIdToDelete === currentSessionId ? messages : [];
+    const textWeight = targetMessages.reduce((total, item) => total + (item.content?.length || 0), 0);
+    const attachmentWeight = targetMessages.reduce((total, item) => total + (messageAttachments[item.id]?.length || 0), 0);
+    const units = textWeight + targetMessages.length * 500 + attachmentWeight * 5000;
+    return units > 120000 || (modalType === 'delete-all' && sessions.length > 100) ? 'large' : units > 18000 || (modalType === 'delete-all' && sessions.length > 20) ? 'medium' : 'small';
+  })();
+  // Keep the chat interface clean on login; the sidebar opens only when requested.
+
+  // =============================================================
+  // CHAT-STYLE VOICE DICTATION
+  //
+  // This is intentionally separate from Live Talk. Dictation uses the
+  // browser's native SpeechRecognition engine so the microphone is opened
+  // only once and words can appear in the composer immediately.
+  // Live Talk keeps its own Gemini Live microphone/session implementation.
+  // =============================================================
+  const voiceBaseInputRef = useRef('');
+  const voiceDraftRef = useRef('');
+  const voiceFinalTranscriptRef = useRef('');
+  const voiceInterimTranscriptRef = useRef('');
+  const voiceStartRef = useRef(0);
+  const voiceBrowserRecognitionRef = useRef<any>(null);
+  const voiceBrowserRecognitionActiveRef = useRef(false);
+  const voiceBrowserStopRequestedRef = useRef(false);
+  const voiceStartInProgressRef = useRef(false);
+  const voiceDictationWantedRef = useRef(false);
+  const voiceCommitInProgressRef = useRef(false);
+  const voiceSpeechTimerRef = useRef<number | null>(null);
+  // Fallback for browsers (notably Brave) where native SpeechRecognition
+  // starts but returns the Google speech service `network` error. This uses
+  // the same Gemini Live input-transcription path as Live Talk, without
+  // changing the normal Mic flow when browser recognition works.
+  const voiceGeminiSocketRef = useRef<WebSocket | null>(null);
+  const voiceGeminiStreamRef = useRef<MediaStream | null>(null);
+  const voiceGeminiAudioContextRef = useRef<AudioContext | null>(null);
+  const voiceGeminiSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const voiceGeminiProcessorRef = useRef<AudioWorkletNode | ScriptProcessorNode | null>(null);
+  const voiceGeminiSilentGainRef = useRef<GainNode | null>(null);
+  const voiceGeminiWorkletReadyRef = useRef<Promise<void> | null>(null);
+  const voiceGeminiFallbackActiveRef = useRef(false);
+  const voiceGeminiPendingPcmRef = useRef<string[]>([]);
+  const [voiceDraftVersion, setVoiceDraftVersion] = useState(0);
+  const [voiceLiveTranscript, setVoiceLiveTranscript] = useState('');
+  const [voiceSpeechDetected, setVoiceSpeechDetected] = useState(false);
+
+  const getSpeechRecognitionLanguage = useCallback((): string => {
+    try {
+      const code = localStorage.getItem('twinkle_app_language') || 'auto';
+      const map: Record<string, string> = {
+        en: 'en-US', hi: 'hi-IN', te: 'te-IN', ta: 'ta-IN', kn: 'kn-IN',
+        ml: 'ml-IN', bn: 'bn-IN', mr: 'mr-IN', gu: 'gu-IN', pa: 'pa-IN',
+        ur: 'ur-PK', ar: 'ar-SA', es: 'es-ES', fr: 'fr-FR', de: 'de-DE',
+        it: 'it-IT', pt: 'pt-PT', ru: 'ru-RU', ja: 'ja-JP', ko: 'ko-KR',
+        zh: 'zh-CN', tr: 'tr-TR', vi: 'vi-VN', id: 'id-ID', th: 'th-TH',
+        fil: 'fil-PH',
+      };
+      return code === 'auto' ? (navigator.language || 'en-US') : (map[code] || code);
+    } catch {
+      return navigator.language || 'en-US';
+    }
+  }, []);
+
+  const stopGeminiDictationFallback = useCallback(() => {
+    voiceGeminiFallbackActiveRef.current = false;
+    voiceGeminiPendingPcmRef.current = [];
+
+    try { voiceGeminiProcessorRef.current?.disconnect(); } catch {}
+    try { voiceGeminiSourceRef.current?.disconnect(); } catch {}
+    try { voiceGeminiSilentGainRef.current?.disconnect(); } catch {}
+    voiceGeminiProcessorRef.current = null;
+    voiceGeminiSourceRef.current = null;
+    voiceGeminiSilentGainRef.current = null;
+
+    voiceGeminiStreamRef.current?.getTracks().forEach(track => track.stop());
+    voiceGeminiStreamRef.current = null;
+
+    try { voiceGeminiSocketRef.current?.close(1000, 'Dictation stopped'); } catch {}
+    voiceGeminiSocketRef.current = null;
+
+    try { void voiceGeminiAudioContextRef.current?.close(); } catch {}
+    voiceGeminiAudioContextRef.current = null;
+  }, []);
+
+  const startGeminiDictationFallback = useCallback(async (attempt: number) => {
+    if (voiceGeminiFallbackActiveRef.current || !voiceDictationWantedRef.current) return;
+    voiceGeminiFallbackActiveRef.current = true;
+    voiceBrowserStopRequestedRef.current = true;
+
+    const nativeRecognition = voiceBrowserRecognitionRef.current;
+    try { nativeRecognition?.stop?.(); } catch {}
+    voiceBrowserRecognitionRef.current = null;
+    voiceBrowserRecognitionActiveRef.current = false;
+    voiceStartInProgressRef.current = false;
+
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Microphone access is not supported in this browser.');
+      }
+
+      const tokenPromise = createLiveToken('Charon', getSpeechRecognitionLanguage());
+      const streamPromise = navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextCtor) throw new Error('Web Audio is not supported in this browser.');
+      const context = new AudioContextCtor();
+      voiceGeminiAudioContextRef.current = context;
+      if (context.state === 'suspended') await context.resume();
+
+      // Brave can expose AudioWorklet but still fail to construct the node after
+      // loading a blob module. Do not make dictation depend on AudioWorklet:
+      // keep it as a low-latency option and fall back to ScriptProcessorNode
+      // when the worklet cannot be created. This keeps the microphone flow alive.
+      let workletReadyPromise: Promise<void> = Promise.resolve();
+      const hasAudioWorklet = Boolean(context.audioWorklet?.addModule);
+      if (hasAudioWorklet) {
+        try {
+          const workletBlob = new Blob([pcmCaptureWorkletSource], { type: 'application/javascript' });
+          const workletUrl = URL.createObjectURL(workletBlob);
+          workletReadyPromise = context.audioWorklet.addModule(workletUrl)
+            .catch(() => undefined)
+            .finally(() => URL.revokeObjectURL(workletUrl));
+        } catch {
+          workletReadyPromise = Promise.resolve();
+        }
+      }
+
+      const [stream, { token, model }] = await Promise.all([streamPromise, tokenPromise, workletReadyPromise]);
+      if (attempt !== voiceStartRef.current || !voiceDictationWantedRef.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+      voiceGeminiStreamRef.current = stream;
+
+      const socket = new WebSocket(
+        `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}`
+      );
+      voiceGeminiSocketRef.current = socket;
+
+      socket.onopen = () => {
+        if (attempt !== voiceStartRef.current || !voiceDictationWantedRef.current) {
+          try { socket.close(1000, 'Dictation stopped'); } catch {}
+          return;
+        }
+        socket.send(JSON.stringify({
+          setup: {
+            model: `models/${model || 'gemini-3.8-live'}`,
+            generationConfig: { responseModalities: ['AUDIO'] },
+            systemInstruction: {
+              parts: [{
+                text: `Twinkle AI speech-to-text mode. Transcribe the user's speech accurately. Preserve the user's wording and language. The selected language is ${getSpeechRecognitionLanguage()}. Do not translate the user's speech. Do not answer the user.`,
+              }],
+            },
+            inputAudioTranscription: {},
+            realtimeInputConfig: {
+              automaticActivityDetection: {
+                disabled: false,
+                prefixPaddingMs: 100,
+                silenceDurationMs: 500,
+              },
+            },
+          },
+        }));
+      };
+
+      socket.onmessage = async event => {
+        if (attempt !== voiceStartRef.current || !voiceDictationWantedRef.current) return;
+        try {
+          const message = await decodeGeminiLiveMessage(event.data);
+          if (message?.error) throw new Error(message.error.message || 'Gemini transcription failed.');
+          const finalText = String(message?.serverContent?.inputTranscription?.text || '')
+            .replace(/\s+/g, ' ')
+            .trim();
+          const interimText = String(message?.serverContent?.interimInputTranscription?.text || '')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+          if (finalText) {
+            voiceFinalTranscriptRef.current = `${voiceFinalTranscriptRef.current}${finalText}`
+              .replace(/\s+/g, ' ')
+              .trim();
+            voiceInterimTranscriptRef.current = '';
+          } else if (interimText) {
+            voiceInterimTranscriptRef.current = interimText;
+          } else {
+            return;
+          }
+
+          const liveText = `${voiceFinalTranscriptRef.current}${voiceFinalTranscriptRef.current && voiceInterimTranscriptRef.current ? ' ' : ''}${voiceInterimTranscriptRef.current}`
+            .replace(/\s+/g, ' ')
+            .trim();
+          voiceDraftRef.current = liveText;
+          const composedText = `${voiceBaseInputRef.current}${voiceBaseInputRef.current && liveText ? ' ' : ''}${liveText}`.trim();
+          setInput(composedText);
+          setVoiceLiveTranscript(liveText);
+          setVoiceDraftVersion(version => version + 1);
+          setVoiceSpeechDetected(true);
+
+          if (voiceSpeechTimerRef.current !== null) window.clearTimeout(voiceSpeechTimerRef.current);
+          voiceSpeechTimerRef.current = window.setTimeout(() => {
+            voiceSpeechTimerRef.current = null;
+            if (attempt === voiceStartRef.current && voiceDictationWantedRef.current) {
+              setVoiceSpeechDetected(false);
+            }
+          }, 450);
+        } catch (error) {
+          console.warn('Twinkle Gemini dictation message error:', error);
+        }
+      };
+
+      socket.onerror = () => {
+        if (attempt === voiceStartRef.current && voiceDictationWantedRef.current) {
+          console.warn('Twinkle Gemini dictation fallback connection error.');
+        }
+      };
+
+      socket.onclose = (event) => {
+        if (voiceGeminiSocketRef.current === socket) voiceGeminiSocketRef.current = null;
+        if (attempt === voiceStartRef.current && voiceDictationWantedRef.current && event.code !== 1000) {
+          // Do not immediately tear down the listening UI. The next start gets
+          // a fresh ephemeral token, while any text already received remains
+          // in the real search field.
+          console.warn('Twinkle Gemini dictation socket closed:', event.code, event.reason || 'no reason');
+        }
+      };
+
+      const source = context.createMediaStreamSource(stream);
+      const silentGain = context.createGain();
+      silentGain.gain.value = 0;
+
+      const sendPcm = (buffer: ArrayBuffer) => {
+        if (!voiceGeminiFallbackActiveRef.current || attempt !== voiceStartRef.current) return;
+        const data = pcm16ToBase64(buffer);
+        const liveSocket = voiceGeminiSocketRef.current;
+        if (liveSocket?.readyState === WebSocket.OPEN) {
+          try {
+            liveSocket.send(JSON.stringify({
+              realtimeInput: { audio: { data, mimeType: 'audio/pcm;rate=16000' } },
+            }));
+          } catch {
+            // The socket close handler will clean up without interrupting capture.
+          }
+        } else {
+          const queue = voiceGeminiPendingPcmRef.current;
+          queue.push(data);
+          if (queue.length > 60) queue.splice(0, queue.length - 60);
+        }
+      };
+
+      let processor: AudioWorkletNode | ScriptProcessorNode;
+      if (hasAudioWorklet) {
+        try {
+          processor = new AudioWorkletNode(context, 'twinkle-pcm-capture');
+          processor.port.onmessage = (event: MessageEvent<ArrayBuffer>) => sendPcm(event.data);
+        } catch (workletError) {
+          console.warn('Twinkle AudioWorklet unavailable; using compatibility microphone capture.', workletError);
+          const scriptProcessor = context.createScriptProcessor(4096, 1, 1);
+          scriptProcessor.onaudioprocess = event => {
+            const inputData = event.inputBuffer.getChannelData(0);
+            const ratio = context.sampleRate / 16000;
+            const outputLength = Math.max(1, Math.round(inputData.length / ratio));
+            const pcm = new Int16Array(outputLength);
+            for (let i = 0; i < outputLength; i += 1) {
+              const position = i * ratio;
+              const left = Math.min(Math.floor(position), inputData.length - 1);
+              const right = Math.min(left + 1, inputData.length - 1);
+              const fraction = position - left;
+              const sample = inputData[left] * (1 - fraction) + inputData[right] * fraction;
+              const clamped = Math.max(-1, Math.min(1, sample));
+              pcm[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+            }
+            sendPcm(pcm.buffer);
+          };
+          processor = scriptProcessor;
+        }
+      } else {
+        const scriptProcessor = context.createScriptProcessor(4096, 1, 1);
+        scriptProcessor.onaudioprocess = event => {
+          const inputData = event.inputBuffer.getChannelData(0);
+          const ratio = context.sampleRate / 16000;
+          const outputLength = Math.max(1, Math.round(inputData.length / ratio));
+          const pcm = new Int16Array(outputLength);
+          for (let i = 0; i < outputLength; i += 1) {
+            const position = i * ratio;
+            const left = Math.min(Math.floor(position), inputData.length - 1);
+            const right = Math.min(left + 1, inputData.length - 1);
+            const fraction = position - left;
+            const sample = inputData[left] * (1 - fraction) + inputData[right] * fraction;
+            const clamped = Math.max(-1, Math.min(1, sample));
+            pcm[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+          }
+          sendPcm(pcm.buffer);
+        };
+        processor = scriptProcessor;
+      }
+
+      source.connect(processor);
+      processor.connect(silentGain);
+      silentGain.connect(context.destination);
+
+      voiceGeminiSourceRef.current = source;
+      voiceGeminiProcessorRef.current = processor;
+      voiceGeminiSilentGainRef.current = silentGain;
+
+      const flushQueue = () => {
+        const liveSocket = voiceGeminiSocketRef.current;
+        if (liveSocket?.readyState !== WebSocket.OPEN) return;
+        const queued = voiceGeminiPendingPcmRef.current.splice(0);
+        for (const data of queued) {
+          try {
+            liveSocket.send(JSON.stringify({ realtimeInput: { audio: { data, mimeType: 'audio/pcm;rate=16000' } } }));
+          } catch {
+            break;
+          }
+        }
+      };
+      const previousOnOpen = socket.onopen;
+      socket.onopen = event => {
+        previousOnOpen?.call(socket, event);
+        window.setTimeout(flushQueue, 0);
+      };
+    } catch (error) {
+      console.warn('Twinkle Gemini dictation fallback failed:', error);
+      stopGeminiDictationFallback();
+      voiceDictationWantedRef.current = false;
+      voiceStartRef.current += 1;
+      setVoiceInputActive(false);
+    }
+  }, [stopGeminiDictationFallback]);
+
+  const cleanupVoiceAudio = useCallback(() => {
+    if (voiceSpeechTimerRef.current !== null) {
+      window.clearTimeout(voiceSpeechTimerRef.current);
+      voiceSpeechTimerRef.current = null;
+    }
+
+    stopGeminiDictationFallback();
+
+    const recognition = voiceBrowserRecognitionRef.current;
+    voiceBrowserStopRequestedRef.current = true;
+    try { recognition?.stop?.(); } catch {}
+
+    voiceBrowserRecognitionRef.current = null;
+    voiceBrowserRecognitionActiveRef.current = false;
+    setVoiceSpeechDetected(false);
+  }, []);
+
+  const cancelVoiceInput = useCallback(() => {
+    voiceStartInProgressRef.current = false;
+    voiceDictationWantedRef.current = false;
+    voiceStartRef.current += 1;
+    voiceBrowserStopRequestedRef.current = true;
+    cleanupVoiceAudio();
+
+    const restoreComposerValue = voiceBaseInputRef.current.trim();
+
+    voiceDraftRef.current = '';
+    voiceFinalTranscriptRef.current = '';
+    voiceInterimTranscriptRef.current = '';
+    voiceBaseInputRef.current = '';
+    voiceCommitInProgressRef.current = false;
+
+    setInput(restoreComposerValue);
+    setVoiceLiveTranscript('');
+    setVoiceDraftVersion(version => version + 1);
+    setVoiceInputActive(false);
+    setVoiceCaptureStopped(false);
+
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+  }, [cleanupVoiceAudio]);
+
+  const commitVoiceInput = useCallback(async (): Promise<string> => {
+    if (!voiceInputActive || voiceCommitInProgressRef.current) return input.trim();
+
+    voiceCommitInProgressRef.current = true;
+    voiceDictationWantedRef.current = false;
+
+    // Snapshot the transcript BEFORE stopping recognition. This is the key
+    // difference from the previous implementation: Stop never waits for
+    // onend, a WebSocket, a token, or a network round trip.
+    const base = voiceBaseInputRef.current.trim();
+    const spoken = `${voiceFinalTranscriptRef.current}${voiceFinalTranscriptRef.current && voiceInterimTranscriptRef.current ? ' ' : ''}${voiceInterimTranscriptRef.current}`
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // The real composer value is authoritative while Gemini is streaming.
+    // This prevents Stop/Send from clearing the transcript that is already
+    // visible in the existing search bar.
+    const currentComposerValue = input.trim();
+    const combined = currentComposerValue !== base
+      ? currentComposerValue
+      : `${base}${base && spoken ? ' ' : ''}${spoken}`.trim();
+
+    // Put the text into the real textarea immediately.
+    flushSync(() => {
+      setInput(combined);
+      setVoiceLiveTranscript('');
+      setVoiceDraftVersion(version => version + 1);
+      setVoiceInputActive(false);
+      setVoiceCaptureStopped(false);
+    });
+
+    // Stop recognition after the text has been committed. A late browser
+    // callback cannot overwrite the normal composer because the attempt id is
+    // invalidated first.
+    voiceStartRef.current += 1;
+    voiceBrowserStopRequestedRef.current = true;
+    stopGeminiDictationFallback();
+    const recognition = voiceBrowserRecognitionRef.current;
+    try { recognition?.stop?.(); } catch {}
+    voiceBrowserRecognitionRef.current = null;
+    voiceBrowserRecognitionActiveRef.current = false;
+
+    if (voiceSpeechTimerRef.current !== null) {
+      window.clearTimeout(voiceSpeechTimerRef.current);
+      voiceSpeechTimerRef.current = null;
+    }
+
+    voiceDraftRef.current = '';
+    voiceFinalTranscriptRef.current = '';
+    voiceInterimTranscriptRef.current = '';
+    voiceBaseInputRef.current = '';
+    voiceCommitInProgressRef.current = false;
+    setVoiceSpeechDetected(false);
+
+    window.setTimeout(() => {
+      const textarea = inputRef.current;
+      textarea?.focus();
+      textarea?.setSelectionRange(combined.length, combined.length);
+    }, 0);
+
+    return combined;
+  }, [input, voiceInputActive, stopGeminiDictationFallback]);
+
+  const stopVoiceCapture = useCallback(async () => {
+    if (!voiceInputActive || voiceCaptureStopped || voiceCommitInProgressRef.current) return;
+    // Disable the button immediately so double-clicks cannot create duplicate
+    // commits.
+    setVoiceCaptureStopped(true);
+    await commitVoiceInput();
+  }, [commitVoiceInput, voiceCaptureStopped, voiceInputActive]);
+
+  const startVoiceInput = useCallback(() => {
+    if (
+      voiceStartInProgressRef.current ||
+      voiceInputActive ||
+      isTyping ||
+      isProcessingFiles ||
+      voiceCommitInProgressRef.current
+    ) return;
+    voiceStartInProgressRef.current = true;
+    voiceDictationWantedRef.current = true;
+
+    const SpeechRecognitionCtor =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
+
+    // Brave can expose the Web Speech API but route recognition through a
+    // browser speech service that frequently returns `network`. For Brave,
+    // use the already-implemented Gemini realtime transcription path directly
+    // so listening starts immediately and does not wait for that failure.
+    const isBraveBrowser = Boolean((navigator as any).brave?.isBrave);
+    if (isBraveBrowser || !SpeechRecognitionCtor) {
+      const attempt = ++voiceStartRef.current;
+      voiceBrowserStopRequestedRef.current = false;
+      voiceCommitInProgressRef.current = false;
+      voiceBaseInputRef.current = input.trim();
+      voiceDraftRef.current = '';
+      voiceFinalTranscriptRef.current = '';
+      voiceInterimTranscriptRef.current = '';
+      setVoiceLiveTranscript('');
+      setVoiceCaptureStopped(false);
+      setVoiceSpeechDetected(false);
+
+      // Enter listening state before the realtime handshake so the Mic feels
+      // immediate. The transcript itself continues to arrive asynchronously.
+      flushSync(() => {
+        setVoiceDraftVersion(version => version + 1);
+        setVoiceInputActive(true);
+      });
+
+      void startGeminiDictationFallback(attempt);
+      window.setTimeout(() => inputRef.current?.focus(), 0);
+      return;
+    }
+
+    const attempt = ++voiceStartRef.current;
+    voiceBrowserStopRequestedRef.current = false;
+    voiceCommitInProgressRef.current = false;
+    voiceBaseInputRef.current = input.trim();
+    voiceDraftRef.current = '';
+    voiceFinalTranscriptRef.current = '';
+    voiceInterimTranscriptRef.current = '';
+    setVoiceLiveTranscript('');
+    setVoiceCaptureStopped(false);
+    setVoiceSpeechDetected(false);
+
+    const recognition = new SpeechRecognitionCtor();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+    recognition.lang = getSpeechRecognitionLanguage();
+
+    recognition.onstart = () => {
+      if (attempt !== voiceStartRef.current) return;
+      voiceStartInProgressRef.current = false;
+      voiceBrowserRecognitionActiveRef.current = true;
+      voiceBrowserRecognitionRef.current = recognition;
+      flushSync(() => {
+        setVoiceDraftVersion(version => version + 1);
+        setVoiceInputActive(true);
+      });
+    };
+
+    recognition.onresult = (event: any) => {
+      if (attempt !== voiceStartRef.current || voiceBrowserStopRequestedRef.current) return;
+
+      let finalText = voiceFinalTranscriptRef.current;
+      let interimText = '';
+
+      for (let i = event.resultIndex ?? 0; i < event.results.length; i += 1) {
+        const result = event.results[i];
+        const text = String(result?.[0]?.transcript || '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (!text) continue;
+
+        if (result?.isFinal) {
+          // Chrome can emit a final result immediately after an interim result.
+          // Only append genuinely new final text.
+          const normalized = text.toLowerCase();
+          if (!finalText.toLowerCase().endsWith(normalized)) {
+            finalText = `${finalText}${finalText ? ' ' : ''}${text}`
+              .replace(/\s+/g, ' ')
+              .trim();
+          }
+        } else {
+          interimText = `${interimText}${interimText ? ' ' : ''}${text}`
+            .replace(/\s+/g, ' ')
+            .trim();
+        }
+      }
+
+      voiceFinalTranscriptRef.current = finalText;
+      voiceInterimTranscriptRef.current = interimText;
+
+      const liveText = `${finalText}${finalText && interimText ? ' ' : ''}${interimText}`
+        .replace(/\s+/g, ' ')
+        .trim();
+      voiceDraftRef.current = liveText;
+
+      // Keep the real search/composer value synchronized while listening.
+      // This is important in Brave: the transcript must be the actual textarea
+      // value, not only a separate listening preview.
+      const composedText = `${voiceBaseInputRef.current}${voiceBaseInputRef.current && liveText ? ' ' : ''}${liveText}`.trim();
+      setInput(composedText);
+      setVoiceLiveTranscript(liveText);
+      setVoiceDraftVersion(version => version + 1);
+      setVoiceSpeechDetected(true);
+
+      if (voiceSpeechTimerRef.current !== null) {
+        window.clearTimeout(voiceSpeechTimerRef.current);
+      }
+      voiceSpeechTimerRef.current = window.setTimeout(() => {
+        voiceSpeechTimerRef.current = null;
+        if (attempt === voiceStartRef.current && !voiceBrowserStopRequestedRef.current) {
+          setVoiceSpeechDetected(false);
+        }
+      }, 450);
+    };
+
+    recognition.onerror = (event: any) => {
+      if (attempt !== voiceStartRef.current) return;
+      const error = String(event?.error || '');
+
+      if (error === 'not-allowed' || error === 'service-not-allowed') {
+        voiceBrowserRecognitionActiveRef.current = false;
+        voiceBrowserRecognitionRef.current = null;
+        voiceStartInProgressRef.current = false;
+        voiceStartRef.current += 1;
+        setVoiceInputActive(false);
+        setVoiceCaptureStopped(false);
+        setVoiceLiveTranscript('');
+        window.alert('Microphone permission was denied. Allow microphone access for this site and try again.');
+        return;
+      }
+
+      // Brave and some Chromium builds can return `network` even though the
+      // microphone itself is working. Fall back to Gemini Live transcription
+      // so spoken words still become text instead of leaving the composer blank.
+      if (error === 'network') {
+        void startGeminiDictationFallback(attempt);
+        return;
+      }
+
+      // `no-speech` and `aborted` are handled by onend while the user is still
+      // in dictation mode.
+      console.warn('Twinkle voice recognition:', error || 'unknown error');
+    };
+
+    recognition.onend = () => {
+      if (attempt !== voiceStartRef.current) return;
+
+      voiceBrowserRecognitionActiveRef.current = false;
+
+      if (voiceBrowserStopRequestedRef.current || voiceGeminiFallbackActiveRef.current || !voiceDictationWantedRef.current) {
+        voiceBrowserRecognitionRef.current = null;
+        return;
+      }
+
+      // Chrome ends SpeechRecognition after periods of silence even when
+      // continuous=true. Restart it without clearing the accumulated text.
+      window.setTimeout(() => {
+        if (
+          attempt !== voiceStartRef.current ||
+          voiceBrowserStopRequestedRef.current ||
+          !voiceDictationWantedRef.current
+        ) return;
+
+        try {
+          recognition.start();
+        } catch {
+          // A start while Chrome is still closing is harmless; onend will retry.
+        }
+      }, 120);
+    };
+
+    voiceBrowserRecognitionRef.current = recognition;
+    // Make the listening state immediate; native SpeechRecognition can fire
+    // onstart slightly later even though the user has already pressed Mic.
+    flushSync(() => {
+      setVoiceDraftVersion(version => version + 1);
+      setVoiceInputActive(true);
+    });
+    try {
+      recognition.start();
+    } catch (error) {
+      voiceStartInProgressRef.current = false;
+      voiceBrowserRecognitionRef.current = null;
+      voiceBrowserRecognitionActiveRef.current = false;
+      setVoiceInputActive(false);
+      const message = error instanceof Error ? error.message : 'Unable to start voice dictation.';
+      window.alert(message);
+    }
+  }, [getSpeechRecognitionLanguage, input, isProcessingFiles, isTyping, voiceInputActive, startGeminiDictationFallback]);
+
+  useEffect(() => () => {
+    voiceStartInProgressRef.current = false;
+    voiceDictationWantedRef.current = false;
+    voiceStartRef.current += 1;
+    voiceBrowserStopRequestedRef.current = true;
+    stopGeminiDictationFallback();
+    try { voiceBrowserRecognitionRef.current?.stop?.(); } catch {}
+    voiceBrowserRecognitionRef.current = null;
+    if (voiceSpeechTimerRef.current !== null) {
+      window.clearTimeout(voiceSpeechTimerRef.current);
+      voiceSpeechTimerRef.current = null;
+    }
+  }, [stopGeminiDictationFallback]);
+
+
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    try {
+      const stored = localStorage.getItem(MODEL_STORAGE_KEY);
+      return stored && MODEL_OPTIONS.some(option => option.id === stored)
+        ? stored
+        : MODEL_OPTIONS[0].id;
+    } catch {
+      return MODEL_OPTIONS[0].id;
+    }
+  });
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [emptyChatPrompt, setEmptyChatPrompt] = useState(() =>
+    EMPTY_CHAT_PROMPTS[Math.floor(Math.random() * EMPTY_CHAT_PROMPTS.length)]
+  );
+  const [chatGreeting, setChatGreeting] = useState(() => getRandomChatGreeting(user?.name || user?.username || ''));
+  const chatGreetingRef = useRef(chatGreeting);
+  useEffect(() => { chatGreetingRef.current = chatGreeting; }, [chatGreeting]);
+
+  // Pick a fresh greeting every time an empty draft chat is shown (New Chat
+  // button, shortcut, logo click, browser back to "/"), like ChatGPT/Claude.
+  useEffect(() => {
+    if (currentSessionId !== null) return;
+    const nextGreeting = getRandomChatGreeting(user?.name || user?.username || '', chatGreetingRef.current);
+    chatGreetingRef.current = nextGreeting;
+    setChatGreeting(nextGreeting);
+    setEmptyChatPrompt(current => getNextEmptyChatPrompt(current));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSessionId]);
+  const modelPickerRef = useRef<HTMLDivElement>(null);
+
+  // File upload
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [filePreviews, setFilePreviews] = useState<{ id: string; file: File; preview?: string }[]>([]);
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewText, setPreviewText] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+
+  // Theme
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    const dark = getInitialTheme();
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.toggle('dark', dark);
+    }
+    return dark;
+  });
+
+  const toggleTheme = useCallback(() => {
+    setIsDark(prev => {
+      const next = !prev;
+      document.documentElement.classList.toggle('dark', next);
+      localStorage.setItem('theme', next ? 'dark' : 'light');
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (modelPickerRef.current && !modelPickerRef.current.contains(target)) {
+        setModelPickerOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, []);
+
+  
+const chooseModel = useCallback((modelId: string) => {
+  const option = MODEL_OPTIONS.find(item => item.id === modelId);
+  if (!option) return;
+
+  setSelectedModel(modelId);
+
+  try {
+    localStorage.setItem(MODEL_STORAGE_KEY, modelId);
+    window.dispatchEvent(new CustomEvent('twinkle:model-changed', { detail: { modelId } }));
+  } catch {
+    
+  }
+
+  setModelPickerOpen(false);
+}, []);
+
+  // Keep the composer selector in sync if another tab/component changes the model.
+  useEffect(() => {
+    const syncModel = (value?: string) => {
+      const candidate = value || localStorage.getItem(MODEL_STORAGE_KEY) || '';
+      const option = MODEL_OPTIONS.find(item => item.id === candidate);
+      if (option) setSelectedModel(candidate);
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === MODEL_STORAGE_KEY) syncModel(event.newValue || undefined);
+    };
+    const onModelChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ modelId?: string }>).detail;
+      syncModel(detail?.modelId);
+    };
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('twinkle:model-changed', onModelChanged);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('twinkle:model-changed', onModelChanged);
+    };
+  }, []);
+
+  const activeModel = MODEL_OPTIONS.find(m => m.id === selectedModel) || MODEL_OPTIONS[0];
+  const selectedModelName = activeModel.name;
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const emptyGreetingRef = useRef<HTMLDivElement>(null);
+  const [emptyComposerTop, setEmptyComposerTop] = useState<number | null>(null);
+  useEffect(() => {
+    const isEmptyChat = messages.length === 0 && !isTyping;
+    if (!isEmptyChat) {
+      setEmptyComposerTop(null);
+      return;
+    }
+
+    const updateEmptyComposerPosition = () => {
+      const greeting = emptyGreetingRef.current;
+      if (!greeting) return;
+      const rect = greeting.getBoundingClientRect();
+      const composerHeight = window.innerWidth <= 640 ? 132 : 140;
+      const gap = 22;
+      const maxTop = Math.max(16, window.innerHeight - composerHeight - 12);
+      setEmptyComposerTop(Math.round(Math.min(rect.bottom + gap, maxTop)));
+    };
+
+    updateEmptyComposerPosition();
+    const observer = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(updateEmptyComposerPosition)
+      : null;
+    if (emptyGreetingRef.current) observer?.observe(emptyGreetingRef.current);
+    window.addEventListener('resize', updateEmptyComposerPosition);
+    window.addEventListener('orientationchange', updateEmptyComposerPosition);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', updateEmptyComposerPosition);
+      window.removeEventListener('orientationchange', updateEmptyComposerPosition);
+    };
+  }, [messages.length, isTyping]);
+
+  const firstMessageScrollPendingRef = useRef(false);
+  const autoFollowScrollRef = useRef(true);
+  const isSendingRef = useRef(false);
+  // Locks the short async preparation phase before sendMessage() acquires
+  // isSendingRef. This prevents rapid double-clicks / duplicate key events
+  // from creating two backend requests for the same user message.
+  const sendPreparationLockRef = useRef(false);
+  const requestGenerationRef = useRef(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const streamingAssistantIdRef = useRef<string | null>(null);
+  const streamReceivedTextRef = useRef('');
+  // Prevent a background history refresh from replacing the local response
+  // while that response is still being generated.
+  const activeResponseSessionRef = useRef<number | null>(null);
+
+  // The backend already provides real SSE deltas. Do not simulate a
+  // typewriter effect. We only coalesce deltas that arrive during the same
+  // browser frame, so React paints the real stream smoothly without inventing
+  // a slower character-by-character cadence.
+  const streamRenderQueueRef = useRef('');
+  const streamRenderTimerRef = useRef<number | null>(null);
+  const streamDrainResolverRef = useRef<(() => void) | null>(null);
+
+  const flushStreamRenderQueue = useCallback(() => {
+    streamRenderTimerRef.current = null;
+    const streamId = streamingAssistantIdRef.current;
+    if (!streamId) return;
+
+    const queue = streamRenderQueueRef.current;
+    if (!queue) {
+      const resolve = streamDrainResolverRef.current;
+      streamDrainResolverRef.current = null;
+      resolve?.();
+      return;
+    }
+
+    // Release the queue gradually instead of in one burst. When the network or
+    // a proxy delivers several deltas at once, this spreads them over a few
+    // frames so the answer flows smoothly instead of appearing in jumps.
+    let take = queue.length <= 12 ? queue.length : Math.ceil(queue.length / 6);
+    const lastUnit = queue.charCodeAt(take - 1);
+    if (take < queue.length && lastUnit >= 0xd800 && lastUnit <= 0xdbff) take += 1; // keep emoji pairs intact
+    const chunkToRender = queue.slice(0, take);
+    streamRenderQueueRef.current = queue.slice(take);
+    setResponsePhase('streaming');
+    setMessages(prev => {
+      const index = prev.findIndex(message => message.id === streamId);
+      if (index < 0) return prev;
+      return prev.map(message =>
+        message.id === streamId
+          ? { ...message, content: message.content + chunkToRender }
+          : message
+      );
+    });
+
+    // More text is still queued: keep rendering on the next frame. Only
+    // resolve a pending drain once the queue is completely empty.
+    if (streamRenderQueueRef.current) {
+      startStreamRenderer();
+    } else {
+      const resolve = streamDrainResolverRef.current;
+      if (resolve) {
+        streamDrainResolverRef.current = null;
+        resolve();
+      }
+    }
+
+    if (autoFollowScrollRef.current) {
+      requestAnimationFrame(() => {
+        const container = messagesContainerRef.current;
+        if (container) container.scrollTop = container.scrollHeight;
+      });
+    }
+  }, []);
+
+  const startStreamRenderer = useCallback(() => {
+    if (streamRenderTimerRef.current !== null) return;
+    streamRenderTimerRef.current = window.requestAnimationFrame(flushStreamRenderQueue);
+  }, [flushStreamRenderQueue]);
+
+  const drainStreamRenderer = useCallback(() => {
+    if (!streamRenderQueueRef.current) return Promise.resolve();
+    return new Promise<void>(resolve => {
+      streamDrainResolverRef.current = resolve;
+      startStreamRenderer();
+    });
+  }, [startStreamRenderer]);
+
+  const cancelStreamRenderer = useCallback(() => {
+    streamRenderQueueRef.current = '';
+    if (streamRenderTimerRef.current !== null) {
+      window.cancelAnimationFrame(streamRenderTimerRef.current);
+      streamRenderTimerRef.current = null;
+    }
+    const resolve = streamDrainResolverRef.current;
+    streamDrainResolverRef.current = null;
+    resolve?.();
+  }, []);
+
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Stores the specific session ID that should skip one message load
+  // (the newly created session after first send), so switching to any
+  // OTHER existing session always loads its messages correctly.
+  const skipMessageLoadRef = useRef<number | null>(null);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+      inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 200)}px`;
+    }
+  }, [input]);
+
+  useEffect(() => {
+    return () => cancelStreamRenderer();
+  }, [cancelStreamRenderer]);
+
+  // Clean up object URLs
+  const filePreviewsRef = useRef(filePreviews);
+  useEffect(() => { filePreviewsRef.current = filePreviews; }, [filePreviews]);
+  useEffect(() => {
+    return () => {
+      filePreviewsRef.current.forEach(fp => {
+        if (fp.preview) URL.revokeObjectURL(fp.preview);
+      });
+    };
+  }, []);
+
+  // Load sessions & messages
+  const loadSessions = useCallback(async () => {
+    try {
+      const response = await chatApi.getSessions() as any;
+      setSessions(response.sessions || []);
+    } catch (err: any) {
+      console.error('Failed to load sessions:', err);
+      if (err.status === 401) onLogout();
+    } finally {
+      setLoading(false);
+    }
+  }, [onLogout]);
+
+  // Live Talk persists turns in the background. Update the same sidebar state
+  // immediately instead of forcing another GET /chat/sessions request.
+  useEffect(() => {
+    const handleLiveSessionUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<{ id: number; sessionName?: string }>).detail;
+      if (!detail?.id) return;
+
+      const now = new Date().toISOString();
+      setSessions(prev => {
+        const existing = prev.find(session => session.id === detail.id);
+        if (existing) {
+          const updated = {
+            ...existing,
+            sessionName: detail.sessionName || existing.sessionName,
+            updatedAt: now,
+          };
+          return [updated, ...prev.filter(session => session.id !== detail.id)];
+        }
+
+        return [
+          {
+            id: detail.id,
+            userId: user.id,
+            sessionName: detail.sessionName || 'Live Talk',
+            createdAt: now,
+            updatedAt: now,
+          },
+          ...prev,
+        ];
+      });
+    };
+
+    window.addEventListener('twinkle-live-session-updated', handleLiveSessionUpdate);
+    return () => window.removeEventListener('twinkle-live-session-updated', handleLiveSessionUpdate);
+  }, [user.id]);
+
+  const loadMessages = useCallback(async (sid: number) => {
+    // The streaming request owns the local message state while it is active.
+    // Do not hydrate the same session from history during that window; doing
+    // so can insert the persisted first answer and then the final SSE answer.
+    if (isSendingRef.current && activeResponseSessionRef.current === sid) {
+      return;
+    }
+
+    try {
+      const response = await chatApi.getMessages(sid) as any;
+      const rawMessages = Array.isArray(response?.messages) ? response.messages : [];
+
+      const normalizedMessages: Message[] = rawMessages.map((msg: any, index: number) => ({
+        id: msg?.id ?? `history-${sid}-${index}`,
+        sessionId: Number(msg?.sessionId ?? sid),
+        role: msg?.role === 'user' ? 'user' : 'assistant',
+        content: cleanMessageContent(msg?.content),
+        timestamp: msg?.timestamp || new Date().toISOString(),
+      }));
+
+      setMessages(dedupeMessages(normalizedMessages));
+
+      const persistedAttachments: Record<string | number, string[]> = {};
+      rawMessages.forEach((msg: any, index: number) => {
+        const id = msg?.id ?? `history-${sid}-${index}`;
+        if (Array.isArray(msg?.attachments) && msg.attachments.length > 0) {
+          persistedAttachments[id] = msg.attachments.filter(
+            (url: unknown): url is string => isValidAttachmentDataUrl(url)
+          );
+        }
+      });
+
+      setMessageAttachments(persistedAttachments);
+    } catch (err: any) {
+      console.error('Failed to load messages:', err);
+      if (err.status === 401) onLogout();
+    }
+  }, [onLogout]);
+
+  useEffect(() => { loadSessions(); }, [loadSessions]);
+
+  // Resolve /c/{uuid} from the backend, not only from the currently loaded
+  // sidebar list. A missing local session is not proof that the chat is invalid.
+  useEffect(() => {
+    if (creatingNewSessionRef.current || loading || !chatUuid) return;
+
+    let cancelled = false;
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidPattern.test(chatUuid)) {
+      setMessages([]);
+      setCurrentSessionId(null);
+      persistSessionId(null);
+      navigate('/', { replace: true });
+      return;
+    }
+
+    const localTarget = sessions.find(session => session.publicId === chatUuid);
+    if (localTarget) {
+      if (localTarget.id !== currentSessionId) {
+        setCurrentSessionId(localTarget.id);
+        persistSessionId(localTarget.id);
+      }
+      return;
+    }
+
+    void (async () => {
+      try {
+        const result: any = await chatApi.getSessionByPublicId(chatUuid);
+        if (cancelled) return;
+        const rawSession = result?.session ?? result?.data?.session ?? result?.data ?? result;
+        const id = Number(rawSession?.id ?? rawSession?.sessionId ?? rawSession?.session_id);
+        const publicId = String(rawSession?.publicId ?? rawSession?.public_id ?? chatUuid);
+        if (!Number.isFinite(id) || id <= 0 || publicId !== chatUuid) {
+          throw Object.assign(new Error('The conversation response was invalid.'), { status: 502 });
+        }
+
+        const now = new Date().toISOString();
+        const session: Session = {
+          ...rawSession,
+          id,
+          publicId,
+          userId: Number(rawSession?.userId ?? rawSession?.user_id ?? user.id),
+          sessionName: String(rawSession?.sessionName ?? rawSession?.name ?? rawSession?.title ?? 'New Chat'),
+          createdAt: rawSession?.createdAt ?? rawSession?.created_at ?? now,
+          updatedAt: rawSession?.updatedAt ?? rawSession?.updated_at ?? now,
+        };
+        setSessions(prev => [session, ...prev.filter(item => item.id !== id)]);
+        setCurrentSessionId(id);
+        persistSessionId(id);
+      } catch (error: any) {
+        if (cancelled) return;
+        console.error('Failed to resolve chat URL:', error);
+        // Only redirect when the server explicitly says the chat is missing or
+        // inaccessible. Network/server errors should not destroy a valid URL.
+        if (error?.status === 404) {
+          setCurrentSessionId(null);
+          persistSessionId(null);
+          setMessages([]);
+          navigate('/', { replace: true });
+        }
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [loading, chatUuid, sessions, currentSessionId, navigate, user.id]);
+
+  // Keep the address bar in sync with the selected persistent conversation.
+  // While a deep link is being resolved, do not redirect away from it.
+  useEffect(() => {
+    if (creatingNewSessionRef.current || loading) return;
+    if (currentSessionId === null) {
+      if (!chatUuid && window.location.pathname.startsWith('/c/')) navigate('/', { replace: true });
+      return;
+    }
+    const active = sessions.find(session => session.id === currentSessionId);
+    if (active?.publicId) {
+      const expected = `/c/${active.publicId}`;
+      if (window.location.pathname !== expected) navigate(expected);
+    }
+  }, [loading, chatUuid, currentSessionId, sessions, navigate]);
+
+
+  // Restore the last conversation after a browser refresh. If it was deleted
+  // elsewhere, clear the stale ID instead of silently creating a new chat.
+  useEffect(() => {
+    if (loading || currentSessionId === null || sessions.length === 0) return;
+    if (!sessions.some(session => session.id === currentSessionId)) {
+      setCurrentSessionId(null);
+      persistSessionId(null);
+      setMessages([]);
+    }
+  }, [loading, currentSessionId, sessions]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (currentSessionId !== null) {
+      const stillExists = sessions.some(s => s.id === currentSessionId);
+      if (!stillExists) {
+        setCurrentSessionId(null);
+        persistSessionId(null);
+        setMessages([]);
+      }
+    }
+  }, [sessions, loading]);
+
+  // Only skip loading messages if the currentSessionId exactly matches the
+  // ID we marked to skip (the newly created session). Any other session --
+  // including ones selected on mobile -- always loads.
+  useEffect(() => {
+    if (currentSessionId) {
+      if (skipMessageLoadRef.current === currentSessionId) {
+        // This is the new session we just created inline — messages are
+        // already in state from the sendMessage flow, so skip the fetch.
+        skipMessageLoadRef.current = null;
+        return;
+      }
+      loadMessages(currentSessionId);
+    } else {
+      setMessages([]);
+    }
+  }, [currentSessionId, loadMessages]);
+
+  // Preserve the user's scroll position while messages stream. Only the
+  // explicit first-message placement for a brand-new chat may scroll the panel.
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    if (!firstMessageScrollPendingRef.current) return;
+
+    const frame = requestAnimationFrame(() => {
+      const firstMessage = container.querySelector<HTMLElement>('[data-twinkle-message]');
+      if (!firstMessage) return;
+
+      if (window.matchMedia('(max-width: 767px)').matches) {
+        const mobileHeaderOffset = 92;
+        const targetTop = Math.max(0, firstMessage.offsetTop - mobileHeaderOffset);
+        container.scrollTo({ top: targetTop, behavior: 'auto' });
+      } else {
+        container.scrollTo({ top: container.scrollHeight, behavior: 'auto' });
+      }
+
+      firstMessageScrollPendingRef.current = false;
+      setShowScrollBottom(false);
+      setIsAtBottom(true);
+      autoFollowScrollRef.current = true;
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [messages.length]);
+
+  const syncScrollState = useCallback((container: HTMLDivElement | null) => {
+    if (!container) return;
+    const distanceFromBottom = Math.max(0, container.scrollHeight - container.scrollTop - container.clientHeight);
+    const atBottom = distanceFromBottom <= 40;
+    const awayFromBottom = distanceFromBottom > 100;
+    autoFollowScrollRef.current = atBottom;
+    setShowScrollBottom(messages.length > 0 && awayFromBottom);
+    setIsAtBottom(atBottom);
+  }, [messages.length]);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    syncScrollState(e.currentTarget);
+  };
+
+  // Re-measure after message/stream layout changes. This prevents the
+  // floating control from becoming stale while the stream grows underneath
+  // the user, especially when they return to the bottom.
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => syncScrollState(messagesContainerRef.current));
+    const container = messagesContainerRef.current;
+    if (!container || typeof ResizeObserver === 'undefined') {
+      return () => cancelAnimationFrame(frame);
+    }
+
+    const observer = new ResizeObserver(() => syncScrollState(container));
+    observer.observe(container);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [messages.length, isTyping, syncScrollState]);
+
+  const extractZipEntry = async (file: File, entryName: string): Promise<string | null> => {
+    const buffer = await file.arrayBuffer();
+    const view = new DataView(buffer);
+    const minEocd = 22;
+    const maxComment = 0xffff;
+    const start = Math.max(0, view.byteLength - minEocd - maxComment);
+    let eocd = -1;
+
+    for (let i = view.byteLength - minEocd; i >= start; i--) {
+      if (view.getUint32(i, true) === 0x06054b50) {
+        eocd = i;
+        break;
+      }
+    }
+
+    if (eocd < 0) return null;
+
+    const directorySize = view.getUint32(eocd + 12, true);
+    const directoryOffset = view.getUint32(eocd + 16, true);
+    let cursor = directoryOffset;
+    const end = directoryOffset + directorySize;
+    const decoder = new TextDecoder();
+
+    while (cursor < end && cursor + 46 <= view.byteLength) {
+      if (view.getUint32(cursor, true) !== 0x02014b50) break;
+
+      const method = view.getUint16(cursor + 10, true);
+      const compressedSize = view.getUint32(cursor + 20, true);
+      const nameLength = view.getUint16(cursor + 28, true);
+      const extraLength = view.getUint16(cursor + 30, true);
+      const commentLength = view.getUint16(cursor + 32, true);
+      const localOffset = view.getUint32(cursor + 42, true);
+      const name = decoder.decode(new Uint8Array(buffer, cursor + 46, nameLength));
+
+      if (name === entryName) {
+        if (localOffset + 30 > view.byteLength || view.getUint32(localOffset, true) !== 0x04034b50) return null;
+
+        const localNameLength = view.getUint16(localOffset + 26, true);
+        const localExtraLength = view.getUint16(localOffset + 28, true);
+        const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+        const compressed = new Uint8Array(buffer, dataStart, compressedSize);
+
+        if (method === 0) return decoder.decode(compressed);
+        if (method === 8 && typeof DecompressionStream !== 'undefined') {
+          const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+          const decompressed = await new Response(stream).arrayBuffer();
+          return decoder.decode(new Uint8Array(decompressed));
+        }
+        return null;
+      }
+
+      cursor += 46 + nameLength + extraLength + commentLength;
+    }
+
+    return null;
+  };
+
+  const extractDocxText = async (file: File): Promise<string | null> => {
+    const xml = await extractZipEntry(file, 'word/document.xml');
+    if (!xml) return null;
+
+    const doc = new DOMParser().parseFromString(xml, 'application/xml');
+    const paragraphs = Array.from(doc.getElementsByTagNameNS('*', 'p'));
+    if (paragraphs.length === 0) return doc.documentElement.textContent?.trim() || null;
+
+    return paragraphs
+      .map(paragraph => paragraph.textContent?.replace(/\s+/g, ' ').trim() || '')
+      .filter(Boolean)
+      .join('\n\n');
+  };
+
+  const openFilePreview = async (file: File, objectUrl?: string) => {
+    setPreviewFile(file);
+    setPreviewText(null);
+    setPreviewUrl(objectUrl || URL.createObjectURL(file));
+
+    const isDocx = /\.docx$/i.test(file.name) || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const isTextLike = file.type.startsWith('text/') || /\.(txt|csv|tsv|json|xml|html?|md|markdown|rtf|js|jsx|ts|tsx|css|java|py|sql|yml|yaml)$/i.test(file.name);
+
+    if (isDocx) {
+      try {
+        setPreviewText(await extractDocxText(file) || 'No readable text was found in this DOCX file.');
+      } catch {
+        setPreviewText('Unable to render this DOCX file in the browser.');
+      }
+    } else if (isTextLike) {
+      try {
+        setPreviewText(await file.text());
+      } catch {
+        setPreviewText('Unable to read this document in the browser.');
+      }
+    }
+  };
+
+  const openPersistedAttachmentPreview = async (
+    dataUrl: string,
+    index: number
+  ) => {
+    if (!isValidAttachmentDataUrl(dataUrl)) {
+      console.error('Invalid persisted attachment preview data.');
+      return;
+    }
+
+    try {
+      const file = await dataUrlToFile(
+        dataUrl,
+        index,
+        getStoredAttachmentName(dataUrl) || undefined
+      );
+
+      // Use a Blob URL for persisted attachments. This is more reliable for
+      // PDF/browser previewing than loading a large base64 data URL directly.
+      const objectUrl = URL.createObjectURL(file);
+      await openFilePreview(file, objectUrl);
+    } catch (error) {
+      console.error('Failed to open attachment preview:', error);
+    }
+  };
+
+  const closeFilePreview = () => {
+    if (previewUrl && previewFile) {
+      const isSelectedPreview = filePreviews.some(fp => fp.file === previewFile && fp.preview === previewUrl);
+      if (!isSelectedPreview) URL.revokeObjectURL(previewUrl);
+    }
+    setPreviewFile(null);
+    setPreviewUrl(null);
+    setPreviewText(null);
+  };
+
+  // File handlers (kept but no UI to trigger them)
+  const handleFileSelection = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    setIsProcessingFiles(true);
+
+    try {
+      const incomingFiles = Array.from(files).filter(
+        file => file instanceof File && file.size > 0
+      );
+
+      if (incomingFiles.length === 0) return;
+
+      const existingImageCount = selectedFiles.filter(file => file.type.startsWith('image/')).length;
+      const incomingImageFiles = incomingFiles.filter(file => file.type.startsWith('image/'));
+      const remainingImageSlots = MAX_IMAGES_PER_MESSAGE - existingImageCount;
+
+      if (incomingImageFiles.length > remainingImageSlots) {
+        throw new Error(
+          `You can attach a maximum of ${MAX_IMAGES_PER_MESSAGE} images per message.`
+        );
+      }
+
+      const processedFiles: File[] = [];
+      for (const file of incomingFiles) {
+        processedFiles.push(file.type.startsWith('image/') ? await compressImage(file) : file);
+      }
+
+      const existingImageBytes = selectedFiles
+        .filter(file => file.type.startsWith('image/'))
+        .reduce((total, file) => total + file.size, 0);
+      const incomingImageBytes = processedFiles
+        .filter(file => file.type.startsWith('image/'))
+        .reduce((total, file) => total + file.size, 0);
+
+      if (existingImageBytes + incomingImageBytes > MAX_TOTAL_IMAGE_BYTES) {
+        throw new Error(
+          `Images are too large. Keep the total image size under ${formatFileSize(MAX_TOTAL_IMAGE_BYTES)} per message.`
+        );
+      }
+
+      const newPreviews = processedFiles.map(file => ({
+        id: `${file.name}-${file.lastModified}-${Date.now()}-${Math.random()}`,
+        file,
+        preview: file.type.startsWith('image/') || file.type === 'application/pdf'
+          ? URL.createObjectURL(file)
+          : undefined,
+      }));
+
+      setFilePreviews(prev => [...prev, ...newPreviews]);
+      setSelectedFiles(prev => [...prev, ...processedFiles]);
+    } catch (error: any) {
+      console.error('File selection failed:', error);
+      alert(
+        typeof error?.message === 'string' && /too large|unsupported|not supported|under \d+/i.test(error.message)
+          ? error.message
+          : 'The selected file could not be prepared. Please check the file and try again.'
+      );
+    } finally {
+      setIsProcessingFiles(false);
+      window.setTimeout(() => {
+        inputRef.current?.focus();
+      }, 0);
+    }
+  };
+
+  const removeFile = (id: string) => {
+    const removed = filePreviews.find(fp => fp.id === id);
+    if (removed?.preview) URL.revokeObjectURL(removed.preview);
+    setFilePreviews(prev => prev.filter(fp => fp.id !== id));
+    setSelectedFiles(prev => prev.filter((_, idx) => {
+      const removedFile = removed?.file;
+      return removedFile ? prev[idx] !== removedFile : true;
+    }));
+  };
+
+  const sendMessage = async (
+    messageText: string,
+    messagesSnapshot?: Message[],
+    filesToSend?: File[],
+    previewUrls?: string[],
+    regenerateTitle = false,
+    onAssistantResponse?: (text: string) => void
+  ) => {
+    if ((!messageText.trim() && (!filesToSend || filesToSend.length === 0))) return;
+
+    // Image understanding is only supported by Twinkle Vision. Stop before
+    // creating a user turn or calling the backend with an incompatible model.
+    const includesImage = Array.isArray(filesToSend)
+      && filesToSend.some(file => file instanceof File && file.type.startsWith('image/'));
+    if (includesImage && !activeModel.vision) {
+      setMessages(prev => [...prev, {
+        id: `image-model-notice-${Date.now()}`,
+        sessionId: currentSessionId || 0,
+        role: 'assistant',
+        content: `I can’t read images with ${activeModel.name}. Please switch to Twinkle Vision and send the image again.`,
+        timestamp: new Date().toISOString(),
+      }]);
+      return;
+    }
+
+    // sendMessage() is also used by retry/edit flows, so keep this guard at
+    // the actual request boundary as a second line of defense.
+    if (isSendingRef.current) return;
+
+    isSendingRef.current = true;
+    const requestGeneration = ++requestGenerationRef.current;
+    activeResponseSessionRef.current = currentSessionId;
+    const contextTextWeight = (messagesSnapshot ?? messages).reduce((total, item) => total + (item.content?.length || 0), 0);
+    const uploadedBytesWeight = (filesToSend || []).reduce((total, file) => total + (file instanceof File ? file.size : 0), 0);
+    const totalRequestWeight = messageText.length + contextTextWeight + Math.ceil(uploadedBytesWeight / 4);
+    setResponseDataWeight(totalRequestWeight > 120000 ? 'heavy' : totalRequestWeight > 18000 ? 'moderate' : 'light');
+    // Fast, short prompts show only the breathing dot. Only longer prompts
+    // get the Thinking label, and only if the response is still pending.
+    setLongPromptPending(messageText.trim().length >= 120 || (filesToSend?.length ?? 0) > 0 || totalRequestWeight > 18000);
+    setShowLongThinking(false);
+    setIsTyping(true);
+    setResponsePhase('connecting');
+    streamingAssistantIdRef.current = null;
+    streamReceivedTextRef.current = '';
+    setJustFinished(false);
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    const tempId = `temp-${Date.now()}`;
+    let requestSessionId: number | null = currentSessionId;
+    const isNewSession = requestSessionId == null;
+
+    // Remember that this is the first message in a new chat so mobile can
+    // move the sent message into view near the top of the conversation.
+    const existingMessageCount = messagesSnapshot?.length ?? messages.length;
+    if (existingMessageCount === 0) {
+      firstMessageScrollPendingRef.current = true;
+    }
+
+    const tempUserMsg: Message = {
+      id: tempId,
+      sessionId: currentSessionId || 0,
+      role: 'user',
+      content: messageText.trim(),
+      timestamp: new Date().toISOString(),
+    };
+
+    if (messagesSnapshot) setMessages([...messagesSnapshot, tempUserMsg]);
+    else setMessages(prev => [...prev, tempUserMsg]);
+
+    if (previewUrls && previewUrls.length > 0) {
+      setMessageAttachments(prev => ({ ...prev, [tempId]: previewUrls }));
+    }
+
+    setInput('');
+    setSelectedFiles([]);
+    (Array.isArray(filePreviews) ? filePreviews : []).forEach(fp => {
+      if (fp?.preview) URL.revokeObjectURL(fp.preview);
+    });
+    setFilePreviews([]);
+
+    try {
+      // Create the persistent session before sending the first request. This
+      // updates the browser URL immediately for both text and attachment chats.
+      if (isNewSession && requestSessionId == null) {
+        const created: any = await chatApi.createSession();
+        const createdId = Number(created?.id ?? created?.sessionId ?? created?.session_id);
+        const createdPublicId = String(created?.publicId ?? created?.public_id ?? '');
+        if (!Number.isFinite(createdId) || createdId <= 0 || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(createdPublicId)) {
+          throw new Error('The server could not create a persistent chat URL. Please try again.');
+        }
+        requestSessionId = createdId;
+        const createdAt = new Date().toISOString();
+        skipMessageLoadRef.current = createdId;
+        activeResponseSessionRef.current = createdId;
+        setCurrentSessionId(createdId);
+        persistSessionId(createdId);
+        setMessages(prev => prev.map(item => item.id === tempId ? { ...item, sessionId: createdId } : item));
+        setSessions(prev => [
+          {
+            id: createdId,
+            publicId: createdPublicId,
+            userId: user.id,
+            // Name the chat in the sidebar the moment it is created, instead of
+            // waiting for the AI response + title request to finish.
+            sessionName: messageText.trim()
+              ? generateProfessionalChatTitle(messageText, Boolean(filesToSend?.length))
+              : (filesToSend && filesToSend.length ? 'File Analysis' : 'New Chat'),
+            createdAt,
+            updatedAt: createdAt,
+          },
+          ...prev.filter(item => item.id !== createdId),
+        ]);
+        navigate(`/c/${createdPublicId}`);
+      }
+
+      let response: any;
+      const hasFiles = filesToSend && filesToSend.length > 0;
+      const finalMessage = messageText.trim() || (hasFiles && filesToSend.some(f => f.type.startsWith('image/')) ? 'Image uploaded' : '');
+
+      if (hasFiles) {
+        // File/multimodal requests keep the existing upload pipeline. The
+        // response is progressively revealed after the backend returns so
+        // the UI remains responsive without changing attachment handling.
+        setResponsePhase('thinking');
+        response = await chatApi.sendMessageWithFiles(
+          finalMessage,
+          requestSessionId,
+          controller.signal,
+          selectedModel,
+          filesToSend
+        );
+      } else {
+        response = await chatApi.streamMessage(
+          finalMessage,
+          requestSessionId,
+          controller.signal,
+          selectedModel,
+          {
+            onStatus: (status, metadata?) => {
+              if (requestGeneration !== requestGenerationRef.current) return;
+              if (status === 'thinking') setResponsePhase('thinking');
+
+              // The backend creates the persistent session before it starts
+              // generating the answer. Use the first SSE status event to put
+              // its public UUID into the browser URL immediately.
+              const incomingSessionId = Number(metadata?.sessionId ?? metadata?.session_id);
+              const incomingPublicId = String(metadata?.publicId ?? metadata?.public_id ?? '');
+              if (isNewSession && Number.isFinite(incomingSessionId) && incomingSessionId > 0
+                  && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(incomingPublicId)) {
+                const now = new Date().toISOString();
+                skipMessageLoadRef.current = incomingSessionId;
+                activeResponseSessionRef.current = incomingSessionId;
+                setCurrentSessionId(incomingSessionId);
+                persistSessionId(incomingSessionId);
+                setSessions(prev => {
+                  const existing = prev.find(session => session.id === incomingSessionId);
+                  if (existing) {
+                    return prev.map(session => session.id === incomingSessionId
+                      ? { ...session, publicId: incomingPublicId, updatedAt: now }
+                      : session);
+                  }
+                  return [{
+                    id: incomingSessionId,
+                    publicId: incomingPublicId,
+                    userId: user.id,
+                    sessionName: 'New Chat',
+                    createdAt: now,
+                    updatedAt: now,
+                  }, ...prev];
+                });
+                const expectedPath = `/c/${incomingPublicId}`;
+                if (window.location.pathname !== expectedPath) navigate(expectedPath, { replace: false });
+              }
+            },
+            onDelta: (chunk) => {
+              // A stopped/invalidated request can still have one buffered SSE
+              // event arrive after AbortController.abort(). Never create a new
+              // assistant bubble from that late event.
+              if (requestGeneration !== requestGenerationRef.current) return;
+              if (!isSendingRef.current) return;
+              if (!chunk) return;
+
+              const streamId = streamingAssistantIdRef.current || `stream-ai-${Date.now()}`;
+              streamingAssistantIdRef.current = streamId;
+
+              // Create the empty streamed assistant bubble immediately. The
+              // actual text is then rendered by the smooth SSE queue below.
+              setMessages(prev => {
+                if (prev.some(message => message.id === streamId)) return prev;
+                return [
+                  ...prev,
+                  {
+                    id: streamId,
+                    sessionId: currentSessionId || 0,
+                    role: 'assistant',
+                    content: '',
+                    timestamp: new Date().toISOString(),
+                  },
+                ];
+              });
+
+              // Accept both true SSE deltas and providers that occasionally
+              // send the cumulative response. This prevents duplicated text
+              // without adding any typewriter effect.
+              const previousStreamText = streamReceivedTextRef.current;
+              let delta = chunk;
+              if (previousStreamText) {
+                if (chunk.startsWith(previousStreamText)) {
+                  delta = chunk.slice(previousStreamText.length);
+                } else if (previousStreamText.endsWith(chunk)) {
+                  delta = '';
+                } else {
+                  const maxOverlap = Math.min(previousStreamText.length, chunk.length);
+                  let overlap = 0;
+                  for (let size = maxOverlap; size > 0; size -= 1) {
+                    if (previousStreamText.slice(-size) === chunk.slice(0, size)) {
+                      overlap = size;
+                      break;
+                    }
+                  }
+                  if (overlap > 0) delta = chunk.slice(overlap);
+                }
+              }
+
+              if (!delta) return;
+              streamReceivedTextRef.current = previousStreamText + delta;
+              streamRenderQueueRef.current += delta;
+              startStreamRenderer();
+            },
+          }
+        );
+      }
+
+      // A user stop invalidates this request generation. Never finalize or
+      // replace the preserved partial response after Stop has been clicked.
+      if (requestGeneration !== requestGenerationRef.current) return;
+
+      const activeSessionId = response.sessionId || requestSessionId;
+
+      if (isNewSession && activeSessionId) {
+        // Store the new session's ID (not just `true`) so the
+        // message-load effect skips ONLY this specific session's fetch.
+        // Switching to any other session will still trigger a full load.
+        skipMessageLoadRef.current = activeSessionId;
+        activeResponseSessionRef.current = activeSessionId;
+        setCurrentSessionId(activeSessionId);
+        persistSessionId(activeSessionId);
+
+        const now = new Date().toISOString();
+        setSessions(prev => {
+          if (prev.some(session => session.id === activeSessionId)) return prev;
+          return [
+            {
+              id: activeSessionId,
+              publicId: response.publicId || undefined,
+              userId: user.id,
+              sessionName: 'New Chat',
+              createdAt: now,
+              updatedAt: now,
+            },
+            ...prev,
+          ];
+        });
+      }
+
+      // Update the sidebar immediately. Do not wait for the title-generation
+      // endpoint: file-only chats used to stay as "New Chat" until refresh.
+      if (isNewSession && activeSessionId) {
+        const fileNames = (filesToSend || []).map(file => file.name.trim()).filter(Boolean);
+        const immediateTitle = messageText.trim()
+          ? generateProfessionalChatTitle(messageText, Boolean(filesToSend?.length))
+          : fileNames.length === 1
+            ? fileNames[0].replace(/\.[^.]+$/, '').slice(0, 60)
+            : fileNames.length > 1
+              ? `${fileNames[0].replace(/\.[^.]+$/, '').slice(0, 45)} + ${fileNames.length - 1} file${fileNames.length - 1 === 1 ? '' : 's'}`
+              : 'File Analysis';
+
+        setSessions(prev =>
+          prev.map(session =>
+            session.id === activeSessionId
+              ? { ...session, sessionName: immediateTitle, updatedAt: new Date().toISOString() }
+              : session
+          )
+        );
+      }
+
+      // Let the real streamed text finish rendering before finalizing the
+      // message. This prevents the final response from jumping ahead of the
+      // visible stream.
+      await drainStreamRenderer();
+      if (requestGeneration !== requestGenerationRef.current) return;
+      setIsTyping(false);
+
+      const aiContent =
+        typeof response?.response === 'string' && response.response.trim()
+          ? response.response
+          : 'I couldn’t generate a response for this request. Please try again.';
+      const cleanedAiContent = cleanMessageContent(aiContent);
+
+      // Track successful chat token usage for the Profile page.
+      // Prefer provider usage metadata; otherwise estimate ~1 token per 4 characters.
+      try {
+        const usage = response?.usage ?? response?.tokenUsage ?? response?.token_usage ?? {};
+        const reportedTotal = Number(
+          usage?.total_tokens ?? usage?.totalTokens ?? usage?.totalTokenCount ??
+          response?.tokenCount ?? response?.token_count ?? response?.total_tokens ?? response?.totalTokens
+        );
+        const countedTokens = Number.isFinite(reportedTotal) && reportedTotal > 0
+          ? Math.round(reportedTotal)
+          : Math.max(1, Math.ceil((String(finalMessage || '').length + cleanedAiContent.length) / 4));
+
+        const storageKey = 'twinkle_token_usage_v1';
+        const stored = JSON.parse(localStorage.getItem(storageKey) || '{}');
+        const now = new Date();
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        const dailyActivity = Array.isArray(stored.dailyActivity) ? [...stored.dailyActivity] : [];
+        const dayIndex = dailyActivity.findIndex((item: any) => item?.date === today);
+
+        if (dayIndex >= 0) {
+          dailyActivity[dayIndex] = {
+            ...dailyActivity[dayIndex],
+            tokens: Math.max(0, Number(dailyActivity[dayIndex]?.tokens || 0)) + countedTokens,
+            messages: Math.max(0, Number(dailyActivity[dayIndex]?.messages || 0)) + 1,
+          };
+        } else {
+          dailyActivity.push({ date: today, tokens: countedTokens, messages: 1 });
+        }
+
+        const lifetimeTokens = Math.max(0, Number(stored.lifetimeTokens ?? stored.lifetime_tokens ?? 0) || 0) + countedTokens;
+        const peakTokens = Math.max(
+          0,
+          Number(stored.peakTokens ?? stored.peak_tokens ?? 0) || 0,
+          ...dailyActivity.map((item: any) => Math.max(0, Number(item?.tokens || 0) || 0)),
+        );
+        localStorage.setItem(storageKey, JSON.stringify({ lifetimeTokens, peakTokens, dailyActivity }));
+        window.dispatchEvent(new CustomEvent('twinkle-chat-activity-updated', {
+          detail: { date: now.toISOString(), tokens: countedTokens },
+        }));
+      } catch (usageError) {
+        console.warn('Could not save local token usage:', usageError);
+      }
+
+      onAssistantResponse?.(cleanedAiContent);
+
+      const aiMsg: Message = {
+        id: response?.messageId || 'ai-' + Date.now(),
+        sessionId: activeSessionId,
+        role: 'assistant',
+        content: cleanedAiContent,
+        timestamp: new Date().toISOString(),
+      };
+
+      setMessages(prev => {
+        const streamId = streamingAssistantIdRef.current;
+
+        // Replace the streamed bubble with the final server message instead
+        // of appending another assistant bubble.
+        if (streamId) {
+          const streamIndex = prev.findIndex(m => m.id === streamId);
+          if (streamIndex >= 0) {
+            return dedupeMessages(
+              prev.map((message, index) =>
+                index === streamIndex ? { ...aiMsg, id: message.id } : message
+              )
+            );
+          }
+        }
+
+        // A history request can finish at exactly the same time as the final
+        // SSE event. If the exact answer is already present, keep it and do
+        // not append a second copy.
+        const normalizedFinal = cleanedAiContent
+          .replace(/\s+/g, ' ')
+          .trim()
+          .toLowerCase();
+
+        if (normalizedFinal) {
+          const alreadyPresent = prev.some(
+            message =>
+              message.role === 'assistant' &&
+              cleanMessageContent(message.content)
+                .replace(/\s+/g, ' ')
+                .trim()
+                .toLowerCase() === normalizedFinal
+          );
+          if (alreadyPresent) return dedupeMessages(prev);
+        }
+
+        if (prev.some(m => m.id === aiMsg.id)) return dedupeMessages(prev);
+        return dedupeMessages([...prev, aiMsg]);
+      });
+      streamingAssistantIdRef.current = null;
+      streamReceivedTextRef.current = '';
+      setResponsePhase('idle');
+
+      // Generate and persist a professional AI-generated chat title.
+      if ((isNewSession || regenerateTitle || !sessions.some(session => session.id === activeSessionId && session.sessionName && !/^(new chat|chat|e)$/i.test(session.sessionName.trim()))) && activeSessionId) {
+        try {
+          const titleInput = finalMessage ||
+            (filesToSend || []).map(file => file.name).filter(Boolean).join(', ') ||
+            'File analysis';
+          const titleResponse: any = await chatApi.generateTitle(titleInput);
+
+          const titleFromModel = typeof titleResponse?.title === 'string' ? titleResponse.title.trim() : '';
+          const titleFromMessage = titleInput.replace(/\s+/g, ' ').trim();
+          const fallbackTitle = titleFromMessage.length > 36 ? `${titleFromMessage.slice(0, 33).trim()}...` : titleFromMessage;
+          const newTitle =
+            titleFromModel.length >= 3 && !/^(new chat|chat|question|request|e)$/i.test(titleFromModel)
+              ? titleFromModel.slice(0, 60)
+              : (fallbackTitle || 'New Chat');
+
+          await chatApi.renameSession(activeSessionId, newTitle);
+          setTypingSessionTitle({ id: activeSessionId, title: newTitle });
+
+          // Keep the Sidebar's sessions prop synchronized immediately.
+          setSessions(prev =>
+            prev.map(session =>
+              session.id === activeSessionId
+                ? { ...session, sessionName: newTitle }
+                : session
+            )
+          );
+
+          // The optimistic sidebar update above is already authoritative for
+          // this UI. Avoid an extra network round-trip after every message.
+        } catch (renameErr) {
+          console.error('AI-generated Twinkle AI chat title save failed:', renameErr);
+        }
+      }
+    } catch (err: any) {
+      setIsTyping(false);
+      setResponsePhase('idle');
+      streamingAssistantIdRef.current = null;
+      streamReceivedTextRef.current = '';
+
+      if (err?.name === 'AbortError') {
+        console.log('Chat aborted');
+        return;
+      }
+
+      console.error('Chat error:', err);
+      cancelStreamRenderer();
+
+      const status = Number(err?.status);
+
+      let errMsg =
+        'Something went wrong. Please try again.';
+
+      if (status === 400) {
+        errMsg = 'The request could not be processed. Please check your message or attachment and try again.';
+      } else if (status === 401) {
+        errMsg =
+          'Your session has expired. Please log in again.';
+      } else if (status === 403) {
+        errMsg =
+          'You do not have permission to perform this action.';
+      } else if (status === 404) {
+        errMsg =
+          'The requested resource could not be found.';
+      } else if (status === 413) {
+        errMsg =
+          'The uploaded file is too large. Please choose a smaller file.';
+      } else if (status === 415) {
+        errMsg =
+          'This file type is not supported.';
+      } else if (status === 422) {
+        errMsg =
+          'The uploaded content could not be processed.';
+      } else if (status === 429) {
+        errMsg =
+          'The AI service is currently busy. Please wait a few seconds and try again.';
+      } else if (status === 502 || status === 503 || status === 504) {
+        errMsg = selectedModel === 'gemini-3.8-flash'
+          ? 'Twinkle Vision is temporarily overloaded (Gemini returned 503). Please select Twinkle or Twinkle Pro and try again, or retry Twinkle Vision in a moment.'
+          : 'The AI service is temporarily unavailable. Please try again shortly.';
+      } else if (
+        typeof err?.message === 'string' &&
+        err.message.toLowerCase().includes('starting up')
+      ) {
+        errMsg =
+          'Twinkle is temporarily unavailable. Please try again in a moment.';
+      } else if (err instanceof TypeError || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+        errMsg = 'Connection problem. Check your internet connection and try again.';
+      }
+
+      setMessages(prev => dedupeMessages([...prev, {
+          id: 'error-' + Date.now(),
+          sessionId: currentSessionId || 0,
+          role: 'assistant',
+          content: errMsg,
+          timestamp: new Date().toISOString(),
+        }]));
+    } finally {
+      isSendingRef.current = false;
+      abortControllerRef.current = null;
+      activeResponseSessionRef.current = null;
+      setIsTyping(false);
+      setResponsePhase('idle');
+      streamingAssistantIdRef.current = null;
+      streamReceivedTextRef.current = '';
+      setJustFinished(true);
+      setTimeout(() => setJustFinished(false), 3000);
+      setTimeout(() => inputRef.current?.focus(), 100);
+    }
+  };
+
+  const handleSendMessage = async (e?: React.FormEvent, directMessage?: string) => {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+
+    // Acquire the lock BEFORE any async file conversion. Previously two rapid
+    // clicks could both pass this check while fileToDataUrl() was awaiting,
+    // then both call sendMessage(), producing the same assistant response twice.
+    if (isSendingRef.current || isTyping || sendPreparationLockRef.current) return;
+
+    const text = typeof directMessage === 'string' ? directMessage : (input || '');
+
+    // Defensive normalization prevents stale browser/HMR state from causing
+    // "Cannot read properties of undefined (reading 'length')" during upload.
+    const currentSelectedFiles = Array.isArray(selectedFiles)
+      ? selectedFiles.filter((file): file is File => file instanceof File)
+      : [];
+
+    if (!text.trim() && currentSelectedFiles.length === 0) return;
+
+    sendPreparationLockRef.current = true;
+
+    const filesToSend = currentSelectedFiles.length > 0
+      ? [...currentSelectedFiles]
+      : undefined;
+
+    let previewUrls: string[] | undefined;
+
+    try {
+      if (filesToSend && filesToSend.length > 0) {
+        // Keep a data URL for EVERY attachment so the sent message can
+        // render the same attachment after it has been sent or reloaded.
+        previewUrls = await Promise.all(
+          filesToSend.map(fileToDataUrl)
+        );
+        rememberAttachmentNames(filesToSend, previewUrls);
+      }
+
+      await sendMessage(
+        text,
+        undefined,
+        filesToSend,
+        previewUrls
+      );
+
+      // Notify Profile immediately so the activity heatmap updates as soon
+      // as a conversation is persisted, without waiting for the 30s poll.
+      window.dispatchEvent(new CustomEvent('twinkle-chat-activity-updated', {
+        detail: { date: new Date().toISOString() },
+      }));
+    } catch (err: any) {
+      console.error('Failed to prepare uploaded file:', err);
+      setMessages(prev => [
+        ...prev,
+        {
+          id: 'error-' + Date.now(),
+          sessionId: currentSessionId || 0,
+          role: 'assistant',
+          content:
+            typeof err?.message === 'string' && /too large|unsupported|not supported|under \d+/i.test(err.message)
+              ? err.message
+              : 'The uploaded file could not be prepared. Please check the file and try again.',
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+    } finally {
+      sendPreparationLockRef.current = false;
+    }
+  };
+
+  // Retry a user message using the conversation state before that message.
+  // Persisted attachments are reconstructed so images and documents are
+  // actually sent again instead of being reduced to placeholder text.
+  const handleRetryMessage = async (msg: Message) => {
+    if (isTyping) return;
+
+    const msgIndex = messages.findIndex(m => m.id === msg.id);
+    const messagesBeforeMsg = msgIndex > 0 ? messages.slice(0, msgIndex) : [];
+    const attachmentUrls = messageAttachments[msg.id] || [];
+
+    try {
+      const retryFiles = attachmentUrls.length > 0
+        ? await Promise.all(
+            attachmentUrls.map((url, index) =>
+              dataUrlToFile(
+                url,
+                index,
+                getStoredAttachmentName(url) || undefined
+              )
+            )
+          )
+        : undefined;
+
+      const retryText =
+        cleanMessageContent(msg.content) === 'Image uploaded'
+          ? ''
+          : cleanMessageContent(msg.content);
+
+      await sendMessage(
+        retryText,
+        messagesBeforeMsg,
+        retryFiles,
+        attachmentUrls.length > 0 ? attachmentUrls : undefined
+      );
+    } catch (error) {
+      console.error('Failed to restore attachments for retry:', error);
+      setMessages(prev => [
+        ...prev,
+        {
+          id: 'error-' + Date.now(),
+          sessionId: currentSessionId || 0,
+          role: 'assistant',
+          content: 'The attached file could not be restored for retry. Please upload it again.',
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+    }
+  };
+
+  const handleStopResponse = () => {
+    // Invalidate the active send before aborting the network request. This
+    // closes the race where the SSE `done` event arrives at the same time as
+    // the user presses Stop and the full response gets committed again.
+    requestGenerationRef.current += 1;
+    activeResponseSessionRef.current = null;
+    const streamId = streamingAssistantIdRef.current;
+    const streamedText = streamReceivedTextRef.current;
+
+    // Keep the response already received on screen when the user stops it.
+    // `streamReceivedTextRef` already includes text that is waiting in the
+    // render queue, so it is the complete partial response at this moment.
+    if (streamId && streamedText) {
+      const completedText = streamedText;
+      setMessages(prev =>
+        prev.map(message =>
+          message.id === streamId
+            ? { ...message, content: completedText }
+            : message
+        )
+      );
+    }
+
+    abortControllerRef.current?.abort();
+    cancelStreamRenderer();
+    setIsTyping(false);
+    setResponsePhase('idle');
+    streamingAssistantIdRef.current = null;
+    streamReceivedTextRef.current = '';
+    isSendingRef.current = false;
+    abortControllerRef.current = null;
+    window.speechSynthesis?.cancel();
+    setTimeout(() => inputRef.current?.focus(), 100);
+  };
+
+  const createNewSession = () => {
+    // New Chat is a local draft until the first message is sent. Do not create
+    // a backend session here; sendMessage creates it and adds the UUID to URL.
+    if (creatingNewSessionRef.current) return;
+    creatingNewSessionRef.current = true;
+
+    requestGenerationRef.current += 1;
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    cancelStreamRenderer();
+    isSendingRef.current = false;
+    activeResponseSessionRef.current = null;
+    streamingAssistantIdRef.current = null;
+    streamReceivedTextRef.current = '';
+    setIsTyping(false);
+    setResponsePhase('idle');
+    setJustFinished(false);
+
+    setCurrentSessionId(null);
+    persistSessionId(null);
+    setMessages([]);
+    setMessageAttachments({});
+    setInput('');
+    setEditingMessage(null);
+    setSelectedFiles([]);
+    setFilePreviews(prev => {
+      prev.forEach(fp => { if (fp?.preview) URL.revokeObjectURL(fp.preview); });
+      return [];
+    });
+    {
+      const nextGreeting = getRandomChatGreeting(user?.name || user?.username || '', chatGreetingRef.current);
+      chatGreetingRef.current = nextGreeting;
+      setChatGreeting(nextGreeting);
+    }
+    setEmptyChatPrompt(current => getNextEmptyChatPrompt(current));
+    setMobileOpen(false);
+    setModalType('none');
+    skipMessageLoadRef.current = null;
+
+    // A blank draft uses the normal root URL, not a persistent chat UUID.
+    if (window.location.pathname !== '/') navigate('/', { replace: true });
+    requestAnimationFrame(() => { creatingNewSessionRef.current = false; });
+  };
+
+  useEffect(() => {
+    const handleNewChatShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key.toLowerCase() === 'o' || event.code === 'KeyO')) {
+        event.preventDefault();
+        createNewSession();
+      }
+    };
+
+    window.addEventListener('keydown', handleNewChatShortcut);
+    return () => window.removeEventListener('keydown', handleNewChatShortcut);
+  }, []);
+
+  const deleteSession = (sid: number) => {
+    setSessionIdToDelete(sid);
+    setModalType('delete-single');
+  };
+
+  const confirmDeleteSession = async () => {
+    if (sessionIdToDelete === null || isDeletingChat) return;
+
+    const deletedSessionId = sessionIdToDelete;
+    setIsDeletingChat(true);
+
+    try {
+      await chatApi.deleteSession(deletedSessionId);
+
+      // Update React state immediately after the server confirms deletion.
+      // This keeps the sidebar in sync without requiring a browser refresh.
+      setSessions(prev => prev.filter(session => session.id !== deletedSessionId));
+
+      if (currentSessionId === deletedSessionId) {
+        setCurrentSessionId(null);
+        persistSessionId(null);
+        setMessages([]);
+        setEditingMessage(null);
+        setTypingSessionTitle(current =>
+          current?.id === deletedSessionId ? null : current
+        );
+      }
+    } catch (err) {
+      console.error('Delete session failed:', err);
+    } finally {
+      setIsDeletingChat(false);
+      setSessionIdToDelete(null);
+      setModalType('none');
+    }
+  };
+
+  const renameSession = async (sid: number, newName: string) => {
+    const trimmedName = newName.trim();
+    if (!trimmedName) return;
+
+    try {
+      await chatApi.renameSession(sid, trimmedName);
+
+      // Update the parent source of truth immediately. Both desktop and
+      // mobile SessionList instances receive this same sessions array.
+      setSessions(prev =>
+        prev.map(session =>
+          session.id === sid
+            ? { ...session, sessionName: trimmedName }
+            : session
+        )
+      );
+
+    } catch (err) {
+      console.error('Rename failed:', err);
+    }
+  };
+
+  const shareSession = async (_sid: number, messageId?: number | string, promptContent?: string) => {
+    const prompt = cleanMessageContent(promptContent || '').trim();
+    if (!prompt) {
+      setShareError('There is no prompt text to share.');
+      setShareSessionId(-1);
+      setShareLoading(false);
+      return null;
+    }
+
+    setShareSessionId(_sid);
+    setShareCutoffMessageId(messageId ?? null);
+    setSharePromptText(prompt);
+    setShareUrl(null);
+    setShareError(null);
+    setShareLoading(false);
+    // Create a fresh ID for every share action. The prompt is UTF-8 encoded into
+    // the URL fragment, so it is not shown as readable text in the address bar.
+    // Note: this is obfuscation/encoding, not cryptographic encryption.
+    const shareId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+    const promptBytes = new TextEncoder().encode(prompt);
+    let binary = '';
+    promptBytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+    const encodedPrompt = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+    const url = `${window.location.origin}/?share=${encodeURIComponent(shareId)}#p=${encodedPrompt}`;
+    setShareUrl(url);
+    return url;
+  };
+
+  const handleTopShare = async () => {
+    if (topShareBusy) return;
+    if (currentSessionId === null) {
+      setShareError('Start a conversation before creating a public link.');
+      setShareSessionId(-1);
+      return;
+    }
+
+    const shareStartedAt = Date.now();
+    setTopShareBusy(true);
+    setShareSuccessVisible(false);
+    setShareError(null);
+    try {
+      // Create a real public share for the whole current session on the backend.
+      const response = await chatApi.shareSession(currentSessionId) as any;
+      const shareToken = response?.shareToken;
+      if (!response?.success || !shareToken) {
+        throw new Error(response?.error || 'Could not create a public link.');
+      }
+
+      const url = `${window.location.origin}/shared/${encodeURIComponent(shareToken)}`;
+      if (!navigator.clipboard?.writeText) {
+        setShareUrl(url);
+        setShareSessionId(currentSessionId);
+        setSharePromptText('');
+        setShareError('The public link was created, but clipboard access is unavailable. Copy the link from the share dialog.');
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+
+      // Keep the share icon spinning for a total of at least five seconds,
+      // but only show success after link creation and clipboard copy succeed.
+      const remainingLoadingTime = Math.max(0, 5000 - (Date.now() - shareStartedAt));
+      if (remainingLoadingTime > 0) {
+        await new Promise<void>(resolve => window.setTimeout(resolve, remainingLoadingTime));
+      }
+      setShareUrl(url);
+      setShareSuccessVisible(true);
+      setShareSessionId(null);
+      setShareError(null);
+    } catch (error) {
+      setShareError(error instanceof Error ? error.message : 'Could not create or copy the public link.');
+      setShareSessionId(currentSessionId);
+    } finally {
+      setTopShareBusy(false);
+    }
+  };
+
+  const closeShareModal = () => {
+    setShareSessionId(null);
+    setShareCutoffMessageId(null);
+    setSharePromptText('');
+    setShareUrl(null);
+    setShareError(null);
+    setShareLoading(false);
+  };
+
+  const confirmClearAll = async () => {
+    if (isDeletingChat) return;
+    setIsDeletingChat(true);
+    try {
+      await chatApi.clearSessions();
+
+      // Clear the local session collection as soon as the backend confirms
+      // the operation so the sidebar updates immediately.
+      setSessions([]);
+      setTypingSessionTitle(null);
+      setSessionIdToDelete(null);
+      setCurrentSessionId(null);
+      persistSessionId(null);
+      setMessages([]);
+      setEditingMessage(null);
+    } catch (err) {
+      console.error('Clear sessions failed:', err);
+    } finally {
+      setIsDeletingChat(false);
+      setModalType('none');
+    }
+  };
+
+  const handleLogout = async () => {
+    try { await authApi.logout(); } catch (err) { console.error('Logout failed:', err); }
+    finally {
+      setCurrentSessionId(null);
+      persistSessionId(null);
+      onLogout();
+    }
+  };
+
+  
+  const handleStartEdit = (msg: Message) => {
+    setEditingMessage({ id: msg.id, content: cleanMessageContent(msg.content) });
+    setEditInput(cleanMessageContent(msg.content));
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessage(null);
+    setEditInput('');
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingMessage || !editInput.trim()) return;
+    const editedText = editInput.trim();
+    const editedIndex = messages.findIndex(m => m.id === editingMessage.id);
+    const messagesBeforeEdit = editedIndex > 0 ? messages.slice(0, editedIndex) : [];
+    const attachmentUrls = messageAttachments[String(editingMessage.id)] || [];
+    setEditingMessage(null);
+    setEditInput('');
+    try {
+      const editFiles = attachmentUrls.length > 0
+        ? await Promise.all(attachmentUrls.map((url, index) =>
+            dataUrlToFile(url, index, getStoredAttachmentName(url) || undefined)))
+        : undefined;
+      await sendMessage(
+        editedText,
+        messagesBeforeEdit,
+        editFiles,
+        attachmentUrls.length > 0 ? attachmentUrls : undefined,
+        true
+      );
+    } catch (error) {
+      console.error('Failed to restore attachments while editing:', error);
+      setMessages(prev => [...prev, {
+        id: `edit-attachment-error-${Date.now()}`,
+        sessionId: currentSessionId || 0,
+        role: 'assistant',
+        content: 'The original attachment could not be restored for this edit. Please attach the file again and resend.',
+        timestamp: new Date().toISOString(),
+      }]);
+    }
+  };
+
+
+  /**
+   * Called by LiveTalkModal only after its final turn has been persisted.
+   * Make that saved Live Talk session the active chat immediately so the
+   * normal chat area displays the complete transcript without a refresh.
+   */
+  const handleLiveSessionComplete = useCallback((sessionId: number) => {
+    if (!Number.isFinite(sessionId)) return;
+
+    setSessions(prev => {
+      const existing = prev.find(session => session.id === sessionId);
+      if (existing) {
+        return [existing, ...prev.filter(session => session.id !== sessionId)];
+      }
+
+      const now = new Date().toISOString();
+      return [
+        {
+          id: sessionId,
+          userId: user.id,
+          sessionName: 'Live Talk',
+          createdAt: now,
+          updatedAt: now,
+        },
+        ...prev,
+      ];
+    });
+
+    setCurrentSessionId(sessionId);
+    persistSessionId(sessionId);
+    setMessages([]);
+    setEditingMessage(null);
+  }, [user.id]);
+
+  // Render the chat shell immediately; avoid a separate full-screen loading animation.
+
+  return (
+    <div className="relative flex h-[100dvh] min-h-0 w-full max-w-full overflow-hidden bg-white dark:bg-zinc-950 font-sans transition-colors duration-300">
+      <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-zinc-1000/5 rounded-full blur-[160px] pointer-events-none" />
+
+      <Sidebar
+        user={user}
+        sessions={sidebarSessions}
+        currentSessionId={currentSessionId}
+        respondingSessionId={isTyping ? activeResponseSessionRef.current : null}
+        onSelectSession={(id) => {
+          setCurrentSessionId(id);
+          persistSessionId(id);
+          setMobileOpen(false);
+        }}
+        onNewSession={() => {
+          createNewSession();
+          setMobileOpen(false);
+        }}
+        onDeleteSession={deleteSession}
+        onRenameSession={renameSession}
+        onShareSession={shareSession}
+        onClearAll={() => setModalType('delete-all')}
+        onLogout={handleLogout}
+        onProfile={onProfile}
+        onSettings={onSettings}
+        onDesktopStateChange={setDesktopSidebarExpanded}
+        onDesktopWidthChange={setDesktopSidebarWidth}
+        mobileOpen={mobileOpen}
+        onMobileClose={() => setMobileOpen(false)}
+      />
+      <main
+        className="relative ml-0 flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent transition-[margin] duration-300 ease-out lg:ml-[var(--desktop-sidebar-offset)]"
+        style={{ '--desktop-sidebar-offset': `${desktopSidebarExpanded ? desktopSidebarWidth : 60}px` } as React.CSSProperties}
+      >
+        <div className="absolute right-6 top-4 z-[9998]">
+          <button
+            type="button"
+            onClick={() => void handleTopShare()}
+            disabled={topShareBusy}
+            className="group relative hidden sm:inline-flex h-11 items-center gap-2 rounded-xl px-4 text-sm font-medium text-zinc-900 transition-colors hover:bg-zinc-100 disabled:cursor-wait disabled:opacity-70 dark:text-zinc-100 dark:hover:bg-zinc-800"
+            aria-label="Share"
+          >
+            {topShareBusy ? <LoaderCircle className="h-4 w-4 animate-spin" strokeWidth={2} aria-hidden="true" /> : <Upload className="h-5 w-5" strokeWidth={2} />}
+            <span>{topShareBusy ? 'Creating link…' : 'Share'}</span>
+            <span className="pointer-events-none absolute right-0 top-[calc(100%+8px)] hidden whitespace-nowrap rounded-full bg-black px-4 py-2 text-sm font-semibold text-white shadow-xl group-hover:block group-focus-visible:block">
+              Create a public link
+            </span>
+          </button>
+        </div>
+        {shareSuccessVisible && typeof document !== 'undefined' && createPortal(
+          <div role="status" aria-live="polite" className="fixed left-1/2 top-4 sm:top-6 z-[2147483647] flex w-[min(680px,calc(100vw-24px))] max-w-full -translate-x-1/2 items-center gap-3 sm:gap-4 rounded-2xl px-4 py-3 sm:px-5 sm:py-4 text-white shadow-[0_16px_48px_rgba(0,0,0,0.28)]" style={{ backgroundColor: "#16a34a", color: "#ffffff" }}>
+            <CheckCircle2 className="h-6 w-6 shrink-0" strokeWidth={2.2} />
+            <div className="min-w-0 flex-1">
+              <p className="text-base font-semibold">Public link copied</p>
+              <p className="text-sm leading-snug">Anyone with the link can view this conversation.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => { setShareSuccessVisible(false); setShareError(null); setShareSessionId(currentSessionId ?? -1); }}
+              className="shrink-0 rounded-full border border-white/50 !bg-[#16a34a] px-3 py-2 text-sm font-semibold !text-white transition-colors hover:!bg-[#15803d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:px-4"
+              style={{ backgroundColor: '#16a34a', color: '#ffffff' }}
+            >Manage links</button>
+            <button type="button" onClick={() => setShareSuccessVisible(false)} aria-label="Close notification" className="shrink-0 rounded-full !bg-[#16a34a] p-1.5 !text-white transition-colors hover:!bg-[#15803d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white" style={{ backgroundColor: '#16a34a', color: '#ffffff' }}>
+              <X className="h-5 w-5 text-white" />
+            </button>
+          </div>,
+          document.body
+        )}
+        {/* Mobile header */}
+        <header
+          className="lg:hidden absolute top-0 inset-x-0 z-[9997] h-14 flex items-center justify-between px-3 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800"
+        >
+          <button
+            type="button"
+            onClick={() => setMobileOpen(true)}
+            aria-label="Open sidebar"
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-700 dark:text-zinc-200"
+          >
+            <span className="sr-only">Open sidebar</span>
+            <svg
+              width="23"
+              height="20"
+              viewBox="0 0 24 20"
+              fill="none"
+              aria-hidden="true"
+              className="text-zinc-700 dark:text-zinc-200"
+            >
+              <rect x="2" y="2" width="20" height="16" rx="4" stroke="currentColor" strokeWidth="1.8" />
+              <path d="M8.5 2.5V17.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+          </button>
+
+          <span className="absolute left-1/2 -translate-x-1/2 pointer-events-none text-base font-medium text-zinc-900 dark:text-white">
+            Twinkle
+          </span>
+
+          <button
+            type="button"
+            onClick={() => {
+              createNewSession();
+              setMobileOpen(false);
+            }}
+            aria-label="New chat"
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-700 dark:text-zinc-200"
+          >
+            <Edit2 className="w-5 h-5" strokeWidth={1.7} />
+          </button>
+        </header>
+        {/* Messages */}
+        <div
+          className={`twinkle-message-scroll-area relative min-h-0 min-w-0 flex-1 w-full max-w-full overflow-x-hidden overflow-y-auto overscroll-contain pb-40 pt-0 md:pb-44 ${messages.length === 0 && !isTyping ? "flex flex-col justify-center" : ""}`}
+          ref={messagesContainerRef}
+          onScroll={handleScroll}
+        >
+          <div className={`relative mx-auto box-border w-[calc(100%-1rem)] max-w-[800px] px-0 sm:w-[calc(100%-2rem)] md:w-[calc(100%-3rem)] ${messages.length === 0 && !isTyping ? "pt-0 pb-0" : "pt-[92px] md:pt-8 pb-8 md:pb-10"}`}>
+            {messages.length === 0 && !isTyping ? (
+              <div ref={emptyGreetingRef} className="flex -translate-y-[32px] flex-col items-center justify-center min-h-0 w-full text-center px-2 max-w-3xl mx-auto gap-3">
+                <motion.div
+                  initial={{ scale: 0.82, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="mb-0"
+                >
+                  <StormLogo className="twinkle-chat-logo h-7 w-7 md:h-8 md:w-8 text-zinc-800 dark:text-zinc-100" />
+                </motion.div>
+                <motion.h2
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="whitespace-normal text-balance text-[clamp(1.2rem,2.25vw,1.5rem)] font-normal tracking-tight text-zinc-900 dark:text-zinc-100"
+                >
+                  Have Something in Mind?
+                </motion.h2>
+              </div>
+            ) : (
+              <div className="space-y-5 md:space-y-7 pb-6 pt-2 font-medium text-[16px] md:text-[17px]">
+                {messages.map((msg, index) => {
+                  const isEditing = editingMessage?.id === msg.id;
+                  const shouldSpin = isTyping && msg.role === 'assistant' && index === messages.length - 1;
+                  const attachedImages = messageAttachments[msg.id] || [];
+                  const rawMessageContent = cleanMessageContent(msg.content);
+                  const displayContent =
+                    attachedImages.length > 0 && rawMessageContent === 'Image uploaded'
+                      ? ''
+                      : rawMessageContent;
+
+                  return (
+                    <div
+                      key={msg.id || `msg-${index}`}
+                      data-twinkle-message
+                      className={`relative flex w-full min-w-0 ${
+                        msg.role === 'user' ? 'justify-end' : 'justify-start'
+                      }`}
+                    >
+                      <div
+                        className={`flex min-w-0 w-full ${
+                          msg.role === 'user'
+                            ? 'flex-col items-end'
+                            : 'items-start'
+                        }`}
+                      >
+                        {msg.role === 'assistant' && (
+                          <div className="absolute -left-10 top-1 flex h-7 w-7 shrink-0 items-center justify-center md:-left-11 md:h-8 md:w-8">
+                            <StormLogo className="w-6 h-6 text-black dark:text-white" />
+                          </div>
+                        )}
+
+                        {msg.role === 'user' && attachedImages.length > 0 && (
+                          <div className="w-full flex justify-end -mt-1">
+                            <div className="flex flex-wrap justify-end gap-2.5 max-w-[92%] sm:max-w-[88%]">
+                              {attachedImages.filter(isValidAttachmentDataUrl).map((url, i) => {
+                                const mimeMatch = url.match(/^data:([^;,]+)/i);
+                                const mime = mimeMatch?.[1]?.toLowerCase() || '';
+                                const attachmentName =
+                                  getStoredAttachmentName(url) ||
+                                  getAttachmentNameFromDataUrl(url, i);
+                                const isImage = mime.startsWith('image/');
+                                const isPdf = mime === 'application/pdf';
+
+                                return (
+                                  <button
+                                    key={`sender-attachment-${i}`}
+                                    type="button"
+                                    onClick={() => void openPersistedAttachmentPreview(url, i)}
+                                    title="Open attachment preview"
+                                    className="group relative overflow-hidden rounded-xl border border-zinc-200/70 bg-white text-left shadow-sm transition-all hover:border-zinc-500 hover:shadow-md dark:border-zinc-700 dark:bg-zinc-900"
+                                  >
+                                    {isImage ? (
+                                      <img
+                                        src={url}
+                                        alt={`Attachment ${i + 1}`}
+                                        className="block h-32 w-32 object-cover transition-transform duration-200 group-hover:scale-[1.03] sm:h-36 sm:w-36"
+                                      />
+                                    ) : isPdf ? (
+                                      <div className="relative h-32 w-32 overflow-hidden bg-white dark:bg-zinc-800 sm:h-36 sm:w-36">
+                                        <iframe
+                                          src={`${url}#page=1&toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+                                          title={`PDF attachment ${i + 1}`}
+                                          className="pointer-events-none absolute left-0 top-0 h-[576px] w-[408px] origin-top-left scale-[0.31] bg-white"
+                                        />
+                                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/65 via-black/20 to-transparent px-2 pb-2 pt-8">
+                                          <span className="text-[9px] font-bold uppercase tracking-wider text-white">PDF</span>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="flex h-32 w-32 flex-col items-center justify-center gap-2 bg-zinc-50 px-2 dark:bg-zinc-800 sm:h-36 sm:w-36">
+                                        <FileText className="h-9 w-9 text-zinc-900 dark:text-zinc-100" />
+                                        <span className="rounded-md bg-zinc-100 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-zinc-600 dark:bg-zinc-800 dark:text-zinc-600 dark:text-zinc-300">
+                                          {mime === 'application/msword' ? 'DOC'
+                                            : mime.includes('wordprocessingml') ? 'DOCX'
+                                            : mime === 'application/vnd.ms-excel' ? 'XLS'
+                                            : mime.includes('spreadsheetml') ? 'XLSX'
+                                            : mime === 'application/vnd.ms-powerpoint' ? 'PPT'
+                                            : mime.includes('presentationml') ? 'PPTX'
+                                            : mime.split('/')[1]?.toUpperCase() || 'FILE'}
+                                        </span>
+                                        <span className="text-center text-[9px] font-medium text-zinc-400">
+                                          Click to preview
+                                        </span>
+                                      </div>
+                                    )}
+                                    <span className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/45 text-white opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
+                                      <Eye className="h-3.5 w-3.5" />
+                                    </span>
+                                    <span
+                                      className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent px-2 pb-1.5 pt-5 text-[9px] font-semibold text-white"
+                                      title={attachmentName}
+                                    >
+                                      {attachmentName}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className={`flex flex-col gap-1 min-w-0 max-w-full ${
+                          msg.role === 'user' ? 'items-end w-full' : 'flex-1'
+                        }`}>
+                          {/* Message card: do not render an empty bubble for attachment-only messages. */}
+                          {((isEditing || displayContent.trim().length > 0)) && (
+                          <div
+                            className={`min-w-0 max-w-full ${
+                              msg.role === 'user'
+                                ? 'w-fit max-w-[92%] sm:max-w-[88%] px-3.5 py-3 sm:px-4 sm:py-3.5 rounded-2xl shadow-sm border overflow-hidden bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 rounded-tr-none'
+                                : 'w-full rounded-2xl border border-zinc-200/80 dark:border-zinc-700/80 bg-white/70 dark:bg-zinc-900/40 px-4 py-3.5 md:px-5 md:py-4 shadow-sm text-zinc-900 dark:text-zinc-100'
+                            }`}
+                          >
+                            <div className="text-sm md:text-base leading-relaxed markdown-body twinkle-response-content max-w-none min-w-0 w-full break-words [overflow-wrap:anywhere]">
+                              {isEditing ? (
+                                <div className="flex flex-col gap-3 w-full min-w-0 p-1">
+                                  <textarea
+                                    value={editInput}
+                                    onChange={(e) => setEditInput(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleSaveEdit();
+                                      }
+                                      if (e.key === 'Escape') handleCancelEdit();
+                                    }}
+                                    className="w-full max-w-full border rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 resize-none min-h-[100px] bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-700"
+                                    autoFocus
+                                  />
+                                  <div className="flex flex-wrap items-center justify-end gap-2">
+                                    <span className="text-[9px] text-zinc-400 mr-auto">Ctrl + Enter to send · Esc to cancel</span>
+                                    <button
+                                      onClick={handleCancelEdit}
+                                      className="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      onClick={handleSaveEdit}
+                                      disabled={!editInput.trim() || isTyping}
+                                      className="px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest shadow-lg disabled:opacity-40 bg-black text-white hover:bg-zinc-700"
+                                    >
+                                      Send
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <ReactMarkdown
+                                  remarkPlugins={[remarkGfm]}
+                                  components={{
+                                    h1({ children, ...props }: any) {
+                                      return (
+                                        <h1
+                                          className="mt-5 mb-3 text-2xl md:text-3xl font-black tracking-tight text-zinc-950 dark:text-zinc-50"
+                                          {...props}
+                                        >
+                                          {children}
+                                        </h1>
+                                      );
+                                    },
+                                    h2({ children, ...props }: any) {
+                                      return (
+                                        <h2
+                                          className="mt-5 mb-3 text-xl md:text-2xl font-black tracking-tight text-zinc-950 dark:text-zinc-50"
+                                          {...props}
+                                        >
+                                          {children}
+                                        </h2>
+                                      );
+                                    },
+                                    h3({ children, ...props }: any) {
+                                      return (
+                                        <h3
+                                          className="mt-4 mb-2 text-lg md:text-xl font-black tracking-tight text-zinc-950 dark:text-zinc-50"
+                                          {...props}
+                                        >
+                                          {children}
+                                        </h3>
+                                      );
+                                    },
+                                    p({ children, ...props }: any) {
+                                      return <p className="my-2.5 leading-7 break-words [overflow-wrap:anywhere] first:mt-0 last:mb-0" {...props}>{children}</p>;
+                                    },
+                                    ul({ children, ...props }: any) {
+                                      return <ul className="my-3 list-disc space-y-1.5 pl-6 leading-7 marker:text-zinc-400" {...props}>{children}</ul>;
+                                    },
+                                    ol({ children, ...props }: any) {
+                                      return <ol className="my-3 list-decimal space-y-1.5 pl-6 leading-7 marker:text-zinc-500" {...props}>{children}</ol>;
+                                    },
+                                    blockquote({ children, ...props }: any) {
+                                      return <blockquote className="my-3 border-l-3 border-violet-400 pl-4 text-zinc-600 dark:text-zinc-300" {...props}>{children}</blockquote>;
+                                    },
+                                    table({ children, ...props }: any) {
+                                      return (
+                                        <div
+                                          className="twinkle-table-wrap block w-full min-w-0 max-w-full"
+                                          style={{ width: '100%', maxWidth: '100%' }}
+                                        >
+                                          <table
+                                            className="twinkle-response-table w-full min-w-full max-w-full"
+                                            style={{ width: '100%', minWidth: '100%', maxWidth: '100%', tableLayout: 'auto' }}
+                                            {...props}
+                                          >
+                                            {children}
+                                          </table>
+                                        </div>
+                                      );
+                                    },
+                                    thead({ children, ...props }: any) {
+                                      return <thead {...props}>{children}</thead>;
+                                    },
+                                    th({ children, ...props }: any) {
+                                      return <th className="twinkle-response-th" {...props}>{children}</th>;
+                                    },
+                                    td({ children, ...props }: any) {
+                                      return <td className="twinkle-response-td" {...props}>{children}</td>;
+                                    },
+                                    img({ src, alt, ...props }: any) {
+                                      return (
+                                        <figure className="twinkle-response-image">
+                                          <img
+                                            src={src}
+                                            alt={alt || 'Response image'}
+                                            loading="lazy"
+                                            decoding="async"
+                                            {...props}
+                                          />
+                                          {alt && <figcaption>{alt}</figcaption>}
+                                        </figure>
+                                      );
+                                    },
+                                    strong({ children, ...props }: any) {
+                                      return (
+                                        <strong className="font-black" {...props}>
+                                          {children}
+                                        </strong>
+                                      );
+                                    },
+                                    em({ children, ...props }: any) {
+                                      const value = String(children ?? '');
+                                      const isResumeSubtitle =
+                                        /Java Developer\s*[—-]\s*Java Backend Developer/i.test(value);
+                                      return (
+                                        <em
+                                          className={isResumeSubtitle ? 'not-italic font-black' : undefined}
+                                          {...props}
+                                        >
+                                          {children}
+                                        </em>
+                                      );
+                                    },
+                                    a({ children, href, ...props }: any) {
+                                      // Always show the complete destination instead
+                                      // of a shortened Markdown label such as
+                                      // [Cartify Repo](https://github.com/...).
+                                      // This keeps every URL visible AND clickable.
+                                      const visibleHref = href
+                                        ?.replace(/^mailto:/i, '')
+                                        .replace(/^tel:/i, '');
+                                      const isExternal = /^https?:\/\//i.test(href || '');
+
+                                      return (
+                                        <a
+                                          href={href}
+                                          target={isExternal ? '_blank' : undefined}
+                                          rel={isExternal ? 'noopener noreferrer' : undefined}
+                                          className="!underline underline-offset-2 decoration-1 !text-blue-600 dark:!text-blue-400 hover:!text-blue-700 dark:hover:!text-blue-300 font-medium break-all"
+                                          style={{ textDecoration: 'underline' }}
+                                          {...props}
+                                        >
+                                          {visibleHref || children}
+                                        </a>
+                                      );
+                                    },
+                                    pre({ children, ...props }: any) {
+                                      return (
+                                        <div className="my-4 w-full max-w-full min-w-0 overflow-hidden rounded-xl border border-zinc-200/40 dark:border-zinc-500/20 shadow-lg bg-gradient-to-br from-zinc-50/80 to-violet-50/60 dark:from-zinc-950/50 dark:to-violet-950/40">
+                                          <div className="flex items-center gap-2 px-3 sm:px-4 py-2 border-b border-zinc-200/30 dark:border-zinc-500/15 bg-zinc-100/40 dark:bg-zinc-900/20">
+                                            <div className="w-1.5 h-1.5 rounded-full bg-zinc-400 dark:bg-zinc-1000 shrink-0" />
+                                            <span className="text-[10px] font-black uppercase tracking-widest text-zinc-600 dark:text-zinc-300 dark:text-zinc-900 dark:text-zinc-100">Code</span>
+                                          </div>
+                                          <pre
+                                            className="max-w-full overflow-x-auto p-3 sm:p-4 md:p-5 text-[0.75rem] sm:text-[0.82rem] leading-relaxed font-mono text-zinc-900 dark:text-zinc-100 dark:text-zinc-300 whitespace-pre"
+                                            {...props}
+                                          >
+                                            {children}
+                                          </pre>
+                                        </div>
+                                      );
+                                    },
+                                    code({ className, children, ...props }: any) {
+                                      const match = /language-(\w+)/.exec(className || '');
+                                      const content = String(children).replace(/\n$/, '');
+                                      const isInline = props.inline || !className;
+                                      return !isInline && match ? (
+                                        <CodeBlock language={match[1]} value={content} />
+                                      ) : (
+                                        <code
+                                          className={`${className || ''} bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-600 dark:text-zinc-300 px-1 py-0.5 rounded font-mono text-[0.85em] break-words [overflow-wrap:anywhere]`}
+                                          {...props}
+                                        >
+                                          {children}
+                                        </code>
+                                      );
+                                    }
+                                  } as Components}
+                                >
+                                  {normalizeMathDelimiters(displayContent)}
+                                </ReactMarkdown>
+                              )}
+                            </div>
+                          </div>
+                          )}
+
+                          {/* Message action buttons.
+                              Always visible so touch devices do not depend on hover. */}
+                          <div
+                            className={`flex flex-wrap items-center gap-1 mt-1 px-1 ${
+                              msg.role === 'user' ? 'justify-end' : 'justify-start'
+                            }`}
+                          >
+                            {msg.role === 'assistant' && (
+                              <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-[0.18em] mr-auto pl-1">
+                                Twinkle
+                              </span>
+                            )}
+
+                            <span className="text-[9px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest whitespace-nowrap mr-1">
+                              {msg.timestamp
+                                ? new Date(msg.timestamp).toLocaleTimeString('en-IN', {
+                                    timeZone: 'Asia/Kolkata',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })
+                                : 'Now'}
+                            </span>
+
+                            <div className="flex items-center gap-0.5">
+                                {msg.role === 'user' ? (
+                                  <>
+                                    <button type="button" onClick={async () => {
+                                      try {
+                                        await navigator.clipboard.writeText(cleanMessageContent(msg.content));
+                                        setCopiedId(msg.id);
+                                        window.setTimeout(() => setCopiedId(null), 2000);
+                                      } catch { window.prompt('Copy this message:', cleanMessageContent(msg.content)); }
+                                    }} data-tooltip={copiedId === msg.id ? 'Copied' : 'Copy message'} aria-label="Copy message"
+                                      className="twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-300 transition-all touch-manipulation">
+                                      {copiedId === msg.id ? <Check className="w-4 h-4 md:w-3.5 md:h-3.5" /> : <Copy className="w-4 h-4 md:w-3.5 md:h-3.5" />}
+                                    </button>
+                                    <button type="button" onClick={() => {
+                                      if (currentSessionId !== null) void shareSession(currentSessionId, msg.id, msg.content);
+                                    }} data-tooltip="Share prompt" aria-label="Share prompt"
+                                      className="twinkle-tooltip-trigger hidden sm:inline-flex p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-300 transition-all touch-manipulation">
+                                      <Upload className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                                    </button>
+                                    {!isEditing && !isTyping && (
+                                      <button type="button" onClick={() => handleStartEdit(msg)} data-tooltip="Edit message" aria-label="Edit message"
+                                        className="twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-300 transition-all touch-manipulation">
+                                        <Pencil className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                                      </button>
+                                    )}
+                                  </>
+                                ) : (
+                                  <>
+                                    <button type="button" onClick={() => handleReadAloud(msg)}
+                                      data-tooltip={speakingMessageId === msg.id ? 'Stop reading' : 'Read aloud'}
+                                      aria-label={speakingMessageId === msg.id ? 'Stop reading aloud' : 'Read response aloud'}
+                                      aria-pressed={speakingMessageId === msg.id}
+                                      className={`twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all touch-manipulation ${speakingMessageId === msg.id ? 'text-violet-600 dark:text-violet-400' : 'text-zinc-500 dark:text-zinc-300'}`}>
+                                      {speakingMessageId === msg.id ? <VolumeX className="w-4 h-4 md:w-3.5 md:h-3.5" /> : <Volume2 className="w-4 h-4 md:w-3.5 md:h-3.5" />}
+                                    </button>
+                                    <button type="button" onClick={async () => {
+                                      try {
+                                        await navigator.clipboard.writeText(cleanMessageContent(msg.content));
+                                        setCopiedId(msg.id);
+                                        window.setTimeout(() => setCopiedId(null), 2000);
+                                      } catch { window.prompt('Copy this response:', cleanMessageContent(msg.content)); }
+                                    }} data-tooltip={copiedId === msg.id ? 'Copied' : 'Copy response'} aria-label="Copy response"
+                                      className="twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-300 transition-all touch-manipulation">
+                                      {copiedId === msg.id ? <Check className="w-4 h-4 md:w-3.5 md:h-3.5" /> : <Copy className="w-4 h-4 md:w-3.5 md:h-3.5" />}
+                                    </button>
+                                    <button type="button" onClick={() => {
+                                      if (currentSessionId !== null) void shareSession(currentSessionId, msg.id, msg.content);
+                                    }} data-tooltip="Share prompt" aria-label="Share prompt"
+                                      className="twinkle-tooltip-trigger hidden sm:inline-flex p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-300 transition-all touch-manipulation">
+                                      <Upload className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {isTyping && !(
+                  messages[messages.length - 1]?.role === 'assistant' &&
+                  cleanMessageContent(messages[messages.length - 1]?.content || '').length > 0
+                ) && (
+                  <motion.div
+                    key="twinkle-response-loading"
+                    initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.22, ease: 'easeOut' }}
+                    className="!m-0 flex w-full items-start gap-2.5 border-0 bg-transparent p-0 shadow-none rounded-none md:gap-3"
+                    style={{ background: 'transparent', border: 0, boxShadow: 'none' }}
+                    role="status"
+                    aria-live="polite"
+                    aria-label="Twinkle AI is thinking"
+                  >
+                    <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center md:h-9 md:w-9" aria-hidden="true">
+                      <StormLogo className="twinkle-chat-logo h-6 w-6 text-zinc-800 dark:text-zinc-100 md:h-7 md:w-7" />
+                    </div>
+                    <div className="flex min-h-[40px] items-center border-0 bg-transparent py-2 shadow-none rounded-none">
+                      <motion.span
+                        className="text-sm font-semibold bg-gradient-to-r from-fuchsia-500 via-violet-500 to-sky-500 bg-clip-text text-transparent"
+                        aria-label="Thinking"
+                        animate={{
+                          opacity: [0.65, 1, 0.75],
+                          backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'],
+                          filter: [
+                            'drop-shadow(0 0 0px rgba(217,70,239,0))',
+                            'drop-shadow(0 0 5px rgba(168,85,247,0.35))',
+                            'drop-shadow(0 0 0px rgba(217,70,239,0))',
+                          ],
+                        }}
+                        transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                        style={{ backgroundSize: '200% 200%' }}
+                      >
+                        Thinking
+                      </motion.span>
+                      <motion.span
+                        className="ml-1 inline-flex gap-0.5 text-sm font-semibold text-violet-500"
+                        aria-hidden="true"
+                      >
+                        {[0, 1, 2].map((dot) => (
+                          <motion.span
+                            key={dot}
+                            animate={{ opacity: [0.25, 1, 0.25], y: [0, -3, 0] }}
+                            transition={{ duration: 0.8, repeat: Infinity, delay: dot * 0.16, ease: 'easeInOut' }}
+                          >
+                            .
+                          </motion.span>
+                        ))}
+                      </motion.span>
+                    </div>
+                  </motion.div>
+                )}
+
+                <div ref={messagesEndRef} />
+              </div>
+            )}
+
+            {(messages.length === 0 && !isTyping) && <div ref={messagesEndRef} />}
+          </div>
+
+          {/* Soft fade: messages visually disappear into the composer instead of
+              abruptly stopping at its top edge while the user scrolls. */}
+          <div aria-hidden="true" className="chat-messages-bottom-mask" />
+        </div>
+
+        {/* Input bar */}
+        <div
+          className={`twinkle-composer-position fixed bottom-0 left-0 right-0 z-[9000] w-full max-w-none overflow-visible bg-transparent px-2 pt-1 pb-[calc(0.35rem+env(safe-area-inset-bottom))] sm:px-4 sm:pt-1.5 sm:pb-[calc(0.5rem+env(safe-area-inset-bottom))] lg:px-6 lg:pt-2 lg:pb-[calc(0.65rem+env(safe-area-inset-bottom))] ${messages.length === 0 && !isTyping ? 'twinkle-composer-empty-state' : ''}`}
+          style={messages.length === 0 && !isTyping && emptyComposerTop !== null ? { top: `${emptyComposerTop}px`, bottom: 'auto' } : undefined}
+        >
+          <div
+            className="twinkle-composer-shell relative mx-auto box-border min-w-0 w-full max-w-[800px]"
+            style={{ boxSizing: 'border-box' }}
+          >
+            {showScrollBottom && !isAtBottom && messages.length > 0 && (
+              <button
+                type="button"
+              className="group absolute left-1/2 top-[-3.25rem] z-[80] flex h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full border border-zinc-200 bg-white shadow-[0_4px_14px_rgba(0,0,0,0.12)] dark:border-zinc-700 dark:bg-zinc-900"
+                style={{ color: liveTalkColor.swatch }}
+                aria-label="Scroll to latest message"
+                data-tooltip="Scroll to latest message"
+                onClick={() => {
+                  const container = messagesContainerRef.current;
+                  if (!container) return;
+                  container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+                  requestAnimationFrame(() => syncScrollState(container));
+                }}
+              >
+                {isTyping ? (
+                  <>
+                    <span className="flex items-center justify-center gap-[3px] group-hover:hidden" aria-hidden="true">
+                      {[0, 1, 2].map((dot) => (
+                        <motion.span
+                          key={dot}
+                          className="block shrink-0 rounded-full"
+                          style={{ width: 6, height: 6, backgroundColor: 'currentColor', opacity: 1 }}
+                          animate={{ y: [0, -3, 0], opacity: [0.55, 1, 0.55] }}
+                          transition={{ duration: 0.8, repeat: Infinity, ease: 'easeInOut', delay: dot * 0.16 }}
+                        />
+                      ))}
+                    </span>
+                    <span className="hidden items-center justify-center group-hover:flex" aria-hidden="true">
+                      <LongTailArrowDown className="h-4 w-4 md:h-5 md:w-5" />
+                    </span>
+                  </>
+                ) : (
+                  <LongTailArrowDown className="h-4 w-4 md:h-5 md:w-5" aria-hidden="true" />
+                )}
+              </button>
+            )}
+
+
+            <div className={`relative left-[1px] z-[60] flex w-full min-w-0 flex-col overflow-visible rounded-[24px] border border-zinc-200/90 bg-white shadow-[0_2px_18px_rgba(0,0,0,0.08)] transition-all dark:border-zinc-700/90 dark:bg-zinc-900 dark:shadow-black/20 ${justFinished ? 'animate-blink' : ''}`}>
+              {/* File preview strip (kept for consistency but never shown without UI trigger) */}
+              <AnimatePresence>
+                {filePreviews.length > 0 && (
+                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="flex flex-wrap gap-3 px-3 pt-3 pb-2.5 border-b border-zinc-100 dark:border-zinc-800/70">
+                    {filePreviews.map(fp => (
+                      <div key={fp.id} className="relative flex flex-col items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => void openFilePreview(fp.file, fp.preview)}
+                          className="group/preview relative block w-20 text-left"
+                          title={`Preview ${fp.file.name}`}
+                        >
+                          {fp.file.type.startsWith('image/') && fp.preview ? (
+                            <div className="w-20 h-16 rounded-xl overflow-hidden bg-zinc-200 dark:bg-zinc-700 shadow-sm border border-zinc-200/60 cursor-pointer">
+                              <img src={fp.preview} alt={fp.file.name} className="w-full h-full object-cover transition-transform group-hover/preview:scale-105" />
+                            </div>
+                          ) : fp.file.type === 'application/pdf' ? (
+                            <div className="flex h-16 w-20 flex-col items-center justify-center gap-1 rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-800 cursor-pointer hover:border-zinc-400 dark:hover:border-zinc-500">
+                              <FileText className="h-6 w-6 text-zinc-800 dark:text-zinc-100" />
+                              <span className="text-[8px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400">PDF</span>
+                            </div>
+                          ) : (
+                            <div className="w-20 h-16 rounded-xl flex flex-col items-center justify-center gap-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 cursor-pointer hover:border-zinc-500 dark:hover:border-zinc-500/50 transition-colors">
+                              <FileText className="w-6 h-6 text-zinc-900 dark:text-zinc-100" />
+                              <span className="text-[8px] font-black uppercase text-zinc-500 dark:text-zinc-400">{fp.file.name.split('.').pop()?.toUpperCase() || 'FILE'}</span>
+                            </div>
+                          )}
+                          <span className="mt-1 block text-[9px] font-medium text-zinc-500 dark:text-zinc-400 truncate max-w-[80px]" title={fp.file.name}>{fp.file.name}</span>
+                          <span className="block text-[8px] text-zinc-400">{formatFileSize(fp.file.size)}</span>
+                        </button>
+                        <button onClick={() => removeFile(fp.id)} className="absolute -top-1.5 -right-1.5 w-[18px] h-[18px] rounded-full flex items-center justify-center bg-zinc-600 dark:bg-zinc-500 text-white shadow-md hover:bg-zinc-500">
+                          <X className="w-2.5 h-2.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <div
+                ref={modelPickerRef}
+                className="twinkle-composer-row relative z-[200] flex min-w-0 items-center"
+              >
+                {/* Hidden file input */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.tsv,.json,.xml,.html,.htm,.md,.markdown,.rtf,.odt,.ods,.odp"
+                  onChange={(e) => {
+                    void handleFileSelection(e.target.files);
+                    e.currentTarget.value = '';
+                  }}
+                />
+
+                {/* Main prompt area — always above the action row */}
+                {voiceInputActive ? (
+                  <div
+                    className="relative flex min-h-[58px] w-full min-w-0 items-center gap-1.5 px-1.5 py-1.5 sm:min-h-[64px] sm:px-2"
+                    aria-live="polite"
+                    aria-label={voiceSpeechDetected ? 'Listening and transcribing' : 'Speak now'}
+                  >
+                    {/* Cancel — returns to the normal composer without sending. */}
+                    <motion.button
+                      type="button"
+                      onClick={cancelVoiceInput}
+                      aria-label="Cancel dictation"
+                      data-tooltip="Cancel"
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.9 }}
+                      className="twinkle-tooltip-trigger flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white sm:h-9 sm:w-9"
+                    >
+                      <X className="h-[19px] w-[19px]" strokeWidth={2.1} />
+                    </motion.button>
+
+                    {/* This is the existing composer/search field — no second popup. */}
+                    <div className="relative min-w-0 flex-1 self-stretch">
+                      <div className="pointer-events-none absolute left-1 top-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 dark:text-zinc-500">
+                        <span>{voiceSpeechDetected ? 'Listening' : 'Speak now'}</span>
+                        <span className="flex items-end gap-[2px]" aria-hidden="true">
+                          {[0, 1, 2, 3].map(index => (
+                            <motion.span
+                              key={index}
+                              className="w-[2px] rounded-full"
+                              style={{ background: liveTalkColor.swatch }}
+                              animate={{ height: voiceSpeechDetected ? [4, 10 + index * 2, 4] : [4, 6, 4] }}
+                              transition={{ duration: 0.5, repeat: Infinity, delay: index * 0.07, ease: 'easeInOut' }}
+                            />
+                          ))}
+                        </span>
+                      </div>
+                      <textarea
+                        ref={inputRef}
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        rows={1}
+                        aria-label="Ask Anything"
+                        className="twinkle-composer-textarea block h-full w-full min-w-0 resize-none overflow-y-auto bg-transparent px-1 pt-4 text-[16px] font-medium leading-[1.35] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[44px] max-h-[96px] sm:text-[17px]"
+                        placeholder="Speak to Twinkle…"
+                        onInput={(e) => {
+                          const t = e.target as HTMLTextAreaElement;
+                          t.style.height = 'auto';
+                          t.style.height = `${Math.min(t.scrollHeight, 96)}px`;
+                        }}
+                      />
+                    </div>
+
+                    {/* Deliberate space before the voice controls. */}
+                    <div className="w-2 shrink-0 sm:w-3" aria-hidden="true" />
+
+                    {/* Stop — commits the spoken text to the existing search bar. */}
+                    <motion.button
+                      type="button"
+                      onClick={() => void stopVoiceCapture()}
+                      disabled={voiceCaptureStopped}
+                      aria-label="Stop dictation"
+                      data-tooltip="Stop"
+                      whileHover={{ scale: voiceCaptureStopped ? 1 : 1.05 }}
+                      whileTap={{ scale: 0.9 }}
+                      className="twinkle-tooltip-trigger relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition-all disabled:cursor-default disabled:opacity-60 sm:h-9 sm:w-9"
+                      style={{ background: liveTalkColor.swatch }}
+                    >
+                      <span className="h-3.5 w-3.5 rounded-[3px] bg-white" />
+                    </motion.button>
+
+                    {/* Send — commits the current composer text, then sends it. */}
+                    <motion.button
+                      type="button"
+                      onClick={async () => {
+                        if (voiceCommitInProgressRef.current) return;
+                        const text = await commitVoiceInput();
+                        if (text.trim()) await handleSendMessage(undefined, text);
+                      }}
+                      aria-label="Send message"
+                      data-tooltip="Send message"
+                      whileHover={{ scale: 1.05, y: -1 }}
+                      whileTap={{ scale: 0.92 }}
+                      className="twinkle-tooltip-trigger relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition-all sm:h-9 sm:w-9"
+                      style={{ background: liveTalkColor.swatch }}
+                    >
+                      <svg viewBox="0 0 24 24" className="h-[19px] w-[19px]" aria-hidden="true">
+                        <path d="M12 21V4M6.25 9.75 12 4l5.75 5.75" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </motion.button>
+                  </div>
+                ) : (
+                  <div className="twinkle-composer-prompt relative flex min-h-[48px] min-w-0 flex-1 items-center px-2 py-1 sm:min-h-[52px] sm:px-2">
+                    <textarea
+                      ref={inputRef}
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey && !isTyping) {
+                          e.preventDefault();
+                          handleSendMessage();
+                        }
+                      }}
+                      placeholder="Ask Anything"
+                      rows={1}
+                      className="twinkle-composer-textarea block w-full min-w-0 resize-none overflow-y-auto bg-transparent p-0 text-[15px] font-medium leading-[1.35] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500 min-h-[38px] max-h-[200px] transition-[height] duration-150 sm:text-[16px] sm:min-h-[40px]"
+                      onInput={(e) => {
+                        const t = e.target as HTMLTextAreaElement;
+                        t.style.height = 'auto';
+                        t.style.height = `${Math.min(t.scrollHeight, 200)}px`;
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* Bottom action row: plus → model → mic → send/live talk */}
+                {!voiceInputActive && (
+                  <div className="twinkle-composer-actions flex shrink-0 items-center gap-0 px-1 sm:px-1.5">
+                  {/* + attachment button */}
+                  <motion.button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isTyping || isProcessingFiles}
+                    aria-label="Attach files"
+                    data-tooltip="Attach files"
+                    whileHover={{ scale: 1.04 }}
+                    whileTap={{ scale: 0.94 }}
+                    className="twinkle-tooltip-trigger twinkle-composer-plus group relative self-center flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-700 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-900 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-zinc-800 dark:hover:text-white"
+                  >
+                    {isProcessingFiles ? (
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-600 dark:border-t-indigo-400" />
+                    ) : (
+                      <Plus className="h-7 w-7 shrink-0 opacity-100" strokeWidth={1.6} />
+                    )}
+                  </motion.button>
+
+                  <div className="min-w-0 flex-1" />
+
+                  {/* Model selector */}
+                  <div className="group relative inline-flex h-8 min-w-0 max-w-full shrink items-center gap-1 rounded-lg border-0 bg-transparent px-1.5 text-black shadow-none outline-none transition-colors hover:bg-zinc-100/70 dark:bg-transparent dark:text-white dark:hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50 sm:gap-1.5 sm:px-2">
+                    <motion.button
+                      type="button"
+                      onClick={() => setModelPickerOpen(prev => !prev)}
+                      aria-haspopup="listbox"
+                      aria-expanded={modelPickerOpen}
+                      data-tooltip={selectedModelName}
+                      whileHover={{ y: -1 }}
+                      whileTap={{ scale: 0.97 }}
+                      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                      
+                         className="twinkle-tooltip-trigger group relative inline-flex h-8 min-w-0 max-w-full shrink items-center gap-1 rounded-lg border-0 bg-transparent px-1 text-black shadow-none outline-none transition-colors hover:bg-zinc-100/70 dark:bg-transparent dark:text-white dark:hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-50 sm:shrink-0 sm:gap-1.5 sm:px-2"
+>
+                            <span key={activeModel.id} className="whitespace-nowrap text-xs font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:text-sm">
+                                {activeModel.name}
+                                       </span>
+                                 <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" />
+                               </motion.button>
+                                    <AnimatePresence>
+                                {modelPickerOpen && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: 8, scale: 0.97 }}
+                          transition={{ duration: 0.16, ease: 'easeOut' }}
+                          role="listbox"
+                          aria-label="Select AI model"
+                          className="model-dropdown z-[99999] max-h-[min(360px,calc(100dvh-150px))] overflow-y-auto overflow-x-hidden border border-zinc-200/90 bg-white/95 p-1.5 shadow-2xl shadow-zinc-900/20 backdrop-blur-2xl dark:border-zinc-700/90 dark:bg-zinc-900/95 dark:shadow-black/50 sm:max-h-[420px] sm:overflow-y-auto sm:rounded-2xl sm:p-2"
+                        >
+                          <div className="px-2 pb-2 pt-1">
+                            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400 dark:text-zinc-500">
+                              Select AI model
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            {MODEL_OPTIONS.map(option => {
+                              const Icon = option.icon;
+                              const selected = option.id === selectedModel;
+                              return (
+                                <motion.button
+                                  key={option.id}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={selected}                                
+                                      onClick={(event) => {
+                                       event.stopPropagation();
+                                       chooseModel(option.id);
+                                              }}
+                                  whileHover={{ x: 2 }}
+                                  whileTap={{ scale: 0.985 }}
+                                  transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+                                  className={`flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-all ${selected ? 'border-zinc-500 bg-zinc-100 shadow-sm dark:border-zinc-500 dark:bg-zinc-950/40' : 'border-transparent hover:border-zinc-200 hover:bg-zinc-50 dark:hover:border-zinc-700 dark:hover:bg-zinc-800/80'}`}
+                                >
+                                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${selected ? 'bg-black text-white shadow-md' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'}`}>
+                                    <Icon className="h-4 w-4" />
+                                  </span>
+                                  <span className="min-w-0 flex-1">
+                                    <span className="flex items-center gap-2">
+                                      <span className="truncate text-xs font-medium text-zinc-800 dark:text-zinc-100">{option.name}</span>
+                                    </span>
+                                    <span className="mt-0.5 block truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
+                                      {option.description}{option.vision ? ' · Vision' : ''}
+                                    </span>
+                                  </span>
+                                  {selected && <Check className="h-4 w-4 shrink-0 text-zinc-600 dark:text-zinc-300" />}
+                                </motion.button>
+                              );
+                            })}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
+                  {!voiceInputActive && (
+                    <motion.button
+                      type="button"
+                      // Start voice capture on the earliest pointer event so the
+                      // browser can initialize the microphone before the click
+                      // event/render cycle completes. The existing guard inside
+                      // startVoiceInput prevents the follow-up click from
+                      // starting a second recognition session.
+                      onPointerDown={startVoiceInput}
+                      onClick={(event) => event.preventDefault()}
+                      disabled={isTyping || isProcessingFiles}
+                      aria-label="Voice input"
+                      data-tooltip="Dictate"
+                      whileHover={{ scale: 1.06 }}
+                      whileTap={{ scale: 0.9 }}
+                      className="twinkle-tooltip-trigger twinkle-composer-mic ml-1 mr-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:ml-1 sm:mr-1.5 sm:h-8 sm:w-8"
+                    >
+                      <Mic className="h-5 w-5" strokeWidth={2} />
+                    </motion.button>
+                  )}
+
+                  {/* Live Talk / Send */}
+                  
+                    {!isTyping && !input.trim() && filePreviews.length === 0 ? (
+                      <motion.button
+                        key="live-talk"
+                        type="button"
+                        onPointerDown={() => {
+                          // Start token acquisition on press, in parallel with
+                          // opening the Live Talk modal.
+                          warmLiveToken();
+                        }}
+                        onClick={() => setLiveTalkOpen(true)}
+                        aria-label="Open Live Talk"
+                        data-tooltip="Live Talk"
+                        className="twinkle-tooltip-trigger twinkle-composer-submit relative z-[30] flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white transition sm:h-7 sm:w-7"
+                        style={{
+                          background: liveTalkColor.swatch,
+                          boxShadow: 'none',
+                        }}
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          className="h-[22px] w-[22px]"
+                          aria-hidden="true"
+                        >
+                          <path
+                            d="M4 8v8M9.3 3.5v17M14.7 6v12M20 8v8"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                      </motion.button>
+                    ) : (
+                      <motion.button
+                        key="send"
+                        type="button"
+                        onClick={isTyping ? handleStopResponse : () => handleSendMessage()}
+                        disabled={!input.trim() && (!Array.isArray(filePreviews) || filePreviews.length === 0) && !isTyping}
+                        aria-label={isTyping ? 'Stop response' : 'Send message'}
+                        data-tooltip={isTyping ? 'Stop response' : 'Send message'}
+                        className={`twinkle-tooltip-trigger twinkle-composer-submit relative z-[30] flex h-7 w-7 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-7 sm:w-7 ${isTyping ? 'border-transparent text-white' : 'border-transparent text-white'}`}
+                        style={{
+                          // Match the exact Live Talk modal button background.
+                          // Do not use the settings swatch/solid color here.
+                          background: liveTalkColor.swatch,
+                          boxShadow: 'none',
+                        }}
+                      >
+                        {isTyping ? (
+                          <span className="relative flex h-full w-full items-center justify-center">
+                            <span className="h-3.5 w-3.5 rounded-[3px] bg-white shadow-sm" />
+                          </span>
+                        ) : (
+                          <svg
+                            viewBox="0 0 24 24"
+                            className="h-[16px] w-[16px]"
+                            aria-hidden="true"
+                          >
+                            <path
+                              d="M12 21V4M6.25 9.75 12 4l5.75 5.75"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.1"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        )}
+                      </motion.button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+            </div>
+            {messages.length > 0 && (
+            <div
+              className="twinkle-chat-disclaimer twinkle-chat-disclaimer-fixed !mt-1.5 !mb-0"
+              aria-live="polite"
+            >
+              <p className="text-center text-[10px] leading-relaxed font-medium text-zinc-500/70 dark:text-zinc-400/70 sm:text-[11px]">
+                <strong className="font-semibold">Twinkle is AI and can make mistakes.</strong>
+              </p>
+            </div>
+            )}
+          </div>
+        </div>
+      </main>
+
+      <LiveTalkModal
+        open={liveTalkOpen}
+        onClose={() => setLiveTalkOpen(false)}
+        onSessionComplete={handleLiveSessionComplete}
+      />
+
+      <AnimatePresence>
+        {previewFile && previewUrl && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[12000] flex items-center justify-center bg-black/70 p-3 sm:p-6 backdrop-blur-sm"
+            onMouseDown={(e) => { if (e.target === e.currentTarget) closeFilePreview(); }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 10 }}
+              className="relative flex h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-white shadow-2xl dark:bg-zinc-900"
+            >
+              <div className="flex shrink-0 items-center gap-3 border-b border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-600 dark:text-zinc-300">
+                  {previewFile.type.startsWith('image/') ? <Eye className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-bold text-zinc-900 dark:text-zinc-100">{previewFile.name}</p>
+                  <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">{previewFile.type === 'application/pdf' ? 'PDF preview' : previewFile.type.startsWith('image/') ? 'Image preview' : /\.docx$/i.test(previewFile.name) ? 'DOCX preview' : 'Document preview'}</p>
+                </div>
+                <button type="button" onClick={closeFilePreview} aria-label="Close preview" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto bg-zinc-100 p-3 dark:bg-zinc-950 sm:p-5">
+                {previewFile.type.startsWith('image/') ? (
+                  <div className="flex min-h-full items-center justify-center"><img src={previewUrl} alt={previewFile.name} className="max-h-full max-w-full rounded-xl object-contain shadow-lg" /></div>
+                ) : previewFile.type === 'application/pdf' ? (
+                  <PdfPreview src={previewUrl} fileName={previewFile.name} />
+                ) : previewText !== null ? (
+                  <pre className="mx-auto min-h-full max-w-4xl whitespace-pre-wrap break-words rounded-xl bg-white p-5 font-mono text-xs leading-relaxed text-zinc-800 shadow-sm dark:bg-zinc-900 dark:text-zinc-200">{previewText}</pre>
+                ) : (
+                  <div className="flex min-h-full items-center justify-center"><div className="max-w-md rounded-2xl bg-white p-8 text-center shadow-sm dark:bg-zinc-900"><FileText className="mx-auto mb-4 h-12 w-12 text-zinc-900 dark:text-zinc-100" /><h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100">{previewFile.name}</h3><p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">This document is attached and ready for AI analysis. The browser cannot render this legacy Office format directly.</p></div></div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <ShareChatModal
+        isOpen={shareSessionId !== null}
+        shareUrl={shareUrl}
+        chatName="Share prompt"
+        promptText={sharePromptText}
+        shareDescription="Anyone with this link can open Twinkle AI with this prompt ready to send."
+        isLoading={shareLoading}
+        error={shareError}
+        onClose={closeShareModal}
+      />
+
+      <ConfirmationModal
+        isOpen={modalType === 'delete-single'}
+        onClose={() => setModalType('none')}
+        onConfirm={confirmDeleteSession}
+        title="Delete chat?"
+        confirmText={isDeletingChat ? 'Deleting…' : 'Delete'}
+        isLoading={isDeletingChat}
+        closeOnConfirm={false}
+        message={<>This will permanently delete{' '}<strong className="font-bold">{sessionToDelete?.sessionName || 'this chat'}</strong>. {isDeletingChat ? `Processing a ${deleteDataWeight} volume of chat data. Please wait…` : 'This can’t be undone.'}</>}
+      />
+      <ConfirmationModal
+        isOpen={modalType === 'delete-all'}
+        onClose={() => setModalType('none')}
+        onConfirm={confirmClearAll}
+        title="Clear all chats?"
+        message={isDeletingChat ? `Processing a ${deleteDataWeight} volume of chat data. Please wait…` : `All ${sessions.length} chats will be permanently deleted.`}
+        confirmText={isDeletingChat ? 'Deleting…' : 'Clear All'}
+        isLoading={isDeletingChat}
+        closeOnConfirm={false}
+      />
+    </div>
+  );
+}
