@@ -38,9 +38,17 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { User, Session } from '../types';
-import { authApi, chatApi, previewGeminiVoice } from '../lib/api';
-import { getVoiceTheme } from '../lib/voiceThemes';
+import {
+  authApi,
+  chatApi,
+  prefetchGeminiVoice,
+  previewGeminiVoice,
+  startLiveTokenKeepWarm,
+  stopGeminiVoicePreview,
+} from '../lib/api';
+import { getVoiceOrbPalette } from '../lib/voiceThemes';
 import { getSavedLiveTalkColor } from '../lib/liveTalkColors';
+import FoggyOrb from '../components/FoggyOrb';
 import {
   loadPrefs,
   savePrefs,
@@ -148,7 +156,7 @@ const SECTION_GROUPS: Array<{
   {
     heading: 'Preferences',
     items: [
-      { label: 'General', id: 'general', icon: SlidersHorizontal, blurb: 'Account, language and Live Talk basics.' },
+      { label: 'General', id: 'general', icon: SlidersHorizontal, blurb: 'Account, language and interface basics.' },
       { label: 'Appearance', id: 'appearance', icon: Palette, blurb: 'Theme, text size and motion.' },
       { label: 'Voice', id: 'voice', icon: Mic, blurb: 'Pick the Gemini voice used by Live Talk.' },
       { label: 'Shortcuts', id: 'shortcuts', icon: Keyboard, blurb: 'Keyboard shortcuts to move faster.' },
@@ -375,7 +383,7 @@ function Btn({
     primary:
       'bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200',
     danger:
-      'border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-400 dark:hover:bg-red-950/40',
+      'border border-[#fecaca] bg-[#fef2f2] text-[#dc2626] hover:bg-[#fee2e2] dark:border-[#7f1d1d] dark:bg-[#2a0f12] dark:text-[#f87171] dark:hover:bg-[#3a1418]',
   }[variant];
 
   return (
@@ -528,12 +536,49 @@ function Kbd({ children }: { children: ReactNode }) {
   );
 }
 
+// Sliding window of dots so the active voice is always visible, no matter
+// where it sits in the list of 30.
+function VoiceDots({
+  selectedIndex,
+  onPick,
+}: {
+  selectedIndex: number;
+  onPick: (voice: string) => void;
+}) {
+  const size = 9;
+  const start = Math.max(0, Math.min(selectedIndex - Math.floor(size / 2), VOICES.length - size));
+  const indexes = Array.from({ length: size }, (_, i) => start + i);
+
+  return (
+    <div className="flex items-center justify-center gap-2" role="tablist" aria-label="Voices">
+      {indexes.map(index => {
+        const voice = VOICES[index];
+        const selected = index === selectedIndex;
+        return (
+          <button
+            key={voice.name}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            onClick={() => onPick(voice.name)}
+            className={`h-2.5 rounded-full transition-all ${
+              selected ? 'w-5 bg-zinc-900 dark:bg-white' : 'w-2.5 bg-zinc-300 hover:bg-zinc-400 dark:bg-zinc-700 dark:hover:bg-zinc-500'
+            }`}
+            aria-label={`Select ${voice.name}`}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 function VoicePickerModal({
   open,
   selectedVoice,
   previewingVoice,
   voiceError,
   onSelect,
+  onStep,
   onClose,
 }: {
   open: boolean;
@@ -541,16 +586,29 @@ function VoicePickerModal({
   previewingVoice: string | null;
   voiceError: string;
   onSelect: (voice: string) => void;
+  onStep: (offset: number) => void;
   onClose: () => void;
 }) {
   const selectedIndex = Math.max(0, VOICES.findIndex(voice => voice.name === selectedVoice));
   const selected = VOICES[selectedIndex] ?? VOICES[2];
-  const selectedTheme = getVoiceTheme(selected.name);
+  const rowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const playing = previewingVoice === selected.name;
 
-  const selectRelative = (offset: number) => {
-    const next = VOICES[(selectedIndex + offset + VOICES.length) % VOICES.length];
-    onSelect(next.name);
-  };
+  useEffect(() => {
+    if (!open) return;
+    rowRefs.current[selected.name]?.scrollIntoView({ block: 'nearest' });
+  }, [open, selected.name]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+      else if (event.key === 'ArrowLeft') onStep(-1);
+      else if (event.key === 'ArrowRight') onStep(1);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose, onStep]);
 
   return (
     <AnimatePresence>
@@ -573,7 +631,7 @@ function VoicePickerModal({
             <div className="flex items-center justify-between border-b border-zinc-100 px-6 py-5 dark:border-zinc-800">
               <div>
                 <h2 className="text-[17px] font-semibold tracking-tight text-zinc-950 dark:text-white">Voice</h2>
-                <p className="mt-1 text-xs text-zinc-400">Choose the Gemini voice used by Live Talk.</p>
+                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Choose the Gemini voice used by Live Talk.</p>
               </div>
               <button
                 type="button"
@@ -589,79 +647,102 @@ function VoicePickerModal({
               <div className="flex items-center justify-center gap-5 sm:gap-10">
                 <button
                   type="button"
-                  onClick={() => selectRelative(-1)}
-                  className="flex h-11 w-11 items-center justify-center rounded-full text-zinc-300 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-900 dark:hover:text-zinc-200"
+                  onClick={() => onStep(-1)}
+                  className="flex h-11 w-11 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
                   aria-label="Previous voice"
                 >
                   <ChevronRight className="h-6 w-6 rotate-180" />
                 </button>
 
-                <div className="flex min-w-0 flex-col items-center text-center">
-                  <motion.div
-                    animate={{ scale: previewingVoice === selected.name ? [1, 1.035, 1] : 1 }}
-                    transition={{ duration: 1.1, repeat: previewingVoice === selected.name ? Infinity : 0, ease: 'easeInOut' }}
-                    className="relative h-32 w-32 overflow-hidden rounded-full sm:h-36 sm:w-36"
-                    style={{
-                      background: `radial-gradient(circle at 35% 25%, ${selectedTheme.soft} 0%, ${selectedTheme.mid} 48%, ${selectedTheme.strong} 100%)`,
-                      boxShadow: `0 18px 45px ${selectedTheme.strong}35`,
-                    }}
-                    aria-label={`${selected.name} voice`}
+                <div className="flex w-44 min-w-0 flex-col items-center text-center sm:w-56">
+                  <FoggyOrb
+                    palette={getVoiceOrbPalette(selected.name)}
+                    state={playing ? 'speaking' : 'idle'}
+                    className="h-32 w-32 sm:h-36 sm:w-36"
+                    label={`${selected.name} voice`}
                   />
-                  <h3 className="mt-6 text-3xl font-semibold tracking-tight text-zinc-950 dark:text-white">{selected.name}</h3>
+                  <motion.h3
+                    key={selected.name}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.16 }}
+                    className="mt-8 text-3xl font-semibold tracking-tight text-zinc-950 dark:text-white"
+                  >
+                    {selected.name}
+                  </motion.h3>
                   <p className="mt-1 text-base text-zinc-500 dark:text-zinc-400">{selected.description}</p>
+                  <p className="mt-2 h-4 text-[11px] font-semibold text-zinc-400" aria-live="polite">
+                    {playing ? 'Playing sample…' : ''}
+                  </p>
                 </div>
 
                 <button
                   type="button"
-                  onClick={() => selectRelative(1)}
-                  className="flex h-11 w-11 items-center justify-center rounded-full text-zinc-300 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-900 dark:hover:text-zinc-200"
+                  onClick={() => onStep(1)}
+                  className="flex h-11 w-11 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
                   aria-label="Next voice"
                 >
                   <ChevronRight className="h-6 w-6" />
                 </button>
               </div>
 
-              <div className="mt-6 flex justify-center gap-2">
-                {VOICES.slice(0, 9).map(voice => (
-                  <button
-                    key={voice.name}
-                    type="button"
-                    onClick={() => onSelect(voice.name)}
-                    disabled={Boolean(previewingVoice)}
-                    className={`h-2.5 w-2.5 rounded-full transition disabled:cursor-not-allowed disabled:opacity-50 ${voice.name === selected.name ? 'bg-black dark:bg-white' : 'bg-zinc-200 dark:bg-zinc-700'}`}
-                    aria-label={`Select ${voice.name}`}
-                  />
-                ))}
+              <div className="mt-5">
+                <VoiceDots selectedIndex={selectedIndex} onPick={onSelect} />
               </div>
 
               {voiceError && (
                 <div
                   role="alert"
-                  className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs leading-5 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300"
+                  className="mt-5 rounded-2xl border border-[#fecaca] bg-[#fef2f2] px-4 py-3 text-xs leading-5 text-[#b91c1c] dark:border-[#7f1d1d] dark:bg-[#2a0f12] dark:text-[#fca5a5]"
                 >
                   {voiceError}
                 </div>
               )}
 
-              <div className="mt-8 max-h-[280px] overflow-y-auto rounded-2xl border border-zinc-200 dark:border-zinc-800">
-                {VOICES.map(voice => (
-                  <button
-                    key={voice.name}
-                    type="button"
-                    onClick={() => onSelect(voice.name)}
-                    disabled={Boolean(previewingVoice)}
-                    className={`flex w-full items-center gap-3 border-b border-zinc-100 px-4 py-3 text-left last:border-0 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 ${voice.name === selected.name ? 'bg-zinc-50 dark:bg-zinc-900' : 'hover:bg-zinc-50 dark:hover:bg-zinc-900/60'}`}
-                  >
-                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300">
-                      {voice.name === selected.name ? <Check className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-medium text-zinc-900 dark:text-white">{voice.name}</span>
-                      <span className="block text-xs text-zinc-400">{voice.description}</span>
-                    </span>
-                    <ChevronRight className="h-4 w-4 text-zinc-300" />
-                  </button>
-                ))}
+              <div className="mt-7 max-h-[280px] overflow-y-auto rounded-2xl border border-zinc-200 dark:border-zinc-800">
+                {VOICES.map(voice => {
+                  const isSelected = voice.name === selected.name;
+                  const isPlaying = voice.name === previewingVoice;
+                  return (
+                    <button
+                      key={voice.name}
+                      ref={node => {
+                        rowRefs.current[voice.name] = node;
+                      }}
+                      type="button"
+                      onClick={() => onSelect(voice.name)}
+                      aria-pressed={isSelected}
+                      className={`flex w-full items-center gap-3 border-b border-zinc-100 px-4 py-3 text-left transition last:border-0 dark:border-zinc-800 ${
+                        isSelected ? 'bg-zinc-100 dark:bg-zinc-900' : 'hover:bg-zinc-50 dark:hover:bg-zinc-900/60'
+                      }`}
+                    >
+                      <span
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white"
+                        style={{ background: getVoiceOrbPalette(voice.name).background }}
+                      >
+                        {isSelected ? <Check className="h-4 w-4 text-zinc-900" /> : null}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold text-zinc-900 dark:text-white">{voice.name}</span>
+                        <span className="block text-xs text-zinc-500 dark:text-zinc-400">{voice.description}</span>
+                      </span>
+                      {isPlaying ? (
+                        <span className="flex h-4 items-end gap-0.5" aria-label="Playing">
+                          {[0, 1, 2].map(bar => (
+                            <motion.span
+                              key={bar}
+                              className="w-0.5 rounded-full bg-zinc-900 dark:bg-white"
+                              animate={{ height: [4, 14, 6, 12, 4] }}
+                              transition={{ duration: 0.9, repeat: Infinity, delay: bar * 0.12 }}
+                            />
+                          ))}
+                        </span>
+                      ) : (
+                        <Volume2 className="h-4 w-4 text-zinc-300 dark:text-zinc-600" />
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </motion.div>
@@ -813,39 +894,90 @@ export default function Settings({
 
   const activeVoice = VOICES.find(voice => voice.name === selectedVoice) ?? VOICES[0];
 
-  const previewVoice = async (voice: string) => {
-    if (previewingVoice) return;
-    setVoiceError('');
-    setPreviewingVoice(voice);
-    try {
-      const greetingName = user.username?.trim() || user.name?.trim() || 'there';
-      await previewGeminiVoice(
-        voice,
-        `Hello ${greetingName}. I'm Twinkle AI. How can I help you today?`,
-        appLanguage
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Gemini voice preview failed.';
-      console.error('Gemini voice preview failed:', error);
-      setVoiceError(message);
-    } finally {
-      setPreviewingVoice(null);
+  const previewSeq = useRef(0);
+  const previewTimer = useRef<number | null>(null);
+  const greetingText = useMemo(
+    () => `Hi ${user.username?.trim() || user.name?.trim() || 'there'}, I'm Twinkle AI.`,
+    [user.username, user.name]
+  );
+
+  const clearPreviewTimer = () => {
+    if (previewTimer.current) {
+      window.clearTimeout(previewTimer.current);
+      previewTimer.current = null;
     }
   };
 
-  const saveVoice = (voice: string) => {
+  // Plays a sample. Never blocks the UI: a newer request simply replaces the
+  // older one, and only the newest request is allowed to update the state.
+  const previewVoice = useCallback(
+    async (voice: string) => {
+      const seq = ++previewSeq.current;
+      setVoiceError('');
+      setPreviewingVoice(voice);
+      try {
+        await previewGeminiVoice(voice, greetingText, appLanguage);
+      } catch (error) {
+        if (seq !== previewSeq.current) return;
+        const message = error instanceof Error ? error.message : 'Gemini voice preview failed.';
+        console.error('Gemini voice preview failed:', error);
+        setVoiceError(message);
+      } finally {
+        if (seq === previewSeq.current) setPreviewingVoice(null);
+      }
+    },
+    [greetingText, appLanguage]
+  );
+
+  // Selecting changes the name immediately and saves it. The sample starts
+  // after a short pause so quickly browsing with the arrows does not fire a
+  // request for every voice that scrolls past.
+  const saveVoice = (voice: string, delay = 0) => {
     setSelectedVoice(voice);
     try {
       localStorage.setItem('twinkle_live_voice', voice);
     } catch { /* ignore storage failures */ }
     window.dispatchEvent(new CustomEvent('twinkle-voice-change', { detail: voice }));
-    void previewVoice(voice);
+
+    clearPreviewTimer();
+    stopGeminiVoicePreview();
+    setPreviewingVoice(null);
+    setVoiceError('');
+    previewTimer.current = window.setTimeout(() => {
+      previewTimer.current = null;
+      void previewVoice(voice);
+    }, delay);
   };
 
-  const stepVoice = (offset: number) => {
-    const index = VOICES.findIndex(voice => voice.name === activeVoice.name);
-    saveVoice(VOICES[(index + offset + VOICES.length) % VOICES.length].name);
-  };
+  const stepVoice = useCallback(
+    (offset: number) => {
+      const index = VOICES.findIndex(voice => voice.name === selectedVoice);
+      saveVoice(VOICES[(index + offset + VOICES.length) % VOICES.length].name, 380);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedVoice, previewVoice]
+  );
+
+  // While a voice screen is open: keep the Live token warm and download the
+  // current voice's sample in the background so "Play sample" is instant.
+  const voiceUiActive = active === 'voice' || voicePickerOpen;
+  useEffect(() => {
+    if (!voiceUiActive) return;
+    const stopKeepWarm = startLiveTokenKeepWarm();
+    const prefetchTimer = window.setTimeout(
+      () => prefetchGeminiVoice(selectedVoice, greetingText, appLanguage),
+      250
+    );
+    return () => {
+      stopKeepWarm();
+      window.clearTimeout(prefetchTimer);
+      clearPreviewTimer();
+      stopGeminiVoicePreview();
+      previewSeq.current += 1;
+      setPreviewingVoice(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceUiActive]);
 
   // ── Live metrics (loaded only for the sections that need them) ───────────
   const [metrics, setMetrics] = useState<LiveMetrics>(EMPTY_METRICS);
@@ -1287,27 +1419,6 @@ export default function Settings({
                         ]}
                       />
                     </Row>
-
-                    <Row title="Live Talk Model Color" desc="Choose the color of the Live Talk model.">
-                      <Btn
-                        onClick={() => navigate('/live-talk-color', { state: { from: '/settings' } })}
-                        label="Change Live Talk model color"
-                      >
-                        <span
-                          className="h-3 w-3 rounded-full ring-1 ring-black/10 dark:ring-white/10"
-                          style={{ background: liveTalkColor.swatch }}
-                        />
-                        {liveTalkColor.name}
-                        <ChevronRight className="h-3.5 w-3.5" />
-                      </Btn>
-                    </Row>
-
-                    <Row title="Voice" desc={`Live Talk uses ${activeVoice.name} · ${activeVoice.description}.`}>
-                      <Btn onClick={() => setVoicePickerOpen(true)} label="Change Live Talk voice">
-                        {activeVoice.name}
-                        <ChevronRight className="h-3.5 w-3.5" />
-                      </Btn>
-                    </Row>
                   </Card>
                 </div>
               )}
@@ -1393,48 +1504,42 @@ export default function Settings({
                       <button
                         type="button"
                         onClick={() => stepVoice(-1)}
-                        disabled={Boolean(previewingVoice)}
-                        className="flex h-11 w-11 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-40 dark:hover:bg-zinc-900 dark:hover:text-zinc-200"
+                        className="flex h-11 w-11 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
                         aria-label="Previous voice"
                       >
                         <ChevronRight className="h-6 w-6 rotate-180" />
                       </button>
 
-                      <div className="flex flex-col items-center text-center">
-                        <motion.div
-                          animate={{ scale: previewingVoice === activeVoice.name ? [1, 1.035, 1] : 1 }}
-                          transition={{ duration: 1.1, repeat: previewingVoice === activeVoice.name ? Infinity : 0, ease: 'easeInOut' }}
-                          className="relative h-36 w-36 overflow-hidden rounded-full sm:h-40 sm:w-40"
-                          style={{
-                            background: `radial-gradient(circle at 35% 25%, ${getVoiceTheme(activeVoice.name).soft} 0%, ${getVoiceTheme(activeVoice.name).mid} 48%, ${getVoiceTheme(activeVoice.name).strong} 100%)`,
-                            boxShadow: `0 20px 55px ${getVoiceTheme(activeVoice.name).strong}30`,
-                          }}
-                          aria-label={`${activeVoice.name} voice`}
+                      <div className="flex w-48 flex-col items-center text-center sm:w-60">
+                        <FoggyOrb
+                          palette={getVoiceOrbPalette(activeVoice.name)}
+                          state={previewingVoice === activeVoice.name ? 'speaking' : 'idle'}
+                          className="h-36 w-36 sm:h-40 sm:w-40"
+                          label={`${activeVoice.name} voice`}
                         />
-                        <h2 className="mt-7 text-3xl font-semibold tracking-tight text-zinc-950 dark:text-white">
+                        <motion.h2
+                          key={activeVoice.name}
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.16 }}
+                          className="mt-9 text-3xl font-semibold tracking-tight text-zinc-950 dark:text-white"
+                        >
                           {activeVoice.name}
-                        </h2>
+                        </motion.h2>
                         <p className="mt-1 text-base text-zinc-500 dark:text-zinc-400">{activeVoice.description}</p>
 
-                        <div className="mt-5 flex items-center gap-2">
-                          {VOICES.slice(0, 9).map(voice => (
-                            <button
-                              key={voice.name}
-                              type="button"
-                              onClick={() => saveVoice(voice.name)}
-                              disabled={Boolean(previewingVoice)}
-                              className={`h-2.5 w-2.5 rounded-full transition disabled:opacity-60 ${voice.name === activeVoice.name ? 'bg-black dark:bg-white' : 'bg-zinc-200 dark:bg-zinc-700'}`}
-                              aria-label={`Select ${voice.name}`}
-                            />
-                          ))}
+                        <div className="mt-5">
+                          <VoiceDots
+                            selectedIndex={Math.max(0, VOICES.findIndex(voice => voice.name === activeVoice.name))}
+                            onPick={voice => saveVoice(voice)}
+                          />
                         </div>
                       </div>
 
                       <button
                         type="button"
                         onClick={() => stepVoice(1)}
-                        disabled={Boolean(previewingVoice)}
-                        className="flex h-11 w-11 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-40 dark:hover:bg-zinc-900 dark:hover:text-zinc-200"
+                        className="flex h-11 w-11 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
                         aria-label="Next voice"
                       >
                         <ChevronRight className="h-6 w-6" />
@@ -1444,11 +1549,13 @@ export default function Settings({
                     <div className="mt-6 flex gap-2">
                       <Btn
                         variant="primary"
-                        onClick={() => void previewVoice(activeVoice.name)}
-                        disabled={Boolean(previewingVoice)}
+                        onClick={() => {
+                          clearPreviewTimer();
+                          void previewVoice(activeVoice.name);
+                        }}
                       >
                         <Volume2 className="h-3.5 w-3.5" />
-                        {previewingVoice ? 'Playing…' : 'Play sample'}
+                        {previewingVoice === activeVoice.name ? 'Playing…' : 'Play sample'}
                       </Btn>
                       <Btn onClick={() => setVoicePickerOpen(true)}>
                         Browse all voices
@@ -1459,7 +1566,7 @@ export default function Settings({
                     {voiceError && (
                       <div
                         role="alert"
-                        className="mt-4 w-full max-w-[760px] rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-center text-xs leading-5 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300"
+                        className="mt-4 w-full max-w-[760px] rounded-2xl border border-[#fecaca] bg-[#fef2f2] px-4 py-3 text-center text-xs leading-5 text-[#b91c1c] dark:border-[#7f1d1d] dark:bg-[#2a0f12] dark:text-[#fca5a5]"
                       >
                         {voiceError}
                       </div>
@@ -1480,15 +1587,18 @@ export default function Settings({
                       </Row>
                       <Row title="Model color" desc="The color of the Live Talk orb.">
                         <Btn onClick={() => navigate('/live-talk-color', { state: { from: '/settings?tab=voice' } })}>
-                          <span className="h-3 w-3 rounded-full ring-1 ring-black/10" style={{ background: liveTalkColor.swatch }} />
+                          <span
+                            className="h-3 w-3 rounded-full ring-1 ring-black/10 dark:ring-white/20"
+                            style={{ background: liveTalkColor.swatch }}
+                          />
                           {liveTalkColor.name}
                           <ChevronRight className="h-3.5 w-3.5" />
                         </Btn>
                       </Row>
                     </Card>
 
-                    <p className="mt-6 max-w-[760px] text-center text-xs leading-5 text-zinc-400 dark:text-zinc-500">
-                      30 Gemini native voices are available. Selecting a voice plays a short personalized greeting automatically.
+                    <p className="mt-6 max-w-[760px] text-center text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                      30 Gemini native voices are available. Picking a voice saves it and plays a short personalized greeting.
                     </p>
                   </div>
                 </div>
@@ -1784,7 +1894,7 @@ export default function Settings({
                     </Row>
                   </Card>
 
-                  <div className="rounded-3xl border border-red-200 bg-red-50/40 px-6 dark:border-red-900/40 dark:bg-red-950/10">
+                  <div className="rounded-3xl border border-[#fecaca] bg-[#fef2f2] px-6 dark:border-[#7f1d1d] dark:bg-[#2a0f12]">
                     <Row
                       title="Delete all chats"
                       desc="Permanently removes every conversation and its messages from your account. This cannot be undone."
@@ -1832,7 +1942,8 @@ export default function Settings({
         selectedVoice={selectedVoice}
         previewingVoice={previewingVoice}
         voiceError={voiceError}
-        onSelect={saveVoice}
+        onSelect={voice => saveVoice(voice)}
+        onStep={stepVoice}
         onClose={() => setVoicePickerOpen(false)}
       />
 
@@ -1873,7 +1984,7 @@ export default function Settings({
             exit={{ opacity: 0, y: 12 }}
             className={`fixed bottom-6 left-1/2 z-[2147483600] flex -translate-x-1/2 items-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium shadow-xl ${
               toast.tone === 'error'
-                ? 'bg-red-600 text-white'
+                ? 'bg-[#dc2626] text-white'
                 : 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900'
             }`}
           >
