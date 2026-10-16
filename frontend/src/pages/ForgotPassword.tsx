@@ -24,7 +24,7 @@ export default function ForgotPassword() {
     setLoading(true);
     setError('');
     try {
-      const response = await authApi.forgotPassword(email);
+      const response = (await authApi.forgotPassword(email)) as { otpSimulated?: string };
       setStep('reset');
       if (response.otpSimulated) {
         setError(`Recovery code: ${response.otpSimulated} (Simulated)`);
@@ -56,7 +56,7 @@ export default function ForgotPassword() {
     setLoading(true);
     setError('');
     try {
-      const response = await authApi.resendOtp(email);
+      const response = (await authApi.resendOtp(email)) as { otpSimulated?: string };
       if (response.otpSimulated) {
         setError(`New code: ${response.otpSimulated} (Simulated)`);
       } else {
