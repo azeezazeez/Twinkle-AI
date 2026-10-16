@@ -882,12 +882,14 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
       Boolean(userTurnRef.current.trim()) ||
       Boolean(assistantTurnRef.current.trim());
 
-    // Persist the final partial turn, if any. If the last completed turn was
-    // already saved, reuse the existing session ID instead of creating or
-    // saving anything again.
-    const savePromise = hasFinalTurn
+    // Persist the final partial turn, if any, and ALWAYS wait for saves that
+    // are still in flight. Previously, ending the call while the first turn was
+    // still being saved (session not created yet) reported an empty session id,
+    // so the chat never opened until a refresh.
+    const savePromise: Promise<number | null> = (hasFinalTurn
       ? persistCompletedTurn()
-      : Promise.resolve(existingSessionId);
+      : (liveSavePromiseRef.current ?? Promise.resolve())
+    ).then(() => liveSessionIdRef.current ?? existingSessionId);
 
     // Close the Live Talk UI immediately. The parent callback is deliberately
     // fired only after the final save finishes, so Chat.tsx can safely load
@@ -898,7 +900,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     void savePromise
       .then(sessionId => {
         const normalizedId = Number(sessionId);
-        if (Number.isFinite(normalizedId)) {
+        if (sessionId != null && Number.isFinite(normalizedId) && normalizedId > 0) {
           onSessionComplete?.(normalizedId, lastSavedSessionNameRef.current || undefined, livePublicIdRef.current || undefined);
         }
       })
@@ -908,8 +910,9 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
         // Even if the final save failed, if a session was already created we
         // can still hand it back to Chat.tsx so it can attempt to load the
         // available persisted history.
-        if (existingSessionId != null && Number.isFinite(existingSessionId)) {
-          onSessionComplete?.(existingSessionId, lastSavedSessionNameRef.current || undefined, livePublicIdRef.current || undefined);
+        const fallbackId = liveSessionIdRef.current ?? existingSessionId;
+        if (fallbackId != null && Number.isFinite(fallbackId) && fallbackId > 0) {
+          onSessionComplete?.(fallbackId, lastSavedSessionNameRef.current || undefined, livePublicIdRef.current || undefined);
         }
       });
   };
