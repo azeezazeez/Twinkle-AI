@@ -4047,7 +4047,7 @@ if (isBlankDraft) {
                   key={chatGreeting}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="whitespace-normal text-balance text-[clamp(1.2rem,2.25vw,1.5rem)] font-normal tracking-tight text-zinc-900 dark:text-zinc-100"
+                  className="whitespace-normal text-balance font-serif text-[clamp(1.5rem,3vw,2rem)] font-normal tracking-tight text-zinc-900 dark:text-zinc-100"
                 >
                   {(() => {
                     // Render a trailing emoji in its own span so it is sized and
