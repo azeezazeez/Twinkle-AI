@@ -1398,8 +1398,9 @@ export default function Settings({
                         >
                           {APP_LANGUAGES.map(language => (
                             <option key={language.code} value={language.code}>
-                              {language.label}
-                              {language.code !== 'auto' ? ` · ${language.native}` : ''}
+                              {language.code !== 'auto' && language.native !== language.label
+                                ? `${language.label} · ${language.native}`
+                                : language.label}
                             </option>
                           ))}
                         </select>
