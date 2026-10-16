@@ -884,7 +884,7 @@ const playModelSwitchSound = () => {
 
 
 const EMPTY_CHAT_PROMPTS = [
-  "What's on your mind today? 💭",
+  "What's on your mind today? 💡",
   "What would you like to explore? 🔍",
   "What can I help you with today? 😊",
   "What are you working on? 🛠️",
@@ -909,7 +909,7 @@ const EMPTY_CHAT_GREETINGS = [
   'What can we work on today? 💡',
   'Ready when you are ⚡',
   'Let’s make something great today 🎨',
-  'What’s on your mind? 💭',
+  'What’s on your mind? 💡',
   'Where should we start? 🧭',
   'Let’s get started 🚀',
   'Have something in mind? 💡',
@@ -977,7 +977,7 @@ const getRandomChatGreeting = (userName = '', previousGreeting = ''): string => 
 
   const choices = [...new Set(pool)].filter(greeting => greeting !== previousGreeting);
   const available = choices.length ? choices : [...new Set(pool)];
-  return available[Math.floor(Math.random() * available.length)] || 'What’s on your mind? 💭';
+  return available[Math.floor(Math.random() * available.length)] || 'What’s on your mind? 💡';
 };
 
 const LongTailArrowDown = ({ className = '' }: { className?: string }) => (
@@ -1323,18 +1323,33 @@ ${textToRead}` }] }], turnComplete: true },
       setTypedSessionTitle('');
       return;
     }
-    setTypedSessionTitle('');
-    let index = 0;
     const { title } = typingSessionTitle;
-    const interval = window.setInterval(() => {
-      index += 1;
-      setTypedSessionTitle(title.slice(0, index));
-      if (index >= title.length) {
-        window.clearInterval(interval);
+    // Time-based reveal: always finishes within ~0.5s no matter how slow the
+    // timers run, so the sidebar can never get stuck on a partial name like "F".
+    const started = performance.now();
+    const duration = Math.min(500, Math.max(150, title.length * 16));
+    setTypedSessionTitle(title.slice(0, 1));
+    let frame = 0;
+    const tick = () => {
+      const progress = Math.min(1, (performance.now() - started) / duration);
+      const count = Math.max(1, Math.ceil(title.length * progress));
+      setTypedSessionTitle(title.slice(0, count));
+      if (progress >= 1) {
         setTypingSessionTitle(null);
+        return;
       }
-    }, 45);
-    return () => window.clearInterval(interval);
+      frame = window.requestAnimationFrame(tick);
+    };
+    frame = window.requestAnimationFrame(tick);
+    // Hard failsafe (also covers background tabs where rAF is paused).
+    const failsafe = window.setTimeout(() => {
+      window.cancelAnimationFrame(frame);
+      setTypingSessionTitle(null);
+    }, duration + 400);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(failsafe);
+    };
   }, [typingSessionTitle]);
 
   const sidebarSessions = sessions.map(session =>
@@ -3447,6 +3462,17 @@ const chooseModel = useCallback((modelId: string) => {
     // New Chat is a local draft until the first message is sent. Do not create
     // a backend session here; sendMessage creates it and adds the UUID to URL.
     if (creatingNewSessionRef.current) return;
+
+    // Only start a new chat if the current one has actually been used. On a
+    // blank draft there is nothing to leave behind, so keep it as is (and keep
+    // the same greeting) instead of resetting it.
+    const isBlankDraft = currentSessionId === null && messages.length === 0 && !isTyping;
+    if (isBlankDraft) {
+      setMobileOpen(false);
+      setModalType('none');
+      window.setTimeout(() => inputRef.current?.focus(), 0);
+      return;
+    }
     creatingNewSessionRef.current = true;
 
     requestGenerationRef.current += 1;
@@ -3487,11 +3513,16 @@ const chooseModel = useCallback((modelId: string) => {
     requestAnimationFrame(() => { creatingNewSessionRef.current = false; });
   };
 
+  // The shortcut listener is registered once, so it must call the latest
+  // createNewSession (which reads the current chat state) through a ref.
+  const createNewSessionRef = useRef<() => void>(() => {});
+  createNewSessionRef.current = createNewSession;
+
   useEffect(() => {
     const handleNewChatShortcut = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key.toLowerCase() === 'o' || event.code === 'KeyO')) {
         event.preventDefault();
-        createNewSession();
+        createNewSessionRef.current();
       }
     };
 
@@ -3717,6 +3748,63 @@ const chooseModel = useCallback((modelId: string) => {
    * Make that saved Live Talk session the active chat immediately so the
    * normal chat area displays the complete transcript without a refresh.
    */
+  const currentSessionIdRef = useRef<number | null>(currentSessionId);
+  currentSessionIdRef.current = currentSessionId;
+
+  /**
+   * Fired the moment Live Talk ends. Shows the conversation immediately from
+   * the local transcript while the final save/title work finishes in the
+   * background; handleLiveSessionComplete then swaps in the saved copy.
+   */
+  const handleLiveSessionPreview = useCallback((info: {
+    sessionId: number | null;
+    publicId?: string;
+    sessionName?: string;
+    turns: Array<{ role: 'user' | 'assistant'; content: string }>;
+  }) => {
+    const turns = info.turns.filter(turn => turn.content.trim());
+    if (turns.length === 0) return;
+
+    const stamp = Date.now();
+    const now = new Date().toISOString();
+    creatingNewSessionRef.current = true;
+    window.setTimeout(() => { creatingNewSessionRef.current = false; }, 600);
+
+    if (info.sessionId) {
+      const sid = info.sessionId;
+      setSessions(prev => {
+        const existing = prev.find(session => session.id === sid);
+        const base = existing ?? {
+          id: sid,
+          userId: user.id,
+          sessionName: info.sessionName || 'Live Talk',
+          createdAt: now,
+          updatedAt: now,
+        } as Session;
+        return [
+          { ...base, publicId: base.publicId || info.publicId, sessionName: info.sessionName || base.sessionName, updatedAt: now },
+          ...prev.filter(session => session.id !== sid),
+        ];
+      });
+      // Do not let the history loader replace the preview with a transcript
+      // that is still missing the last turn.
+      skipMessageLoadRef.current = currentSessionIdRef.current === sid ? null : sid;
+      setCurrentSessionId(sid);
+      persistSessionId(sid);
+      if (info.publicId) navigate(`/c/${info.publicId}`);
+    }
+
+    setEditingMessage(null);
+    setMessageAttachments({});
+    setMessages(turns.map((turn, index) => ({
+      id: `live-preview-${stamp}-${index}`,
+      sessionId: info.sessionId || 0,
+      role: turn.role,
+      content: turn.content,
+      timestamp: now,
+    })));
+  }, [user.id, navigate]);
+
   const handleLiveSessionComplete = useCallback(async (sessionId: number, sessionName?: string, publicIdFromLive?: string) => {
     if (!Number.isFinite(sessionId)) return;
 
@@ -3745,7 +3833,8 @@ const chooseModel = useCallback((modelId: string) => {
 
       // Select it and put its permanent URL in the address bar in the same
       // batch, so nothing flips back to the previous chat.
-      skipMessageLoadRef.current = currentSessionId === sessionId ? null : sessionId;
+      // Read the live value: this callback runs long after Live Talk closed.
+      skipMessageLoadRef.current = currentSessionIdRef.current === sessionId ? null : sessionId;
       setEditingMessage(null);
       setCurrentSessionId(sessionId);
       persistSessionId(sessionId);
@@ -3791,7 +3880,7 @@ const chooseModel = useCallback((modelId: string) => {
     } finally {
       window.setTimeout(() => { creatingNewSessionRef.current = false; }, 400);
     }
-  }, [user.id, sessions, currentSessionId, navigate, loadMessages]);
+  }, [user.id, sessions, navigate, loadMessages]);
 
   // Render the chat shell immediately; avoid a separate full-screen loading animation.
 
@@ -3925,7 +4014,18 @@ const chooseModel = useCallback((modelId: string) => {
                   animate={{ opacity: 1, y: 0 }}
                   className="whitespace-normal text-balance text-[clamp(1.2rem,2.25vw,1.5rem)] font-normal tracking-tight text-zinc-900 dark:text-zinc-100"
                 >
-                  {chatGreeting}
+                  {(() => {
+                    // Render a trailing emoji in its own span so it is sized and
+                    // aligned consistently with the text.
+                    const match = chatGreeting.match(/^(.*?)\s*((?:\p{Extended_Pictographic}\uFE0F?(?:\u200D\p{Extended_Pictographic}\uFE0F?)*)+)\s*$/u);
+                    if (!match) return chatGreeting;
+                    return (
+                      <>
+                        {match[1]}
+                        <span className="ml-1.5 inline-block align-[-0.06em] text-[1.12em] leading-none" aria-hidden="true">{match[2]}</span>
+                      </>
+                    );
+                  })()}
                 </motion.h2>
               </div>
             ) : (
@@ -4825,6 +4925,7 @@ const chooseModel = useCallback((modelId: string) => {
         open={liveTalkOpen}
         onClose={() => setLiveTalkOpen(false)}
         onSessionComplete={handleLiveSessionComplete}
+        onSessionPreview={handleLiveSessionPreview}
       />
 
       <AnimatePresence>
