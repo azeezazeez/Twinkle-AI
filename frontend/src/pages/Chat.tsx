@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 
 import ReactMarkdown from 'react-markdown';
+import AttachmentTile from '../components/AttachmentTile';
 import type { Components } from 'react-markdown'; 
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -4078,6 +4079,7 @@ if (isBlankDraft) {
                     <div
                       key={msg.id || `msg-${index}`}
                       data-twinkle-message
+      data-twinkle-user-content
                       className={`relative flex w-full min-w-0 ${
                         msg.role === 'user' ? 'justify-end' : 'justify-start'
                       }`}
@@ -4107,58 +4109,27 @@ if (isBlankDraft) {
                                 const isImage = mime.startsWith('image/');
                                 const isPdf = mime === 'application/pdf';
 
+                                const badge =
+                                  isPdf ? 'PDF'
+                                  : mime === 'application/msword' ? 'DOC'
+                                  : mime.includes('wordprocessingml') ? 'DOCX'
+                                  : mime === 'application/vnd.ms-excel' ? 'XLS'
+                                  : mime.includes('spreadsheetml') ? 'XLSX'
+                                  : mime === 'application/vnd.ms-powerpoint' ? 'PPT'
+                                  : mime.includes('presentationml') ? 'PPTX'
+                                  : (attachmentName.includes('.') ? attachmentName.split('.').pop()!.toUpperCase().slice(0, 5) : '')
+                                    || mime.split('/')[1]?.toUpperCase().slice(0, 5)
+                                    || 'FILE';
+
                                 return (
-                                  <button
+                                  <AttachmentTile
                                     key={`sender-attachment-${i}`}
-                                    type="button"
-                                    onClick={() => void openPersistedAttachmentPreview(url, i)}
+                                    name={attachmentName}
+                                    badge={badge}
+                                    imageSrc={isImage ? url : null}
                                     title="Open attachment preview"
-                                    className="group relative overflow-hidden rounded-xl border border-zinc-200/70 bg-white text-left shadow-sm transition-all hover:border-zinc-500 hover:shadow-md dark:border-zinc-700 dark:bg-zinc-900"
-                                  >
-                                    {isImage ? (
-                                      <img
-                                        src={url}
-                                        alt={`Attachment ${i + 1}`}
-                                        className="block h-32 w-32 object-cover transition-transform duration-200 group-hover:scale-[1.03] sm:h-36 sm:w-36"
-                                      />
-                                    ) : isPdf ? (
-                                      <div className="relative h-32 w-32 overflow-hidden bg-white dark:bg-zinc-800 sm:h-36 sm:w-36">
-                                        <iframe
-                                          src={`${url}#page=1&toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
-                                          title={`PDF attachment ${i + 1}`}
-                                          className="pointer-events-none absolute left-0 top-0 h-[576px] w-[408px] origin-top-left scale-[0.31] bg-white"
-                                        />
-                                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/65 via-black/20 to-transparent px-2 pb-2 pt-8">
-                                          <span className="text-[9px] font-bold uppercase tracking-wider text-white">PDF</span>
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div className="flex h-32 w-32 flex-col items-center justify-center gap-2 bg-zinc-50 px-2 dark:bg-zinc-800 sm:h-36 sm:w-36">
-                                        <FileText className="h-9 w-9 text-zinc-900 dark:text-zinc-100" />
-                                        <span className="rounded-md bg-zinc-100 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-zinc-600 dark:bg-zinc-800 dark:text-zinc-600 dark:text-zinc-300">
-                                          {mime === 'application/msword' ? 'DOC'
-                                            : mime.includes('wordprocessingml') ? 'DOCX'
-                                            : mime === 'application/vnd.ms-excel' ? 'XLS'
-                                            : mime.includes('spreadsheetml') ? 'XLSX'
-                                            : mime === 'application/vnd.ms-powerpoint' ? 'PPT'
-                                            : mime.includes('presentationml') ? 'PPTX'
-                                            : mime.split('/')[1]?.toUpperCase() || 'FILE'}
-                                        </span>
-                                        <span className="text-center text-[9px] font-medium text-zinc-400">
-                                          Click to preview
-                                        </span>
-                                      </div>
-                                    )}
-                                    <span className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/45 text-white opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
-                                      <Eye className="h-3.5 w-3.5" />
-                                    </span>
-                                    <span
-                                      className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent px-2 pb-1.5 pt-5 text-[9px] font-semibold text-white"
-                                      title={attachmentName}
-                                    >
-                                      {attachmentName}
-                                    </span>
-                                  </button>
+                                    onClick={() => void openPersistedAttachmentPreview(url, i)}
+                                  />
                                 );
                               })}
                             </div>
@@ -4564,38 +4535,22 @@ if (isBlankDraft) {
               {/* File preview strip (kept for consistency but never shown without UI trigger) */}
               <AnimatePresence>
                 {filePreviews.length > 0 && (
-                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="flex flex-wrap gap-3 px-3 pt-3 pb-2.5 border-b border-zinc-100 dark:border-zinc-800/70">
-                    {filePreviews.map(fp => (
-                      <div key={fp.id} className="relative flex flex-col items-center gap-1 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => void openFilePreview(fp.file, fp.preview)}
-                          className="group/preview relative block w-20 text-left"
+                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="flex flex-wrap gap-3 px-3.5 pt-3.5 pb-1">
+                    {filePreviews.map(fp => {
+                      const isImage = fp.file.type.startsWith('image/') && !!fp.preview;
+                      const ext = fp.file.name.includes('.') ? fp.file.name.split('.').pop()!.toUpperCase() : '';
+                      return (
+                        <AttachmentTile
+                          key={fp.id}
+                          name={fp.file.name}
+                          badge={fp.file.type === 'application/pdf' ? 'PDF' : ext.slice(0, 5) || 'FILE'}
+                          imageSrc={isImage ? fp.preview : null}
                           title={`Preview ${fp.file.name}`}
-                        >
-                          {fp.file.type.startsWith('image/') && fp.preview ? (
-                            <div className="w-20 h-16 rounded-xl overflow-hidden bg-zinc-200 dark:bg-zinc-700 shadow-sm border border-zinc-200/60 cursor-pointer">
-                              <img src={fp.preview} alt={fp.file.name} className="w-full h-full object-cover transition-transform group-hover/preview:scale-105" />
-                            </div>
-                          ) : fp.file.type === 'application/pdf' ? (
-                            <div className="flex h-16 w-20 flex-col items-center justify-center gap-1 rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-800 cursor-pointer hover:border-zinc-400 dark:hover:border-zinc-500">
-                              <FileText className="h-6 w-6 text-zinc-800 dark:text-zinc-100" />
-                              <span className="text-[8px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400">PDF</span>
-                            </div>
-                          ) : (
-                            <div className="w-20 h-16 rounded-xl flex flex-col items-center justify-center gap-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 cursor-pointer hover:border-zinc-500 dark:hover:border-zinc-500/50 transition-colors">
-                              <FileText className="w-6 h-6 text-zinc-900 dark:text-zinc-100" />
-                              <span className="text-[8px] font-black uppercase text-zinc-500 dark:text-zinc-400">{fp.file.name.split('.').pop()?.toUpperCase() || 'FILE'}</span>
-                            </div>
-                          )}
-                          <span className="mt-1 block text-[9px] font-medium text-zinc-500 dark:text-zinc-400 truncate max-w-[80px]" title={fp.file.name}>{fp.file.name}</span>
-                          <span className="block text-[8px] text-zinc-400">{formatFileSize(fp.file.size)}</span>
-                        </button>
-                        <button onClick={() => removeFile(fp.id)} className="absolute -top-1.5 -right-1.5 w-[18px] h-[18px] rounded-full flex items-center justify-center bg-zinc-600 dark:bg-zinc-500 text-white shadow-md hover:bg-zinc-500">
-                          <X className="w-2.5 h-2.5" />
-                        </button>
-                      </div>
-                    ))}
+                          onClick={() => void openFilePreview(fp.file, fp.preview)}
+                          onRemove={() => removeFile(fp.id)}
+                        />
+                      );
+                    })}
                   </motion.div>
                 )}
               </AnimatePresence>
