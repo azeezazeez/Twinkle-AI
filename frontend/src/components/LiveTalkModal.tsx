@@ -10,7 +10,7 @@ type Props = {
   open: boolean;
   onClose: () => void; 
   /** Called after the final Live Talk data has been persisted. */
-  onSessionComplete?: (sessionId: number, sessionName?: string) => void;
+  onSessionComplete?: (sessionId: number, sessionName?: string, publicId?: string) => void;
 };
 
 type WakeLockSentinelLike = {
@@ -141,6 +141,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
   const liveSavePromiseRef = useRef<Promise<void> | null>(null);
   const liveTitleGeneratedRef = useRef(false);
   const lastSavedSessionNameRef = useRef<string | null>(null);
+  const livePublicIdRef = useRef<string | null>(null);
   const userTurnRef = useRef('');
   const assistantTurnRef = useRef('');
   const endingRef = useRef(false);
@@ -198,6 +199,8 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
                 throw new Error('Live Talk could not create a chat session.');
               }
               liveSessionIdRef.current = id;
+              const publicId = String(response?.publicId ?? response?.public_id ?? '');
+              if (publicId) livePublicIdRef.current = publicId;
               return id;
             })().finally(() => {
               liveSessionPromiseRef.current = null;
@@ -232,7 +235,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
         }
 
         window.dispatchEvent(new CustomEvent('twinkle-live-session-updated', {
-          detail: { sessionId, id: sessionId, sessionName, source: 'live-talk' },
+          detail: { sessionId, id: sessionId, sessionName, publicId: livePublicIdRef.current || undefined, source: 'live-talk' },
         }));
       } catch (error) {
         console.error('Live Talk background save failed:', error);
@@ -864,6 +867,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
     liveSavePromiseRef.current = null;
     liveTitleGeneratedRef.current = false;
     lastSavedSessionNameRef.current = null;
+    livePublicIdRef.current = null;
     void connect();
     return () => cleanup();
   }, [open, connect, cleanup]);
@@ -895,7 +899,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
       .then(sessionId => {
         const normalizedId = Number(sessionId);
         if (Number.isFinite(normalizedId)) {
-          onSessionComplete?.(normalizedId, lastSavedSessionNameRef.current || undefined);
+          onSessionComplete?.(normalizedId, lastSavedSessionNameRef.current || undefined, livePublicIdRef.current || undefined);
         }
       })
       .catch(error => {
@@ -905,7 +909,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete }: Prop
         // can still hand it back to Chat.tsx so it can attempt to load the
         // available persisted history.
         if (existingSessionId != null && Number.isFinite(existingSessionId)) {
-          onSessionComplete?.(existingSessionId, lastSavedSessionNameRef.current || undefined);
+          onSessionComplete?.(existingSessionId, lastSavedSessionNameRef.current || undefined, livePublicIdRef.current || undefined);
         }
       });
   };
