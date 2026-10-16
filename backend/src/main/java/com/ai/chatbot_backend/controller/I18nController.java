@@ -14,6 +14,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestTemplate;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.HttpStatus;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -23,7 +26,11 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-
+/**
+ * Translates interface strings so the whole website follows the language
+ * chosen in Settings → General. Results are cached in memory so each string
+ * is translated by the model only once per language.
+ */
 @RestController
 @RequestMapping("/api/i18n")
 public class I18nController {
@@ -48,6 +55,28 @@ public class I18nController {
 
     private final Map<String, String> cache = new ConcurrentHashMap<>();
 
+    /** Simple per-IP limit so the public endpoint cannot burn the AI quota. */
+    private static final int MAX_REQUESTS_PER_MINUTE = 40;
+    private final Map<String, AtomicInteger> hits = new ConcurrentHashMap<>();
+    private volatile long windowStart = System.currentTimeMillis();
+
+    private boolean allow(HttpServletRequest http) {
+        long now = System.currentTimeMillis();
+        if (now - windowStart > 60_000) {
+            synchronized (this) {
+                if (now - windowStart > 60_000) {
+                    hits.clear();
+                    windowStart = now;
+                }
+            }
+        }
+        String forwarded = http.getHeader("X-Forwarded-For");
+        String ip = forwarded != null && !forwarded.isBlank()
+                ? forwarded.split(",")[0].trim()
+                : http.getRemoteAddr();
+        return hits.computeIfAbsent(ip, k -> new AtomicInteger()).incrementAndGet() <= MAX_REQUESTS_PER_MINUTE;
+    }
+
     @Value("${groq.api.key}")
     private String apiKey;
 
@@ -71,7 +100,13 @@ public class I18nController {
     }
 
     @PostMapping("/translate")
-    public ResponseEntity<Map<String, Object>> translate(@RequestBody TranslateRequest request) {
+    public ResponseEntity<Map<String, Object>> translate(@RequestBody TranslateRequest request, HttpServletRequest http) {
+        if (!allow(http)) {
+            Map<String, Object> limited = new LinkedHashMap<>();
+            limited.put("translations", new LinkedHashMap<String, String>());
+            limited.put("error", "rate_limited");
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(limited);
+        }
         Map<String, Object> response = new LinkedHashMap<>();
         Map<String, String> result = new LinkedHashMap<>();
         response.put("translations", result);
