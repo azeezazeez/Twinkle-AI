@@ -2,7 +2,7 @@ import { X } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 
-export const ATTACHMENT_TILE_SIZE = 150;
+export const ATTACHMENT_TILE_SIZE = 120;
 
 type Props = {
   name: string;
@@ -25,14 +25,14 @@ export default function AttachmentTile({ name, badge, imageSrc, onClick, onRemov
       className="h-full w-full object-cover transition-transform duration-200 group-hover/tile:scale-[1.03]"
     />
   ) : (
-    <div className="flex h-full w-full flex-col justify-between p-3.5 text-left">
+    <div className="flex h-full w-full flex-col justify-between p-3 text-left">
       <span
-        className="line-clamp-3 break-words text-[14px] font-medium leading-snug text-zinc-900 dark:text-zinc-100"
+        className="line-clamp-3 break-words text-[13px] font-normal leading-snug text-zinc-900 dark:text-zinc-100"
         title={name}
       >
         {name}
       </span>
-      <span className="w-fit rounded-md bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+      <span className="w-fit rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
         {badge || 'FILE'}
       </span>
     </div>
@@ -48,7 +48,7 @@ export default function AttachmentTile({ name, badge, imageSrc, onClick, onRemov
         type="button"
         onClick={onClick}
         title={title || name}
-        className="block h-full w-full overflow-hidden rounded-2xl border border-zinc-300/80 bg-white text-left shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-zinc-500"
+        className="block h-full w-full overflow-hidden rounded-xl border border-zinc-300/80 bg-white text-left shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-zinc-500"
       >
         {body}
       </button>
