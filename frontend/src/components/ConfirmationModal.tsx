@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { Loader2, X } from 'lucide-react';
 
@@ -56,10 +57,14 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
     if (closeOnConfirm) onClose();
   };
 
-  return (
+  if (typeof document === 'undefined') return null;
+
+  // Rendered in a portal above the composer (z-[9000]), mobile header and
+  // share toast so the dialog is never covered by other UI.
+  return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[2147483000] flex items-center justify-center p-4">
           <motion.button
             type="button"
             aria-label="Close confirmation dialog"
@@ -133,7 +138,8 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
           </motion.div>
         </div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 };
 
