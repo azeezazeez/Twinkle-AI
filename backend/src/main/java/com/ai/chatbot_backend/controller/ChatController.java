@@ -12,6 +12,7 @@ import com.ai.chatbot_backend.dto.SharedChatResponse;
 import com.ai.chatbot_backend.service.RedisEventService;
 import com.ai.chatbot_backend.service.ChatHistoryService;
 import com.ai.chatbot_backend.service.GroqService;
+import com.ai.chatbot_backend.service.CloudflareAiService;
 import com.ai.chatbot_backend.service.GeminiService;
 import com.ai.chatbot_backend.service.UserService;
 import com.ai.chatbot_backend.service.ChatShareService;
@@ -68,6 +69,7 @@ public class ChatController {
 
     private final GroqService groqService;
     private final GeminiService geminiService;
+    private final CloudflareAiService cloudflareService;
     private final ChatHistoryService chatHistoryService;
     private final UserService userService;
     private final RedisEventService redisEventService;
@@ -237,7 +239,7 @@ public class ChatController {
                     if (msg != null && msg.getContent() != null && !msg.getContent().isBlank()) {
                         conversationHistory.add(Map.of(
                                 "role", msg.getRole(),
-                                "content", msg.getContent()
+                                "content", stripInlineImages(msg.getContent())
                         ));
                     }
                 }
@@ -258,7 +260,8 @@ public class ChatController {
                     : request.getModel().trim();
 
             boolean geminiRequested = geminiService.isGeminiModel(requestedModel);
-            if (!geminiRequested && !groqModels.contains(requestedModel)) {
+            boolean cloudflareRequested = cloudflareService.isCloudflareModel(requestedModel);
+            if (!geminiRequested && !cloudflareRequested && !groqModels.contains(requestedModel)) {
                 throw new IllegalArgumentException("Selected model is not available: " + requestedModel);
             }
 
@@ -304,7 +307,16 @@ public class ChatController {
                         }
                     };
 
-                    if (geminiRequested) {
+                    if (cloudflareRequested && cloudflareService.isImageModel(finalRequestedModel)) {
+                        String imageMarkdown = "![" + imageAltText(finalMessage) + "]("
+                                + cloudflareService.generateImage(finalMessage) + ")";
+                        sendDelta.accept(imageMarkdown);
+                        fullResponse.append(imageMarkdown);
+                    } else if (cloudflareRequested) {
+                        fullResponse.append(cloudflareService.streamResponse(
+                                buildCloudflareMessages(finalPromptMessage, conversationHistory, finalLanguage),
+                                finalRequestedModel, sendDelta));
+                    } else if (geminiRequested) {
                         fullResponse.append(geminiService.streamResponse(
                                 finalPromptMessage, conversationHistory, List.of(), finalLanguage, finalRequestedModel, sendDelta));
                     } else {
@@ -1264,7 +1276,7 @@ public class ChatController {
                                 msg.getRole(),
 
                                 "content",
-                                msg.getContent()
+                                stripInlineImages(msg.getContent())
                         )
                 );
             }
@@ -1349,8 +1361,10 @@ public class ChatController {
 
         boolean geminiRequested =
                 geminiService.isGeminiModel(requestedModel);
+        boolean cloudflareRequested =
+                cloudflareService.isCloudflareModel(requestedModel);
 
-        if (!geminiRequested && !groqModels.contains(requestedModel)) {
+        if (!geminiRequested && !cloudflareRequested && !groqModels.contains(requestedModel)) {
             throw new IllegalArgumentException("Selected model is not available: " + requestedModel);
         }
 
@@ -1368,7 +1382,15 @@ public class ChatController {
          * Documents were extracted with Apache Tika above, so they use the
          * selected text model instead of consuming Gemini multimodal quota.
          */
-        if (geminiMediaUrls != null && !geminiMediaUrls.isEmpty()) {
+        if (cloudflareRequested && (geminiMediaUrls == null || geminiMediaUrls.isEmpty())) {
+
+            aiResponse = cloudflareService.isImageModel(requestedModel)
+                    ? "![" + imageAltText(message) + "](" + cloudflareService.generateImage(message) + ")"
+                    : cloudflareService.generateResponse(
+                            buildCloudflareMessages(promptMessage, conversationHistory, language),
+                            requestedModel);
+
+        } else if (geminiMediaUrls != null && !geminiMediaUrls.isEmpty()) {
             if (!geminiRequested) {
                 throw new IllegalArgumentException(
                         "The selected model does not support native media uploads. Select Twinkle Vision to analyze images, audio, or video."
@@ -1461,9 +1483,32 @@ public class ChatController {
     }
 
 
+    private static final java.util.regex.Pattern INLINE_IMAGE =
+            java.util.regex.Pattern.compile("!\\[[^\\]]*\\]\\(data:image/[^)]*\\)");
+
+    /** Generated images are stored inline; never send their base64 back to a model. */
+    private static String stripInlineImages(String content) {
+        return content == null ? null : INLINE_IMAGE.matcher(content).replaceAll("[generated image]");
+    }
+
+    private static String imageAltText(String prompt) {
+        String clean = prompt == null ? "" : prompt.replaceAll("[\\[\\]()\\r\\n]+", " ").trim();
+        return clean.length() > 120 ? clean.substring(0, 120) : (clean.isEmpty() ? "Generated image" : clean);
+    }
+
+    private List<Map<String, Object>> buildCloudflareMessages(
+            String userMessage,
+            List<Map<String, String>> history,
+            String language) {
+        List<Map<String, Object>> messages = groqService.buildHistory(history, language);
+        messages.add(Map.of("role", "user", "content", userMessage == null ? "" : userMessage));
+        return messages;
+    }
+
     private static long estimateTurnTokens(String userContent, String assistantContent) {
         int inputLength = userContent == null ? 0 : userContent.length();
-        int outputLength = assistantContent == null ? 0 : assistantContent.length();
+        String visibleOutput = stripInlineImages(assistantContent);
+        int outputLength = visibleOutput == null ? 0 : visibleOutput.length();
         return Math.max(1L, (long) Math.ceil((inputLength + outputLength) / 4.0));
     }
 
@@ -1510,6 +1555,13 @@ public class ChatController {
         String geminiModel = geminiService.getModel();
         if (!models.contains(geminiModel)) {
             models.add(geminiModel);
+        }
+        if (cloudflareService.isConfigured()) {
+            for (String cfModel : cloudflareService.getAvailableModels()) {
+                if (!models.contains(cfModel)) {
+                    models.add(cfModel);
+                }
+            }
         }
 
 
