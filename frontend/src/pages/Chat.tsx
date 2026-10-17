@@ -5,7 +5,7 @@ import { createPortal, flushSync } from 'react-dom';
 import { User, Session, Message } from '../types';
 import Sidebar from '../components/Sidebar'; 
 import { chatApi, authApi, createLiveToken, startLiveTokenKeepWarm, warmLiveToken } from '../lib/api'; 
-import { motion, AnimatePresence, useReducedMotion } from 'motion/react'; 
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';  
 import StormLogo from '../components/StormLogo';
 import ConfirmationModal from '../components/ConfirmationModal';
 import ShareChatModal from '../components/ShareChatModal';
