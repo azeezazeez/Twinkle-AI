@@ -1365,6 +1365,7 @@ ${textToRead}` }] }], turnComplete: true },
   const [sharePromptText, setSharePromptText] = useState('');
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareLoading, setShareLoading] = useState(false);
+  const [shareMode, setShareMode] = useState<'prompt' | 'conversation'>('prompt');
   const [shareError, setShareError] = useState<string | null>(null);
   const [shareSuccessVisible, setShareSuccessVisible] = useState(false);
 
@@ -1771,6 +1772,7 @@ ${textToRead}` }] }], turnComplete: true },
       voiceDictationWantedRef.current = false;
       voiceStartRef.current += 1;
       setVoiceInputActive(false);
+      window.alert('Voice input could not start. Check that microphone access is allowed for this site and try again.');
     }
   }, [stopGeminiDictationFallback]);
 
@@ -2030,6 +2032,23 @@ ${textToRead}` }] }], turnComplete: true },
         window.alert('Microphone permission was denied. Allow microphone access for this site and try again.');
         return;
       }
+
+      if (error === 'audio-capture') {
+        voiceBrowserRecognitionActiveRef.current = false;
+        voiceBrowserRecognitionRef.current = null;
+        voiceStartInProgressRef.current = false;
+        voiceDictationWantedRef.current = false;
+        voiceStartRef.current += 1;
+        setVoiceInputActive(false);
+        setVoiceCaptureStopped(false);
+        setVoiceLiveTranscript('');
+        window.alert('No microphone was found. Connect a microphone and try again.');
+        return;
+      }
+
+      // Any other error must not leave the start guard stuck, otherwise the
+      // Mic button stops responding.
+      voiceStartInProgressRef.current = false;
 
       // Brave and some Chromium builds can return `network` even though the
       // microphone itself is working. Fall back to Gemini Live transcription
@@ -3817,6 +3836,7 @@ if (isBlankDraft) {
       return null;
     }
 
+    setShareMode('prompt');
     setShareSessionId(_sid);
     setShareCutoffMessageId(messageId ?? null);
     setSharePromptText(prompt);
@@ -3838,44 +3858,37 @@ if (isBlankDraft) {
     return url;
   };
 
-  const handleTopShare = async () => {
-    if (topShareBusy) return;
+  // The top-right Share button opens the share popup; the public link is
+  // created from inside the popup.
+  const handleTopShare = () => {
+    setShareMode('conversation');
+    setShareUrl(null);
+    setShareLoading(false);
+    setSharePromptText(sessions.find(item => item.id === currentSessionId)?.sessionName || '');
     if (currentSessionId === null) {
       setShareError('Start a conversation before creating a public link.');
       setShareSessionId(-1);
       return;
     }
+    setShareError(null);
+    setShareSessionId(currentSessionId);
+  };
 
-    setTopShareBusy(true);
-    setShareSuccessVisible(false);
+  const createConversationLink = async () => {
+    if (currentSessionId === null || shareLoading) return;
+    setShareLoading(true);
     setShareError(null);
     try {
-      // Create a real public share for the whole current session on the backend.
       const response = await chatApi.shareSession(currentSessionId) as any;
       const shareToken = response?.shareToken;
       if (!response?.success || !shareToken) {
         throw new Error(response?.error || 'Could not create a public link.');
       }
-
-      const url = `${window.location.origin}/shared/${encodeURIComponent(shareToken)}`;
-      if (!navigator.clipboard?.writeText) {
-        setShareUrl(url);
-        setShareSessionId(currentSessionId);
-        setSharePromptText('');
-        setShareError('The public link was created, but clipboard access is unavailable. Copy the link from the share dialog.');
-        return;
-      }
-      await navigator.clipboard.writeText(url);
-
-      setShareUrl(url);
-      setShareSuccessVisible(true);
-      setShareSessionId(null);
-      setShareError(null);
+      setShareUrl(`${window.location.origin}/shared/${encodeURIComponent(shareToken)}`);
     } catch (error) {
-      setShareError(error instanceof Error ? error.message : 'Could not create or copy the public link.');
-      setShareSessionId(currentSessionId);
+      setShareError(error instanceof Error ? error.message : 'Could not create the public link.');
     } finally {
-      setTopShareBusy(false);
+      setShareLoading(false);
     }
   };
 
@@ -4143,7 +4156,7 @@ if (isBlankDraft) {
         <div className="absolute right-4 top-3 z-[9998]">
           <button
             type="button"
-            onClick={() => void handleTopShare()}
+            onClick={handleTopShare}
             disabled={topShareBusy}
             className="group relative hidden h-9 items-center gap-2 rounded-lg border border-zinc-300/70 bg-white px-3.5 text-sm font-medium text-zinc-900 transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 disabled:cursor-wait disabled:opacity-70 sm:inline-flex dark:border-white/15 dark:bg-transparent dark:text-zinc-100 dark:hover:bg-white/5"
             aria-label="Share"
@@ -4994,8 +5007,7 @@ if (isBlankDraft) {
                       // starting a second recognition session.
                       onPointerEnter={() => warmLiveToken()}
                       onFocus={() => warmLiveToken()}
-                      onPointerDown={startVoiceInput}
-                      onClick={(event) => event.preventDefault()}
+                      onClick={startVoiceInput}
                       disabled={isTyping || isProcessingFiles}
                       aria-label="Voice input"
                       data-tooltip="Dictate"
@@ -5222,9 +5234,11 @@ if (isBlankDraft) {
       <ShareChatModal
         isOpen={shareSessionId !== null}
         shareUrl={shareUrl}
-        chatName="Share prompt"
+        chatName={shareMode === 'conversation' ? 'Share chat' : 'Share prompt'}
+        mode={shareMode}
+        onCreateLink={() => void createConversationLink()}
         promptText={sharePromptText}
-        shareDescription="Anyone with this link can open Twinkle AI with this prompt ready to send."
+        shareDescription={shareMode === 'prompt' ? 'Anyone with this link can open Twinkle AI with this prompt ready to send.' : undefined}
         isLoading={shareLoading}
         error={shareError}
         onClose={closeShareModal}
@@ -5280,15 +5294,15 @@ if (isBlankDraft) {
         onConfirm={confirmDeleteSession}
         title="Delete chat?"
         confirmText="Delete"
-        message={<>This will permanently delete{' '}<strong className="font-bold">{sessionToDelete?.sessionName || 'this chat'}</strong>. This can’t be undone.</>}
+        message={<>This will permanently delete{' '}<strong className="font-semibold text-zinc-700 dark:text-zinc-200">{sessionToDelete?.sessionName || 'this chat'}</strong>. This can’t be undone.</>}
       />
       <ConfirmationModal
         isOpen={modalType === 'delete-all'}
         onClose={() => setModalType('none')}
         onConfirm={confirmClearAll}
-        title="Clear all chats?"
-        message={`All ${sessions.length} chats will be permanently deleted.`}
-        confirmText="Clear All"
+        title="Delete all chats?"
+        message={`All ${sessions.length} chats will be permanently deleted. This can’t be undone.`}
+        confirmText="Delete"
       />
     </div>
   );
