@@ -58,7 +58,7 @@ import {
 } from '../lib/preferences';
 import ConfirmationModal from '../components/ConfirmationModal';
 import VoiceGrid from '../components/VoiceGrid';
-import { VOICES } from '../lib/voices';
+import { VOICES, getVoiceGreeting } from '../lib/voices';
 import { shortcutGroups } from '../lib/shortcuts';
 
 type SettingsSection =
@@ -984,8 +984,8 @@ export default function Settings({
   const previewSeq = useRef(0);
   const previewTimer = useRef<number | null>(null);
   const greetingText = useMemo(
-    () => `Hi ${user.username?.trim() || user.name?.trim() || 'there'}, I'm Twinkle AI.`,
-    [user.username, user.name]
+    () => getVoiceGreeting(selectedVoice, user.username?.trim() || user.name?.trim()),
+    [selectedVoice, user.username, user.name]
   );
 
   const clearPreviewTimer = () => {
@@ -1003,7 +1003,11 @@ export default function Settings({
       setVoiceError('');
       setPreviewingVoice(voice);
       try {
-        await previewGeminiVoice(voice, greetingText, appLanguage);
+        await previewGeminiVoice(
+          voice,
+          getVoiceGreeting(voice, user.username?.trim() || user.name?.trim()),
+          appLanguage
+        );
       } catch (error) {
         if (seq !== previewSeq.current) return;
         const message = error instanceof Error ? error.message : 'Gemini voice preview failed.';
@@ -1013,7 +1017,7 @@ export default function Settings({
         if (seq === previewSeq.current) setPreviewingVoice(null);
       }
     },
-    [greetingText, appLanguage]
+    [user.username, user.name, appLanguage]
   );
 
   // Selecting changes the name immediately and saves it. The sample starts
