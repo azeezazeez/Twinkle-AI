@@ -4,7 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { createPortal, flushSync } from 'react-dom';
 import { User, Session, Message } from '../types';
 import Sidebar from '../components/Sidebar'; 
-import { chatApi, authApi, createLiveToken, startLiveTokenKeepWarm, warmLiveToken } from '../lib/api'; 
+import { chatApi, authApi, createLiveToken, startLiveTokenKeepWarm, warmLiveToken, buildLiveSocketUrl, reportLiveSocketFailure, reportLiveSocketSuccess } from '../lib/api'; 
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react'; 
 import StormLogo from '../components/StormLogo';
 import ConfirmationModal from '../components/ConfirmationModal';
@@ -94,6 +94,48 @@ const pcm16ToBase64 = (buffer: ArrayBuffer): string => {
     binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + chunkSize, bytes.length)));
   }
   return btoa(binary);
+};
+
+/**
+ * Streaming 16 kHz PCM downsampler for the ScriptProcessor fallback. Each
+ * output sample is the average of (inputRate / 16000) input samples, which low-
+ * passes the signal before decimation. The old linear interpolation skipped
+ * samples without filtering (aliasing), which blurred soft consonants and made
+ * the transcriber confuse words like "who" and "how".
+ */
+const createPcm16Downsampler = (inputRate: number) => {
+  const ratio = inputRate / 16000;
+  let cellFill = 0;
+  let cellSum = 0;
+
+  return (input: Float32Array): Int16Array => {
+    const out: number[] = [];
+    for (let n = 0; n < input.length; n += 1) {
+      const sample = input[n] || 0;
+      if (ratio <= 1.0001) {
+        out.push(Math.max(-1, Math.min(1, sample)));
+        continue;
+      }
+      let remaining = 1;
+      while (remaining > 1e-9) {
+        const room = ratio - cellFill;
+        const take = remaining < room ? remaining : room;
+        cellSum += sample * take;
+        cellFill += take;
+        remaining -= take;
+        if (cellFill >= ratio - 1e-9) {
+          out.push(Math.max(-1, Math.min(1, cellSum / ratio)));
+          cellSum = 0;
+          cellFill = 0;
+        }
+      }
+    }
+    const pcm = new Int16Array(out.length);
+    for (let i = 0; i < out.length; i += 1) {
+      pcm[i] = out[i] < 0 ? out[i] * 0x8000 : out[i] * 0x7fff;
+    }
+    return pcm;
+  };
 };
 
 /**
@@ -896,32 +938,80 @@ const isGenericOrRawTitle = (name: unknown): boolean => {
 };
 
 /**
- * Mic listening meter. Opens its own analyser on the microphone and drives the
- * bars straight from the DOM (no React re-render per frame). Silence shows a
- * row of still dots; any sound makes the bars spike with the voice.
+ * Mic listening meter - a scrolling voice waveform, like Claude's dictation bar.
+ *
+ * Every ~50 ms the current loudness of the microphone is pushed in on the right
+ * and older bars scroll to the left, so each bar has its OWN height: a record of
+ * how loud the last couple of seconds were. Silence is a row of still dots; speech
+ * produces tall and short bars that follow the rhythm of the voice.
+ *
+ * (The previous version mapped frequency bins to bars with a 3x gain and a
+ * saturating scale, so every bar hit the same maximum height at once.)
+ *
+ * It opens its own analyser and writes heights straight to the DOM, so there is
+ * no React re-render per frame.
  */
-const VoiceLevelBars = ({ bars = 16 }: { bars?: number }) => {
+const VOICE_BAR_WIDTH = 3;
+const VOICE_BAR_GAP = 3;
+const VOICE_BAR_MIN_HEIGHT = 3;
+const VOICE_BAR_MAX_HEIGHT = 28;
+const VOICE_BAR_INTERVAL_MS = 50;
+const VOICE_BAR_MAX_COUNT = 72;
+
+const VoiceLevelBars = () => {
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const barRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  const countRef = useRef(32);
+  const historyRef = useRef(new Float32Array(VOICE_BAR_MAX_COUNT));
+  const [count, setCount] = useState(32);
+
+  const paint = useCallback(() => {
+    const history = historyRef.current;
+    const visible = countRef.current;
+    for (let i = 0; i < visible; i += 1) {
+      const el = barRefs.current[i];
+      if (!el) continue;
+      const level = history[history.length - visible + i] || 0;
+      el.style.height = `${VOICE_BAR_MIN_HEIGHT + level * (VOICE_BAR_MAX_HEIGHT - VOICE_BAR_MIN_HEIGHT)}px`;
+      el.style.opacity = String(0.35 + level * 0.65);
+    }
+  }, []);
+
+  // Fit as many bars as the free space allows (works from 320 px phones up).
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const measure = () => {
+      const width = root.clientWidth;
+      const fit = Math.floor((width + VOICE_BAR_GAP) / (VOICE_BAR_WIDTH + VOICE_BAR_GAP));
+      const next = Math.max(10, Math.min(VOICE_BAR_MAX_COUNT, fit || 32));
+      countRef.current = next;
+      setCount(next);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => { paint(); }, [count, paint]);
 
   useEffect(() => {
     let stopped = false;
     let raf = 0;
     let stream: MediaStream | null = null;
     let context: AudioContext | null = null;
-    const levels = new Float32Array(bars);
-
-    const resetBars = () => {
-      for (let i = 0; i < bars; i += 1) {
-        const el = barRefs.current[i];
-        if (el) { el.style.height = '3px'; el.style.opacity = '0.45'; }
-      }
-    };
+    const history = historyRef.current;
+    history.fill(0);
 
     (async () => {
       try {
         if (!navigator.mediaDevices?.getUserMedia) return;
+        // AGC is off on purpose: with it on, background noise is boosted and the
+        // bars would never settle to dots in silence.
         stream = await navigator.mediaDevices.getUserMedia({
-          audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: false },
         });
         if (stopped) { stream.getTracks().forEach(track => track.stop()); return; }
 
@@ -932,50 +1022,60 @@ const VoiceLevelBars = ({ bars = 16 }: { bars?: number }) => {
         if (stopped) return;
 
         const source = context.createMediaStreamSource(stream);
-        const gain = context.createGain();
-        gain.gain.value = 3; // lift quiet voices so they register on the meter
         const analyser = context.createAnalyser();
-        analyser.fftSize = 512;
-        analyser.smoothingTimeConstant = 0.35;
+        analyser.fftSize = 1024;
+        analyser.smoothingTimeConstant = 0;
         const mute = context.createGain();
         mute.gain.value = 0; // keeps the graph running without playing the mic back
-        source.connect(gain);
-        gain.connect(analyser);
+        source.connect(analyser);
         analyser.connect(mute);
         mute.connect(context.destination);
 
-        const freq = new Uint8Array(analyser.frequencyBinCount);
         const wave = new Float32Array(analyser.fftSize);
-        const firstBin = 2;                            // ~190 Hz
-        const lastBin = Math.min(freq.length - 1, 44); // ~4 kHz (voice band)
-        const span = (lastBin - firstBin + 1) / bars;
+        let noiseFloor = 0.002;
+        let envelope = 0;
+        let intervalPeak = 0;
+        let lastPush = performance.now();
 
-        const tick = () => {
+        const tick = (now: number) => {
           if (stopped) return;
-          analyser.getByteFrequencyData(freq);
           analyser.getFloatTimeDomainData(wave);
+
           let sum = 0;
           for (let i = 0; i < wave.length; i += 1) sum += wave[i] * wave[i];
-          const loud = Math.sqrt(sum / wave.length) > 0.012;
+          const rms = Math.sqrt(sum / wave.length);
 
-          for (let i = 0; i < bars; i += 1) {
-            const lo = firstBin + Math.floor(i * span);
-            const hi = Math.max(lo, firstBin + Math.floor((i + 1) * span) - 1);
-            let acc = 0;
-            for (let b = lo; b <= hi; b += 1) acc += freq[b];
-            const target = loud ? Math.min(1, (acc / (hi - lo + 1) / 255) * 1.7) : 0;
-            levels[i] += (target - levels[i]) * (target > levels[i] ? 0.6 : 0.2);
-            const el = barRefs.current[i];
-            if (el) {
-              el.style.height = `${3 + levels[i] * 21}px`;
-              el.style.opacity = String(0.45 + levels[i] * 0.55);
-            }
+          // Adaptive noise floor: follows quiet moments quickly and rises very
+          // slowly, so steady room noise is gated out but speech is not.
+          if (rms < noiseFloor) noiseFloor += (rms - noiseFloor) * 0.12;
+          else noiseFloor += (rms - noiseFloor) * 0.0025;
+          noiseFloor = Math.min(0.03, Math.max(0.0004, noiseFloor));
+
+          let target = 0;
+          if (rms > noiseFloor * 2 + 0.003) {
+            // Perceptual (dB) scale: about -50 dB (whisper) .. -16 dB (loud).
+            const db = 20 * Math.log10(rms);
+            target = Math.min(1, Math.max(0, (db + 50) / 34));
           }
+
+          // Fast attack, slower release: bars jump with a syllable and fall away.
+          envelope += (target - envelope) * (target > envelope ? 0.6 : 0.2);
+          if (envelope > intervalPeak) intervalPeak = envelope;
+
+          if (now - lastPush >= VOICE_BAR_INTERVAL_MS) {
+            lastPush = now;
+            history.copyWithin(0, 1);
+            history[history.length - 1] = intervalPeak < 0.02 ? 0 : intervalPeak;
+            intervalPeak = envelope;
+            paint();
+          }
+
           raf = requestAnimationFrame(tick);
         };
         raf = requestAnimationFrame(tick);
       } catch {
-        resetBars();
+        history.fill(0);
+        paint();
       }
     })();
 
@@ -985,18 +1085,29 @@ const VoiceLevelBars = ({ bars = 16 }: { bars?: number }) => {
       stream?.getTracks().forEach(track => track.stop());
       try { void context?.close(); } catch { /* already closed */ }
     };
-  }, [bars]);
+  }, [paint]);
 
   return (
-    <div className="flex h-6 items-center gap-[5px]" aria-hidden="true">
-      {Array.from({ length: bars }).map((_, index) => (
-        <span
-          key={index}
-          ref={el => { barRefs.current[index] = el; }}
-          className="block shrink-0 rounded-full bg-zinc-500 dark:bg-zinc-400"
-          style={{ width: 3, height: 3, opacity: 0.45, transition: 'height 60ms linear' }}
-        />
-      ))}
+    <div
+      ref={rootRef}
+      className="flex h-8 w-full min-w-0 items-center justify-end overflow-hidden"
+      aria-hidden="true"
+    >
+      <div className="flex h-8 items-center" style={{ gap: VOICE_BAR_GAP }}>
+        {Array.from({ length: count }).map((_, index) => (
+          <span
+            key={index}
+            ref={el => { barRefs.current[index] = el; }}
+            className="block shrink-0 rounded-full bg-zinc-700 dark:bg-zinc-200"
+            style={{
+              width: VOICE_BAR_WIDTH,
+              height: VOICE_BAR_MIN_HEIGHT,
+              opacity: 0.35,
+              transition: 'height 90ms ease-out, opacity 90ms ease-out',
+            }}
+          />
+        ))}
+      </div>
     </div>
   );
 };
@@ -1597,17 +1708,18 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       if (audioContext.state === 'suspended') await audioContext.resume();
       speechNextStartRef.current = audioContext.currentTime;
 
-      const { token, model } = await createLiveToken('Charon', getSpeechLanguage());
+      const { token, model, apiVersion } = await createLiveToken('Charon', getSpeechLanguage());
       if (requestId !== speechRequestRef.current) return;
 
-      const socket = new WebSocket(
-        `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}`
-      );
+      const socket = new WebSocket(buildLiveSocketUrl(token, apiVersion));
+      let speechSocketOpened = false;
       speechSocketRef.current = socket;
       setSpeakingMessageId(message.id);
 
       socket.onopen = () => {
         if (requestId !== speechRequestRef.current) { socket.close(); return; }
+        speechSocketOpened = true;
+        reportLiveSocketSuccess(apiVersion);
         // Gemini Live requires setupComplete before clientContent is sent.
         // Sending both frames immediately can race setup and leave Read Aloud silent.
         socket.send(JSON.stringify({
@@ -1670,6 +1782,8 @@ ${textToRead}` }] }], turnComplete: true },
         }
       };
       socket.onerror = () => {
+        // Never opened = handshake rejected: use the other Live API version next time.
+        if (!speechSocketOpened) reportLiveSocketFailure(apiVersion, token);
         if (requestId === speechRequestRef.current) {
           console.error('Gemini Live audio connection failed.');
           stopReadAloud();
@@ -1802,6 +1916,11 @@ ${textToRead}` }] }], turnComplete: true },
   const voiceGeminiWorkletReadyRef = useRef<Promise<void> | null>(null);
   const voiceGeminiFallbackActiveRef = useRef(false);
   const voiceGeminiPendingPcmRef = useRef<string[]>([]);
+  // Audio may only be sent after the server's setupComplete frame.
+  const voiceGeminiSetupDoneRef = useRef(false);
+  const voiceGeminiRetryRef = useRef(0);
+  const voiceGeminiBasicSetupRef = useRef(false);
+  const startGeminiDictationFallbackRef = useRef<((attempt: number) => Promise<void>) | null>(null);
   const [voiceDraftVersion, setVoiceDraftVersion] = useState(0);
   const [voiceLiveTranscript, setVoiceLiveTranscript] = useState('');
   const [voiceSpeechDetected, setVoiceSpeechDetected] = useState(false);
@@ -1825,6 +1944,7 @@ ${textToRead}` }] }], turnComplete: true },
 
   const stopGeminiDictationFallback = useCallback(() => {
     voiceGeminiFallbackActiveRef.current = false;
+    voiceGeminiSetupDoneRef.current = false;
     voiceGeminiPendingPcmRef.current = [];
 
     try { voiceGeminiProcessorRef.current?.disconnect(); } catch {}
@@ -1902,7 +2022,7 @@ ${textToRead}` }] }], turnComplete: true },
       // microphone, AudioContext and worklet keep initializing in parallel, so
       // the network handshake no longer waits for them. Mic audio is buffered
       // until the socket is open.
-      const { token, model } = await tokenPromise.catch(error => {
+      const { token, model, apiVersion } = await tokenPromise.catch(error => {
         streamPromise.then(s => s.getTracks().forEach(track => track.stop())).catch(() => undefined);
         throw error;
       });
@@ -1911,16 +2031,43 @@ ${textToRead}` }] }], turnComplete: true },
         return;
       }
 
-      const socket = new WebSocket(
-        `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}`
-      );
+      // The ephemeral token is only valid on the API version that issued it.
+      const socket = new WebSocket(buildLiveSocketUrl(token, apiVersion));
+      let socketOpened = false;
+      let setupDone = false;
       voiceGeminiSocketRef.current = socket;
+      voiceGeminiSetupDoneRef.current = false;
+
+      const flushPending = () => {
+        if (socket.readyState !== WebSocket.OPEN || !voiceGeminiSetupDoneRef.current) return;
+        const queued = voiceGeminiPendingPcmRef.current.splice(0);
+        for (const data of queued) {
+          try {
+            socket.send(JSON.stringify({ realtimeInput: { audio: { data, mimeType: 'audio/pcm;rate=16000' } } }));
+          } catch {
+            break;
+          }
+        }
+      };
 
       socket.onopen = () => {
         if (attempt !== voiceStartRef.current || !voiceDictationWantedRef.current) {
           try { socket.close(1000, 'Dictation stopped'); } catch {}
           return;
         }
+        socketOpened = true;
+        reportLiveSocketSuccess(apiVersion);
+
+        // Tell the recogniser the language when the user picked one. If the
+        // server rejects the hint (close 1007 before setupComplete) dictation
+        // retries automatically with the plain setup.
+        let explicitLanguage = false;
+        try { explicitLanguage = (localStorage.getItem('twinkle_app_language') || 'auto') !== 'auto'; } catch {}
+        const inputTranscription: Record<string, unknown> =
+          explicitLanguage && !voiceGeminiBasicSetupRef.current
+            ? { languageCodes: [getSpeechRecognitionLanguage()] }
+            : {};
+
         socket.send(JSON.stringify({
           setup: {
             model: `models/${model || 'gemini-3.8-live'}`,
@@ -1930,12 +2077,14 @@ ${textToRead}` }] }], turnComplete: true },
                 text: `Twinkle AI speech-to-text mode. Transcribe the user's speech accurately. Preserve the user's wording and language. The selected language is ${getSpeechRecognitionLanguage()}. Do not translate the user's speech. Do not answer the user.`,
               }],
             },
-            inputAudioTranscription: {},
+            inputAudioTranscription: inputTranscription,
             realtimeInputConfig: {
               automaticActivityDetection: {
                 disabled: false,
-                prefixPaddingMs: 20,
-                silenceDurationMs: 200,
+                // 20 ms of lead-in clipped the first sound of every phrase
+                // ("who" -> "how"). Keep ~250 ms so the whole word is sent.
+                prefixPaddingMs: 250,
+                silenceDurationMs: 500,
                 startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH',
                 endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
               },
@@ -1949,6 +2098,13 @@ ${textToRead}` }] }], turnComplete: true },
         try {
           const message = await decodeGeminiLiveMessage(event.data);
           if (message?.error) throw new Error(message.error.message || 'Gemini transcription failed.');
+          if (message?.setupComplete) {
+            setupDone = true;
+            voiceGeminiSetupDoneRef.current = true;
+            voiceGeminiRetryRef.current = 0;
+            flushPending();
+            return;
+          }
           const finalText = String(message?.serverContent?.inputTranscription?.text || '')
             .replace(/\s+/g, ' ')
             .trim();
@@ -1997,11 +2153,30 @@ ${textToRead}` }] }], turnComplete: true },
 
       socket.onclose = (event) => {
         if (voiceGeminiSocketRef.current === socket) voiceGeminiSocketRef.current = null;
+        voiceGeminiSetupDoneRef.current = false;
         if (attempt === voiceStartRef.current && voiceDictationWantedRef.current && event.code !== 1000) {
-          // Do not immediately tear down the listening UI. The next start gets
-          // a fresh ephemeral token, while any text already received remains
-          // in the real search field.
           console.warn('Twinkle Gemini dictation socket closed:', event.code, event.reason || 'no reason');
+
+          // Self-healing, at most twice per start. Text already received stays
+          // in the composer.
+          //  - never opened (a rejected handshake shows up as 1006): drop the
+          //    token and retry on the other Live API version;
+          //  - rejected setup (1007): retry without the optional hints.
+          if (!setupDone && voiceGeminiRetryRef.current < 2) {
+            let retry = true;
+            if (!socketOpened) {
+              reportLiveSocketFailure(apiVersion, token);
+            } else if (event.code === 1007 && !voiceGeminiBasicSetupRef.current) {
+              voiceGeminiBasicSetupRef.current = true;
+            } else {
+              retry = false;
+            }
+            if (retry) {
+              voiceGeminiRetryRef.current += 1;
+              stopGeminiDictationFallback();
+              void startGeminiDictationFallbackRef.current?.(attempt);
+            }
+          }
         }
       };
 
@@ -2020,7 +2195,7 @@ ${textToRead}` }] }], turnComplete: true },
         if (!voiceGeminiFallbackActiveRef.current || attempt !== voiceStartRef.current) return;
         const data = pcm16ToBase64(buffer);
         const liveSocket = voiceGeminiSocketRef.current;
-        if (liveSocket?.readyState === WebSocket.OPEN) {
+        if (liveSocket?.readyState === WebSocket.OPEN && voiceGeminiSetupDoneRef.current) {
           try {
             liveSocket.send(JSON.stringify({
               realtimeInput: { audio: { data, mimeType: 'audio/pcm;rate=16000' } },
@@ -2029,9 +2204,11 @@ ${textToRead}` }] }], turnComplete: true },
             // The socket close handler will clean up without interrupting capture.
           }
         } else {
+          // About one second (~10 ms per chunk) is kept so the first word the
+          // user says while the connection is still being set up is not lost.
           const queue = voiceGeminiPendingPcmRef.current;
           queue.push(data);
-          if (queue.length > 60) queue.splice(0, queue.length - 60);
+          if (queue.length > 100) queue.splice(0, queue.length - 100);
         }
       };
 
@@ -2043,58 +2220,28 @@ ${textToRead}` }] }], turnComplete: true },
         } catch (workletError) {
           console.warn('Twinkle AudioWorklet unavailable; using compatibility microphone capture.', workletError);
           const scriptProcessor = context.createScriptProcessor(1024, 1, 1);
+          const downsample = createPcm16Downsampler(context.sampleRate);
           scriptProcessor.onaudioprocess = event => {
-            const inputData = event.inputBuffer.getChannelData(0);
-            const ratio = context.sampleRate / 16000;
-            const outputLength = Math.max(1, Math.round(inputData.length / ratio));
-            const pcm = new Int16Array(outputLength);
-            for (let i = 0; i < outputLength; i += 1) {
-              const position = i * ratio;
-              const left = Math.min(Math.floor(position), inputData.length - 1);
-              const right = Math.min(left + 1, inputData.length - 1);
-              const fraction = position - left;
-              const sample = inputData[left] * (1 - fraction) + inputData[right] * fraction;
-              const clamped = Math.max(-1, Math.min(1, sample));
-              pcm[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
-            }
-            sendPcm(pcm.buffer);
+            const pcm = downsample(event.inputBuffer.getChannelData(0));
+            if (pcm.length) sendPcm(pcm.buffer as ArrayBuffer);
           };
           processor = scriptProcessor;
         }
       } else {
         const scriptProcessor = context.createScriptProcessor(1024, 1, 1);
+        const downsample = createPcm16Downsampler(context.sampleRate);
         scriptProcessor.onaudioprocess = event => {
-          const inputData = event.inputBuffer.getChannelData(0);
-          const ratio = context.sampleRate / 16000;
-          const outputLength = Math.max(1, Math.round(inputData.length / ratio));
-          const pcm = new Int16Array(outputLength);
-          for (let i = 0; i < outputLength; i += 1) {
-            const position = i * ratio;
-            const left = Math.min(Math.floor(position), inputData.length - 1);
-            const right = Math.min(left + 1, inputData.length - 1);
-            const fraction = position - left;
-            const sample = inputData[left] * (1 - fraction) + inputData[right] * fraction;
-            const clamped = Math.max(-1, Math.min(1, sample));
-            pcm[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
-          }
-          sendPcm(pcm.buffer);
+          const pcm = downsample(event.inputBuffer.getChannelData(0));
+          if (pcm.length) sendPcm(pcm.buffer as ArrayBuffer);
         };
         processor = scriptProcessor;
       }
 
-      // Quiet-speech boost: a gain lift plus a compressor, so soft voices reach
-      // the transcriber clearly while loud ones cannot clip.
-      const micBoost = context.createGain();
-      micBoost.gain.value = 2.6;
-      const micCompressor = context.createDynamicsCompressor();
-      micCompressor.threshold.value = -50;
-      micCompressor.knee.value = 24;
-      micCompressor.ratio.value = 6;
-      micCompressor.attack.value = 0.003;
-      micCompressor.release.value = 0.2;
-      source.connect(micBoost);
-      micBoost.connect(micCompressor);
-      micCompressor.connect(processor);
+      // Clean, unity-gain capture. The browser already applies echo
+      // cancellation, noise suppression and AGC; an extra 2.6x gain plus a
+      // -50 dB / 6:1 compressor on top pumped the noise floor and distorted
+      // soft consonants, which is what turned "who are you" into "how are you".
+      source.connect(processor);
       processor.connect(silentGain);
       silentGain.connect(context.destination);
 
@@ -2102,23 +2249,9 @@ ${textToRead}` }] }], turnComplete: true },
       voiceGeminiProcessorRef.current = processor;
       voiceGeminiSilentGainRef.current = silentGain;
 
-      const flushQueue = () => {
-        const liveSocket = voiceGeminiSocketRef.current;
-        if (liveSocket?.readyState !== WebSocket.OPEN) return;
-        const queued = voiceGeminiPendingPcmRef.current.splice(0);
-        for (const data of queued) {
-          try {
-            liveSocket.send(JSON.stringify({ realtimeInput: { audio: { data, mimeType: 'audio/pcm;rate=16000' } } }));
-          } catch {
-            break;
-          }
-        }
-      };
-      const previousOnOpen = socket.onopen;
-      socket.onopen = event => {
-        previousOnOpen?.call(socket, event);
-        window.setTimeout(flushQueue, 0);
-      };
+      // If setup already finished while the microphone was starting, send the
+      // audio that was captured in the meantime.
+      flushPending();
     } catch (error) {
       console.warn('Twinkle Gemini dictation fallback failed:', error);
       stopGeminiDictationFallback();
@@ -2127,7 +2260,9 @@ ${textToRead}` }] }], turnComplete: true },
       setVoiceInputActive(false);
       window.alert('Voice input could not start. Check that microphone access is allowed for this site and try again.');
     }
-  }, [stopGeminiDictationFallback]);
+  }, [stopGeminiDictationFallback, getSpeechRecognitionLanguage]);
+
+  startGeminiDictationFallbackRef.current = startGeminiDictationFallback;
 
   const cleanupVoiceAudio = useCallback(() => {
     if (voiceSpeechTimerRef.current !== null) {
@@ -2251,6 +2386,8 @@ ${textToRead}` }] }], turnComplete: true },
     ) return;
     voiceStartInProgressRef.current = true;
     voiceDictationWantedRef.current = true;
+    voiceGeminiRetryRef.current = 0;
+    voiceGeminiBasicSetupRef.current = false;
 
     const SpeechRecognitionCtor =
       (window as any).SpeechRecognition ||
