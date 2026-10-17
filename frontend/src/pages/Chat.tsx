@@ -56,7 +56,7 @@ const formatRelativeAgo = (value: string | number | Date | undefined | null): st
   return new Intl.RelativeTimeFormat('en', { numeric: 'always' }).format(-Math.max(1, Math.floor(seconds / size)), unit);
 };
 
-function RelativeTime({ value }: { value?: string | number | Date | null }) {
+function RelativeTime({ value, className }: { value?: string | number | Date | null; className?: string }) {
   const [, tick] = useState(0);
   useEffect(() => {
     const id = window.setInterval(() => tick(n => n + 1), 30_000);
@@ -65,7 +65,7 @@ function RelativeTime({ value }: { value?: string | number | Date | null }) {
   const date = value ? new Date(value) : null;
   return (
     <span
-      className="ml-1.5 whitespace-nowrap text-[13px] font-normal text-zinc-500 dark:text-zinc-400"
+      className={className ?? "ml-1.5 whitespace-nowrap text-[13px] font-normal text-zinc-500 dark:text-zinc-400"}
       title={date && !Number.isNaN(date.getTime()) ? date.toLocaleString() : undefined}
     >
       {formatRelativeAgo(value)}
@@ -940,11 +940,11 @@ interface ModelOption {
 }
 
 const MODEL_OPTIONS: ModelOption[] = [
-  { id: '@cf/openai/gpt-oss-20b', name: 'Twinkle', description: 'Fast everyday conversations', icon: Zap },
-  { id: '@cf/meta/llama-3.1-8b-instruct-fp8-fast', name: 'Twinkle Live', description: 'Ultra-low latency real-time chat', icon: Zap },
-  { id: '@cf/openai/gpt-oss-120b', name: 'Twinkle Pro', description: 'Advanced reasoning and coding', icon: Brain },
-  { id: '@cf/black-forest-labs/flux-1-schnell', name: 'Twinkle Imagine', description: 'Generate images from a text prompt', icon: Sparkles },
-  { id: 'gemini-3.8-flash', name: 'Twinkle Vision', description: 'Advanced image & file understanding', icon: Eye, vision: true, documents: true },
+  { id: '@cf/openai/gpt-oss-20b', name: 'Spark', description: 'Fast, friendly everyday answers', icon: Zap },
+  { id: '@cf/meta/llama-3.1-8b-instruct-fp8-fast', name: 'Flow', description: 'Instant replies for real-time chat', icon: Zap },
+  { id: '@cf/openai/gpt-oss-120b', name: 'Prime', description: 'Deep reasoning, coding and analysis', icon: Brain },
+  { id: '@cf/black-forest-labs/flux-1-schnell', name: 'Canvas', description: 'Turn your words into images', icon: Sparkles },
+  { id: 'gemini-3.8-flash', name: 'Sight', description: 'Understands images, audio and files', icon: Eye, vision: true, documents: true },
 ];
 
 const MODEL_STORAGE_KEY = 'Twinkle_selected_model';
@@ -1043,7 +1043,46 @@ const getTimeOfDay = (): 'morning' | 'afternoon' | 'evening' => {
   return 'evening';
 };
 
-const getRandomChatGreeting = (userName = '', previousGreeting = ''): string => {
+// Each model greets in its own voice.
+const MODEL_GREETINGS: Record<string, string[]> = {
+  // Spark: warm and chatty
+  '@cf/openai/gpt-oss-20b': [
+    'Hey {name}! What are we up to today? 😊',
+    'Hi there! Got something on your mind? 💬',
+    'Hey {name}, good to see you! What can I help with? 🌟',
+    'Hello! Ask me anything, big or small 😄',
+  ],
+  // Flow: short and snappy
+  '@cf/meta/llama-3.1-8b-instruct-fp8-fast': [
+    'Hi {name}. Go ahead, I’m listening ⚡',
+    'Ready when you are.',
+    'Quick question? Fire away ⚡',
+    'Hey {name}. What’s up?',
+  ],
+  // Prime: composed and professional
+  '@cf/openai/gpt-oss-120b': [
+    'Welcome, {name}. What would you like to analyze or build?',
+    'Good to see you, {name}. Which problem shall we solve?',
+    'Ready for the hard questions. Where shall we begin?',
+    'Hello. Share the task, and we’ll work through it step by step.',
+  ],
+  // Canvas: imaginative
+  '@cf/black-forest-labs/flux-1-schnell': [
+    'Hello {name}, what shall we picture today? 🎨',
+    'Describe a scene and I’ll paint it ✨',
+    'A blank canvas awaits, {name}. What do you imagine? 🖌️',
+    'Dream it up, then let’s see it come to life 🌈',
+  ],
+  // Sight: curious and observant
+  'gemini-3.8-flash': [
+    'Show me something, {name} 👀',
+    'Drop in an image, a file or a question. I’ll take a look 🔍',
+    'Hi {name}! What should we take a closer look at? 👁️',
+    'Got a picture or document? Let’s look at it together 📎',
+  ],
+};
+
+const getRandomChatGreeting = (userName = '', previousGreeting = '', modelId = ''): string => {
   const rawName = userName.trim().split(/\s+/)[0] || '';
   // Never greet someone with an email address or a username full of digits.
   const name = rawName.includes('@') ? rawName.split('@')[0] : rawName;
@@ -1056,12 +1095,12 @@ const getRandomChatGreeting = (userName = '', previousGreeting = ''): string => 
     return displayName ? template.replace(/\{name\}/g, displayName) : null;
   };
 
-  const pool = [
+  const pool = (MODEL_GREETINGS[modelId] ?? [
     ...TIME_BASED_CHAT_GREETINGS[getTimeOfDay()],
     ...TIME_BASED_CHAT_GREETINGS[getTimeOfDay()], // weight the time-aware greetings
     ...EMPTY_CHAT_GREETINGS,
     ...EMPTY_CHAT_PROMPTS,
-  ]
+  ])
     .map(fill)
     .filter((greeting): greeting is string => Boolean(greeting));
 
@@ -2140,7 +2179,7 @@ ${textToRead}` }] }], turnComplete: true },
   const [emptyChatPrompt, setEmptyChatPrompt] = useState(() =>
     EMPTY_CHAT_PROMPTS[Math.floor(Math.random() * EMPTY_CHAT_PROMPTS.length)]
   );
-  const [chatGreeting, setChatGreeting] = useState(() => getRandomChatGreeting(user?.name || user?.username || ''));
+  const [chatGreeting, setChatGreeting] = useState(() => getRandomChatGreeting(user?.name || user?.username || '', '', selectedModel));
   const chatGreetingRef = useRef(chatGreeting);
   useEffect(() => { chatGreetingRef.current = chatGreeting; }, [chatGreeting]);
 
@@ -2148,12 +2187,12 @@ ${textToRead}` }] }], turnComplete: true },
   // button, shortcut, logo click, browser back to "/"), like ChatGPT/Claude.
   useEffect(() => {
     if (currentSessionId !== null) return;
-    const nextGreeting = getRandomChatGreeting(user?.name || user?.username || '', chatGreetingRef.current);
+    const nextGreeting = getRandomChatGreeting(user?.name || user?.username || '', chatGreetingRef.current, selectedModel);
     chatGreetingRef.current = nextGreeting;
     setChatGreeting(nextGreeting);
     setEmptyChatPrompt(current => getNextEmptyChatPrompt(current));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSessionId]);
+  }, [currentSessionId, selectedModel]);
   const modelPickerRef = useRef<HTMLDivElement>(null);
 
   // File upload
@@ -3037,7 +3076,7 @@ const chooseModel = useCallback((modelId: string) => {
   ) => {
     if ((!messageText.trim() && (!filesToSend || filesToSend.length === 0))) return;
 
-    // Image understanding is only supported by Twinkle Vision. Stop before
+    // Image understanding is only supported by Sight. Stop before
     // creating a user turn or calling the backend with an incompatible model.
     const includesImage = Array.isArray(filesToSend)
       && filesToSend.some(file => file instanceof File && file.type.startsWith('image/'));
@@ -3046,7 +3085,7 @@ const chooseModel = useCallback((modelId: string) => {
         id: `image-model-notice-${Date.now()}`,
         sessionId: currentSessionId || 0,
         role: 'assistant',
-        content: `I can’t read images with ${activeModel.name}. Please switch to Twinkle Vision and send the image again.`,
+        content: `I can’t read images with ${activeModel.name}. Please switch to Sight and send the image again.`,
         timestamp: new Date().toISOString(),
       }]);
       return;
@@ -3503,7 +3542,7 @@ const chooseModel = useCallback((modelId: string) => {
           'The AI service is currently busy. Please wait a few seconds and try again.';
       } else if (status === 502 || status === 503 || status === 504) {
         errMsg = selectedModel === 'gemini-3.8-flash'
-          ? 'Twinkle Vision is temporarily overloaded (Gemini returned 503). Please select Twinkle or Twinkle Pro and try again, or retry Twinkle Vision in a moment.'
+          ? 'Sight is temporarily overloaded (Gemini returned 503). Please select Spark or Prime and try again, or retry Sight in a moment.'
           : 'The AI service is temporarily unavailable. Please try again shortly.';
       } else if (
         typeof err?.message === 'string' &&
@@ -3697,7 +3736,8 @@ const chooseModel = useCallback((modelId: string) => {
 if (isBlankDraft) {
   const nextGreeting = getRandomChatGreeting(
     user?.name || user?.username || '',
-    chatGreetingRef.current
+    chatGreetingRef.current,
+    selectedModel
   );
 
   chatGreetingRef.current = nextGreeting;
@@ -3736,7 +3776,7 @@ if (isBlankDraft) {
       return [];
     });
     {
-      const nextGreeting = getRandomChatGreeting(user?.name || user?.username || '', chatGreetingRef.current);
+      const nextGreeting = getRandomChatGreeting(user?.name || user?.username || '', chatGreetingRef.current, selectedModel);
       chatGreetingRef.current = nextGreeting;
       setChatGreeting(nextGreeting);
     }
@@ -4567,15 +4607,12 @@ if (isBlankDraft) {
                               </span>
                             )}
 
-                            {msg.role === 'user' && <span className="text-[12px] font-normal text-zinc-500 dark:text-zinc-400 whitespace-nowrap mr-1">
-                              {msg.timestamp
-                                ? new Date(msg.timestamp).toLocaleTimeString('en-IN', {
-                                    timeZone: 'Asia/Kolkata',
-                                    hour: '2-digit',
-                                    minute: '2-digit'
-                                  })
-                                : 'Now'}
-                            </span>}
+                            {msg.role === 'user' && (
+                              <RelativeTime
+                                value={msg.timestamp}
+                                className="text-[12px] font-normal text-zinc-500 dark:text-zinc-400 whitespace-nowrap mr-1"
+                              />
+                            )}
 
                             <div className="flex items-center gap-0.5">
                                 {msg.role === 'user' ? (
