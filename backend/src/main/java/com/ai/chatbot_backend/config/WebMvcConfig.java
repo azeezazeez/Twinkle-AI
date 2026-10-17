@@ -9,12 +9,20 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     private final RateLimitInterceptor rateLimitInterceptor;
 
-    public WebMvcConfig(RateLimitInterceptor rateLimitInterceptor) {
+    private final SessionRevocationInterceptor sessionRevocationInterceptor;
+
+    public WebMvcConfig(RateLimitInterceptor rateLimitInterceptor,
+                        SessionRevocationInterceptor sessionRevocationInterceptor) {
         this.rateLimitInterceptor = rateLimitInterceptor;
+        this.sessionRevocationInterceptor = sessionRevocationInterceptor;
     }
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
+        // Runs first so a revoked session ("Log out of all devices") is rejected everywhere.
+        registry.addInterceptor(sessionRevocationInterceptor)
+                .addPathPatterns("/api/**");
+
         registry.addInterceptor(rateLimitInterceptor)
                 .addPathPatterns("/api/auth/**", "/api/chat/**");
     }
