@@ -398,6 +398,234 @@ You can ask me questions, give me a file or image to analyze, ask for help with 
   return content;
 }
 
+const IMAGE_MODEL_ID = '@cf/black-forest-labs/flux-1-schnell';
+const IMAGE_CHAT_PATTERN = /^\s*(hi+|hello+|hey+|hii+|yo|hola|namaste|sup|howdy|good\s+(morning|afternoon|evening|night)|how\s+are\s+you|who\s+are\s+you|what\s+can\s+you\s+do|what.?s\s+up|thanks?|thank\s+you|ok(ay)?|bye|help|test|testing)\b[\s\p{P}]*(there|twinkle|buddy|friend|bro)?[\s\p{P}]*$/iu;
+const IMAGE_WORDS_PATTERN = /\b(image|picture|photo|draw|paint|sketch|illustration|logo|wallpaper|render|portrait|poster|generate|create|make)\b/i;
+
+/** Mirrors the backend: greetings/small talk get a text reply, everything else an image. */
+function shouldShowImageProgress(
+  messages: Array<{ role: string; content?: string }>,
+  selectedModel: string,
+  isTyping: boolean
+): boolean {
+  if (!isTyping || selectedModel !== IMAGE_MODEL_ID) return false;
+  const last = messages[messages.length - 1];
+  if (last?.role === 'assistant' && String(last.content || '').length > 0) return false;
+  const lastUser = [...messages].reverse().find(message => message.role === 'user');
+  const text = String(lastUser?.content || '').trim();
+  if (!text) return false;
+  if (IMAGE_WORDS_PATTERN.test(text)) return true;
+  return !(text.length <= 60 && IMAGE_CHAT_PATTERN.test(text));
+}
+
+/**
+ * "Creating your image" card. The image service returns the finished picture in
+ * one piece and reports no real progress, so the percentage is an estimate: it
+ * climbs quickly, slows down as it nears the end and never shows 100% until the
+ * image actually arrives (the card is then replaced by the image).
+ */
+function ImageGenerationProgress({ prompt }: { prompt: string }) {
+  const [percent, setPercent] = useState(0);
+
+  useEffect(() => {
+    const startedAt = performance.now();
+    const timer = window.setInterval(() => {
+      const seconds = (performance.now() - startedAt) / 1000;
+      setPercent(Math.min(97, Math.round(97 * (1 - Math.exp(-seconds / 4)))));
+    }, 150);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const stage =
+    percent < 18 ? 'Understanding your prompt'
+    : percent < 55 ? 'Composing the scene'
+    : percent < 85 ? 'Adding details and color'
+    : 'Applying finishing touches';
+
+  return (
+    <motion.div
+      key="twinkle-image-generation"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -4 }}
+      transition={{ duration: 0.22, ease: 'easeOut' }}
+      role="status"
+      aria-live="polite"
+      aria-label={`Creating your image, ${percent}% complete`}
+      className="my-1 w-[min(100%,340px)] overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-[0_4px_16px_rgba(0,0,0,0.05)] dark:border-zinc-700 dark:bg-zinc-900"
+    >
+      <div className="relative aspect-square w-full overflow-hidden">
+        <motion.div
+          className="absolute inset-0"
+          style={{
+            backgroundImage:
+              'linear-gradient(115deg, rgba(217,119,87,0.28), rgba(167,139,250,0.30), rgba(96,165,250,0.28), rgba(217,119,87,0.28))',
+            backgroundSize: '300% 300%',
+          }}
+          animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
+          transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
+        />
+        <motion.div
+          className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/40 to-transparent dark:via-white/10"
+          initial={{ x: '-120%' }}
+          animate={{ x: '420%' }}
+          transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+        />
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+          <motion.div
+            animate={{ scale: [1, 1.12, 1], rotate: [0, 8, 0] }}
+            transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            <Sparkles className="h-9 w-9 text-[#D97757]" strokeWidth={1.6} />
+          </motion.div>
+          <span className="text-[34px] font-semibold tabular-nums leading-none tracking-tight text-zinc-800 dark:text-zinc-100">
+            {percent}%
+          </span>
+        </div>
+      </div>
+
+      <div className="px-4 pb-4 pt-3">
+        <div className="flex items-center justify-between gap-3 text-[14px]">
+          <span className="font-medium text-zinc-800 dark:text-zinc-100">Creating your image…</span>
+          <span className="shrink-0 text-[12px] text-zinc-500 dark:text-zinc-400">{stage}</span>
+        </div>
+        <div
+          className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percent}
+        >
+          <div
+            className="h-full rounded-full bg-[#D97757] transition-[width] duration-200 ease-out"
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+        {prompt && (
+          <p className="mt-2.5 line-clamp-2 text-[12px] leading-4 text-zinc-500 dark:text-zinc-400">{prompt}</p>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+/** Hides an image whose Markdown is still streaming in (partial base64), so raw data is never shown. */
+function maskIncompleteImages(text: string): string {
+  if (!text || text.indexOf('![') < 0) return text;
+  return text.replace(/!\[[^\]]*(?:\]\([^)]*)?$/, '\n\n*Generating image…*');
+}
+
+function imageDownloadName(src: string): string {
+  const mime = /^data:image\/([a-z0-9.+-]+)/i.exec(src)?.[1]?.toLowerCase();
+  const ext = mime ? (mime === 'jpeg' ? 'jpg' : mime.replace(/\+.*$/, '')) : 'png';
+  return `twinkle-image-${Date.now()}.${ext}`;
+}
+
+async function downloadGeneratedImage(src: string) {
+  const name = imageDownloadName(src);
+  try {
+    let href = src;
+    let revoke: string | null = null;
+    if (!src.startsWith('data:')) {
+      const blob = await (await fetch(src)).blob();
+      href = URL.createObjectURL(blob);
+      revoke = href;
+    }
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    if (revoke) window.setTimeout(() => URL.revokeObjectURL(revoke as string), 2000);
+  } catch {
+    window.open(src, '_blank', 'noopener,noreferrer');
+  }
+}
+
+/** Generated/response image with click-to-preview (full screen) and download. */
+function GeneratedImage({ src, alt }: { src?: string; alt?: string }) {
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  useEffect(() => {
+    if (!previewOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPreviewOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [previewOpen]);
+
+  if (!src) return null;
+  const label = alt || 'Response image';
+
+  return (
+    <>
+      <figure className="twinkle-response-image">
+        <img
+          src={src}
+          alt={label}
+          loading="lazy"
+          decoding="async"
+          onClick={() => setPreviewOpen(true)}
+          style={{ cursor: 'zoom-in' }}
+        />
+        <div className="flex items-center gap-2 border-t border-zinc-200 px-2.5 py-2 dark:border-zinc-700">
+          <button
+            type="button"
+            onClick={() => setPreviewOpen(true)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          >
+            <Eye className="h-4 w-4" strokeWidth={1.8} /> Preview
+          </button>
+          <button
+            type="button"
+            onClick={() => void downloadGeneratedImage(src)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          >
+            <Download className="h-4 w-4" strokeWidth={1.8} /> Download
+          </button>
+        </div>
+      </figure>
+
+      {previewOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Image preview"
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setPreviewOpen(false)}
+        >
+          <div className="absolute right-4 top-4 flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => void downloadGeneratedImage(src)}
+              aria-label="Download image"
+              className="inline-flex h-10 items-center gap-2 rounded-full bg-white/15 px-4 text-[14px] font-medium text-white backdrop-blur transition-colors hover:bg-white/25"
+            >
+              <Download className="h-4 w-4" strokeWidth={1.8} /> Download
+            </button>
+            <button
+              type="button"
+              onClick={() => setPreviewOpen(false)}
+              aria-label="Close preview"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur transition-colors hover:bg-white/25"
+            >
+              <X className="h-5 w-5" strokeWidth={1.8} />
+            </button>
+          </div>
+          <img
+            src={src}
+            alt={label}
+            onClick={(event) => event.stopPropagation()}
+            className="max-h-[88vh] max-w-[94vw] rounded-lg object-contain shadow-2xl"
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
 function cleanMessageContent(content: unknown): string {
     if (typeof content !== 'string') return '';
 
@@ -2400,7 +2628,9 @@ const chooseModel = useCallback((modelId: string) => {
     // Release the queue gradually instead of in one burst. When the network or
     // a proxy delivers several deltas at once, this spreads them over a few
     // frames so the answer flows smoothly instead of appearing in jumps.
-    let take = queue.length <= 12 ? queue.length : Math.ceil(queue.length / 6);
+    // Inline image data must arrive in one piece: dripping 100s of KB of base64
+    // through the Markdown renderer frame by frame is slow and flashes raw data.
+    let take = queue.length <= 12 || queue.includes('](data:image/') ? queue.length : Math.ceil(queue.length / 6);
     const lastUnit = queue.charCodeAt(take - 1);
     if (take < queue.length && lastUnit >= 0xd800 && lastUnit <= 0xdbff) take += 1; // keep emoji pairs intact
     const chunkToRender = queue.slice(0, take);
@@ -3908,7 +4138,8 @@ if (isBlankDraft) {
     setShareLoading(false);
     setSharePromptText(sessions.find(item => item.id === currentSessionId)?.sessionName || '');
     if (currentSessionId === null) {
-      setShareError('Start a conversation before creating a public link.');
+      // Nothing saved yet: the dialog shows a friendly "start chatting" state.
+      setShareError(null);
       setShareSessionId(-1);
       return;
     }
@@ -4310,7 +4541,7 @@ if (isBlankDraft) {
                   const displayContent =
                     attachedImages.length > 0 && rawMessageContent === 'Image uploaded'
                       ? ''
-                      : rawMessageContent;
+                      : maskIncompleteImages(rawMessageContent);
 
                   return (
                     <div
@@ -4497,19 +4728,8 @@ if (isBlankDraft) {
                                     td({ children, ...props }: any) {
                                       return <td className="twinkle-response-td" {...props}>{children}</td>;
                                     },
-                                    img({ src, alt, ...props }: any) {
-                                      return (
-                                        <figure className="twinkle-response-image">
-                                          <img
-                                            src={src}
-                                            alt={alt || 'Response image'}
-                                            loading="lazy"
-                                            decoding="async"
-                                            {...props}
-                                          />
-                                          {alt && <figcaption>{alt}</figcaption>}
-                                        </figure>
-                                      );
+                                    img({ src, alt }: any) {
+                                      return <GeneratedImage src={src} alt={alt} />;
                                     },
                                     strong({ children, ...props }: any) {
                                       return (
@@ -4689,7 +4909,13 @@ if (isBlankDraft) {
                   );
                 })}
 
-                {isTyping && !(
+                {shouldShowImageProgress(messages, selectedModel, isTyping) && (
+                  <ImageGenerationProgress
+                    prompt={cleanMessageContent([...messages].reverse().find(message => message.role === 'user')?.content || '')}
+                  />
+                )}
+
+                {isTyping && !shouldShowImageProgress(messages, selectedModel, isTyping) && !(
                   messages[messages.length - 1]?.role === 'assistant' &&
                   cleanMessageContent(messages[messages.length - 1]?.content || '').length > 0
                 ) && (
@@ -5279,6 +5505,11 @@ if (isBlankDraft) {
         chatName={shareMode === 'conversation' ? 'Share chat' : 'Share prompt'}
         mode={shareMode}
         onCreateLink={() => void createConversationLink()}
+        emptyChat={shareMode === 'conversation' && shareSessionId === -1}
+        onStartChat={() => {
+          closeShareModal();
+          window.setTimeout(() => inputRef.current?.focus(), 60);
+        }}
         promptText={sharePromptText}
         shareDescription={shareMode === 'prompt' ? 'Anyone with this link can open Twinkle AI with this prompt ready to send.' : undefined}
         isLoading={shareLoading}
