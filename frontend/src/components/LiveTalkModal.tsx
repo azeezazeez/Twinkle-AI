@@ -4,7 +4,7 @@ import { Mic, MicOff, RotateCw, X } from 'lucide-react';
 import VoiceRing from './VoiceRing';
 import { getVoiceOrbPalette } from '../lib/voiceThemes';
 import { VOICES, DEFAULT_VOICE } from '../lib/voices';
-import { chatApi, createLiveToken } from '../lib/api';
+import { chatApi, createLiveToken, assistantNameContext, getAssistantName, learnAssistantName } from '../lib/api';
 import { APP_LANGUAGE_KEY, getLanguageInstruction, type AppLanguage } from '../lib/i18n';
 import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw';
 
@@ -143,7 +143,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
       return 'auto';
     }
   });
-  const [status, setStatus] = useState('Connecting…');
+  const [status, setStatus] = useState('Connecting');
   // Live captions: the latest thing said, by whom.
   const [caption, setCaption] = useState<{ role: 'user' | 'assistant'; text: string }>({ role: 'user', text: '' });
   const [elapsed, setElapsed] = useState(0);
@@ -525,7 +525,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
             realtimeInput: { audioStreamEnd: true },
           }));
           vadTurnEndedRef.current = true;
-          setStatus('Thinking…');
+          setStatus('Thinking');
         } catch {
           // The socket may close between the readyState check and send().
         }
@@ -595,14 +595,14 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
     if (socket?.readyState === WebSocket.OPEN) {
       try { socket.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } })); } catch { /* ignore */ }
     }
-    if (connected) setStatus('Thinking…');
+    if (connected) setStatus('Thinking');
   }, [cleanupAudioInput, connected]);
 
   const connect = useCallback(async () => {
     const attempt = ++connectAttemptRef.current;
     endingRef.current = false;
     setError('');
-    setStatus('Connecting…');
+    setStatus('Connecting');
 
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -703,7 +703,8 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
                   `You are Twinkle AI, a polished professional voice assistant. Speak naturally, concisely, confidently, and warmly. Answer the user directly and keep the conversation conversational. ` +
                   (appLanguage === 'auto'
                     ? 'At the beginning of this conversation, identify the language of the user’s first clearly spoken sentence. Use that as the conversation language and keep speaking and transcribing naturally in that language for the rest of this Live Talk session. Do not switch languages just because later words or phrases are mixed-language. Switch only if the user explicitly asks you to change language. If the first sentence is genuinely ambiguous, use the next clearly spoken sentence to identify the language.'
-                    : `${getLanguageInstruction(appLanguage)} Continue using the selected language consistently, while following an explicit request from the user to switch languages.`),
+                    : `${getLanguageInstruction(appLanguage)} Continue using the selected language consistently, while following an explicit request from the user to switch languages.`) +
+                  (assistantNameContext() ? `\n\n${assistantNameContext()}` : ''),
               }],
             },
             inputAudioTranscription: {},
@@ -798,6 +799,33 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
             vadTurnEndedRef.current = false;
             setListening(true);
             if (audioSourcesRef.current.size === 0) setStatus('Listening');
+            // If the user just told the assistant what to call it, remember the
+            // name and tell the running session so it applies immediately.
+            const spokenUserTurn = userTurnRef.current.trim();
+            if (spokenUserTurn) {
+              const nameBefore = getAssistantName();
+              learnAssistantName(spokenUserTurn);
+              const nameAfter = getAssistantName();
+              if (nameAfter && nameAfter !== nameBefore && socket.readyState === WebSocket.OPEN) {
+                try {
+                  socket.send(JSON.stringify({
+                    clientContent: {
+                      turns: [{ role: 'user', parts: [{ text: `(System note: the user now calls you "${nameAfter}". Use "${nameAfter}" as your own name from now on.)` }] }],
+                      turnComplete: false,
+                    },
+                  }));
+                } catch { /* ignore */ }
+              } else if (!nameAfter && nameBefore && socket.readyState === WebSocket.OPEN) {
+                try {
+                  socket.send(JSON.stringify({
+                    clientContent: {
+                      turns: [{ role: 'user', parts: [{ text: '(System note: the user reset your custom name. You are Twinkle AI again.)' }] }],
+                      turnComplete: false,
+                    },
+                  }));
+                } catch { /* ignore */ }
+              }
+            }
             // Persist the completed turn without blocking Live Talk.
             void persistCompletedTurn();
           }
@@ -996,7 +1024,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
   };
 
   const palette = getVoiceOrbPalette(voiceName);
-  const thinking = status === 'Thinking…' || status === 'Thinking';
+  const thinking = status === 'Thinking';
   const hasError = Boolean(error);
 
   const label = hasError
