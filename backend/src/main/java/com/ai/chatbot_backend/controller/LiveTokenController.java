@@ -18,7 +18,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -27,6 +29,9 @@ import java.util.Map;
 public class LiveTokenController {
 
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
+    private static final String GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
+    private static final List<String> API_VERSIONS = List.of("v1beta", "v1alpha");
+    private static final int TOKEN_USES = 10;
 
 
     @Value("${gemini.api.key}")
@@ -44,16 +49,17 @@ public class LiveTokenController {
             .build();
 
     /**
-     * Creates a short-lived Gemini Live token.
+     * Creates a short-lived Gemini Live ephemeral token.
      *
-     * Important: keep this request compatible with the auth_tokens schema
-     * accepted by the deployed Gemini endpoint. The current backend was
-     * sending unsupported fields such as liveConnectConstraints and
-     * lockAdditionalFields, which caused the 502 error.
+     * Google's current documentation provisions ephemeral tokens on the
+     * v1beta API, while older deployments only accepted v1alpha. A token is
+     * only valid on the API version that issued it, so this endpoint tries
+     * v1beta first, falls back to v1alpha, and reports the version it used.
+     * The browser must open its Live WebSocket on that same version.
+     * A client can force one version by sending {"apiVersion": "v1alpha"}.
      *
-     * The Live WebSocket client sends the model, voice and audio setup in
-     * its initial setup frame, so the token only carries its lifetime and
-     * usage limits.
+     * The request is deliberately minimal (lifetime and usage limits only);
+     * the browser sends model, voice and audio setup in its setup frame.
      */
     @PostMapping("/token")
     public ResponseEntity<?> createToken(
@@ -70,82 +76,91 @@ public class LiveTokenController {
                     .body(Map.of("error", "GEMINI_API_KEY is not configured on the backend."));
         }
 
-        try {
-            /*
-             * IMPORTANT:
-             *
-             * Keep the auth_tokens request deliberately minimal.
-             * The deployed Gemini auth_tokens endpoint is rejecting
-             * liveConnectConstraints / lockAdditionalFields with:
-             *   Unknown name "liveConnectConstraints" at 'auth_token'
-             *   Unknown name "lockAdditionalFields" at 'auth_token'
-             *
-             * The Live WebSocket client already sends the model, voice,
-             * response modality and system instruction in its setup frame.
-             * Therefore the ephemeral token only needs its lifetime/usage
-             * limits here.
-             */
-            Instant now = Instant.now();
-            String expireTime = now.plus(Duration.ofMinutes(30)).toString();
-            String newSessionExpireTime = now.plus(Duration.ofMinutes(1)).toString();
+        String requested = requestedApiVersion(requestBody);
+        List<String> versions = requested != null ? List.of(requested) : API_VERSIONS;
 
-            Map<String, Object> requestJson = new LinkedHashMap<>();
-            requestJson.put("uses", 10);
-            requestJson.put("expireTime", expireTime);
-            requestJson.put("newSessionExpireTime", newSessionExpireTime);
-
-            String body = objectMapper.writeValueAsString(requestJson);
-
-            Request request = new Request.Builder()
-                    .url("https://generativelanguage.googleapis.com/v1alpha/auth_tokens")
-                    .addHeader("x-goog-api-key", geminiApiKey)
-                    .addHeader("Content-Type", "application/json")
-                    .post(okhttp3.RequestBody.create(body, JSON))
-                    .build();
-
-            try (Response response = httpClient.newCall(request).execute()) {
-                String responseBody = response.body() == null ? "" : response.body().string();
-
-                if (!response.isSuccessful()) {
-                    String message = "Gemini token provisioning failed.";
-                    if (!responseBody.isBlank()) {
-                        try {
-                            JsonNode error = objectMapper.readTree(responseBody);
-                            if (error.path("error").path("message").isTextual()) {
-                                message = error.path("error").path("message").asText();
-                            }
-                        } catch (Exception ignored) {
-                            // Keep the safe generic message.
-                        }
-                    }
-                    return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                            .body(Map.of("error", message));
-                }
-
-                JsonNode tokenResponse = objectMapper.readTree(responseBody);
-                String token = tokenResponse.path("name").asText("");
-                if (token.isBlank()) {
-                    return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                            .body(Map.of("error", "Gemini returned an empty Live Talk token."));
-                }
-
-                return ResponseEntity.ok(Map.of(
-                        "token", token,
-                        "model", liveModel,
-                        "expiresAt", expireTime,
-                        "newSessionExpiresAt", newSessionExpireTime,
-                        "uses", 10
-                ));
+        String lastError = "Gemini token provisioning failed.";
+        for (String version : versions) {
+            try {
+                return ResponseEntity.ok(mintToken(version));
+            } catch (TokenProvisioningException exception) {
+                lastError = exception.getMessage();
+            } catch (Exception exception) {
+                String detail = exception.getMessage();
+                lastError = detail == null || detail.isBlank()
+                        ? "Unable to create Live Talk session."
+                        : "Unable to create Live Talk session: " + detail;
             }
-        } catch (Exception exception) {
-            String detail = exception.getMessage();
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .body(Map.of(
-                            "error",
-                            detail == null || detail.isBlank()
-                                    ? "Unable to create Live Talk session."
-                                    : "Unable to create Live Talk session: " + detail
-                    ));
+        }
+
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", lastError));
+    }
+
+    private Map<String, Object> mintToken(String apiVersion) throws Exception {
+        Instant now = Instant.now();
+        String expireTime = now.plus(Duration.ofMinutes(30)).truncatedTo(ChronoUnit.SECONDS).toString();
+        String newSessionExpireTime = now.plus(Duration.ofMinutes(1)).truncatedTo(ChronoUnit.SECONDS).toString();
+
+        Map<String, Object> requestJson = new LinkedHashMap<>();
+        requestJson.put("uses", TOKEN_USES);
+        requestJson.put("expireTime", expireTime);
+        requestJson.put("newSessionExpireTime", newSessionExpireTime);
+
+        String body = objectMapper.writeValueAsString(requestJson);
+
+        Request request = new Request.Builder()
+                .url(GEMINI_BASE_URL + "/" + apiVersion + "/auth_tokens")
+                .addHeader("x-goog-api-key", geminiApiKey)
+                .addHeader("Content-Type", "application/json")
+                .post(okhttp3.RequestBody.create(body, JSON))
+                .build();
+
+        try (Response response = httpClient.newCall(request).execute()) {
+            String responseBody = response.body() == null ? "" : response.body().string();
+
+            if (!response.isSuccessful()) {
+                String message = "Gemini token provisioning failed (" + apiVersion + ", HTTP " + response.code() + ").";
+                if (!responseBody.isBlank()) {
+                    try {
+                        JsonNode error = objectMapper.readTree(responseBody);
+                        if (error.path("error").path("message").isTextual()) {
+                            message = error.path("error").path("message").asText();
+                        }
+                    } catch (Exception ignored) {
+                        // Keep the safe generic message.
+                    }
+                }
+                throw new TokenProvisioningException(message);
+            }
+
+            JsonNode tokenResponse = objectMapper.readTree(responseBody);
+            String token = tokenResponse.path("name").asText("");
+            if (token.isBlank()) {
+                throw new TokenProvisioningException("Gemini returned an empty Live Talk token.");
+            }
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("token", token);
+            result.put("model", liveModel);
+            result.put("apiVersion", apiVersion);
+            result.put("expiresAt", expireTime);
+            result.put("newSessionExpiresAt", newSessionExpireTime);
+            result.put("uses", TOKEN_USES);
+            return result;
+        }
+    }
+
+    private static String requestedApiVersion(Map<String, Object> requestBody) {
+        if (requestBody == null) return null;
+        Object value = requestBody.get("apiVersion");
+        if (value == null) return null;
+        String version = String.valueOf(value).trim().toLowerCase();
+        return API_VERSIONS.contains(version) ? version : null;
+    }
+
+    private static final class TokenProvisioningException extends Exception {
+        TokenProvisioningException(String message) {
+            super(message);
         }
     }
 
