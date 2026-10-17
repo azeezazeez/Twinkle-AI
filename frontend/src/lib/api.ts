@@ -24,14 +24,14 @@ const ASSISTANT_NAME_RESET = /\b(?:reset|forget|remove|clear)\s+(?:your|the)\s+(
 const ASSISTANT_NAME_PATTERN = /(?:\byour\s+name\s+(?:is|will\s+be|shall\s+be)|\bcall\s+yourself|\bchange\s+your\s+name\s+to|\brename\s+yourself\s+(?:to|as)|\bfrom\s+now\s+on,?\s+you(?:'re|\u2019re|\s+are)\s+(?:called|named)?|\b(?:i(?:'ll|\u2019ll|\s+will|\s+want\s+to|\s+wanna|'d\s+like\s+to|\s+would\s+like\s+to)?|let\s+me|(?:can|could|may)\s+i)\s+call\s+you|\bi\s+want\s+you\s+to\s+be\s+called|\byou(?:'re|\u2019re|\s+are)\s+now\s+(?:called|named)|\byou\s+will\s+be\s+called|\bgo\s+by)\s+["\u201c']?([A-Za-z][A-Za-z0-9'\u2019\- ]{0,29}?)["\u201d']?(?=\s*[.!,;]|\s*\?|\s+(?:from|and|ok|okay|please|now|instead|always|forever|ok)\b|\s*$)/i;
 const ASSISTANT_NAME_STOPWORDS = /^(?:a|an|the|it|that|this|what|who|not|called|named|ai|assistant|bot|chatbot|me|you|your|my|something|anything|different|another|else)$/i;
 
-const getAssistantName = (): string => {
+export const getAssistantName = (): string => {
   try { return (localStorage.getItem(ASSISTANT_NAME_KEY) || '').trim(); } catch { return ''; }
 };
 const clearAssistantName = () => {
   try { localStorage.removeItem(ASSISTANT_NAME_KEY); } catch { /* storage blocked */ }
 };
 
-const learnAssistantName = (message: string) => {
+export const learnAssistantName = (message: string) => {
   const text = (message || '').trim();
   if (!text || text.length > 300) return;
   if (ASSISTANT_NAME_RESET.test(text)) { clearAssistantName(); return; }
@@ -45,7 +45,7 @@ const learnAssistantName = (message: string) => {
   try { localStorage.setItem(ASSISTANT_NAME_KEY, name); } catch { /* storage blocked */ }
 };
 
-const assistantNameContext = (): string => {
+export const assistantNameContext = (): string => {
   const name = getAssistantName();
   if (!name) return '';
   return `ASSISTANT NAME SET BY THE USER: The user has chosen to call you "${name}". Use "${name}" as your own name from now on: when you introduce yourself or are asked your name, say you are ${name}. If the user has just asked you to take this name, accept it briefly and warmly (for example: "Got it, you can call me ${name}."). Do not call yourself Twinkle AI unless the user asks about the product.`;
@@ -1207,7 +1207,7 @@ export const chatApi = {
     signal: AbortSignal | undefined,
     model: string | undefined,
     handlers: {
-      onStatus?: (status: string) => void;
+      onStatus?: (status: string, metadata?: Record<string, any>) => void;
       onSession?: (sessionInfo: { sessionId?: number | string; publicId?: string }) => void;
       onDelta?: (text: string) => void;
     } = {}
@@ -1318,7 +1318,7 @@ export const chatApi = {
         }
         doneEventSeen = true;
       } else if (eventName === 'status') {
-        handlers.onStatus?.(typeof data?.status === 'string' ? data.status : 'thinking');
+        handlers.onStatus?.(typeof data?.status === 'string' ? data.status : 'thinking', data);
         if (data?.sessionId || data?.publicId) {
           handlers.onSession?.({ sessionId: data.sessionId, publicId: data.publicId });
         }
