@@ -128,7 +128,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
   const vadSpeechStartedRef = useRef(false);
   const vadLastSpeechAtRef = useRef(0);
   const vadTurnEndedRef = useRef(false);
-  const VAD_SILENCE_MS = 350;
+  const VAD_SILENCE_MS = 300;
   const VAD_THRESHOLD = 0.018;
 
   const [connected, setConnected] = useState(false);
@@ -546,7 +546,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
           pendingPcmRef.current.push(encodedPcm);
           // Keep only a short startup window. A large backlog makes the model
           // process stale speech after the socket becomes ready.
-          if (pendingPcmRef.current.length > 12) pendingPcmRef.current.shift();
+          if (pendingPcmRef.current.length > 25) pendingPcmRef.current.shift();
           return;
         }
 
@@ -643,31 +643,34 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
       }
       const workletPromise = audioWorkletReadyRef.current;
 
-      const stream = await streamPromise;
-      if (attempt !== connectAttemptRef.current || endingRef.current) {
-        stream.getTracks().forEach(track => track.stop());
-        return;
-      }
-      streamRef.current = stream;
-
-      if (context.state === 'suspended') {
-        void context.resume().catch(() => undefined);
-      }
-
-      // Start the microphone pipeline without awaiting it. It buffers PCM
-      // while the token/WebSocket/setup is still completing.
-      void Promise.resolve(workletPromise)
-        .then(() => {
-          if (attempt === connectAttemptRef.current && !endingRef.current) {
-            return startInputRef.current?.();
+      // The microphone pipeline runs fully in parallel with the token and the
+      // WebSocket handshake. The socket no longer waits for the permission
+      // prompt or device start-up; early PCM is buffered and flushed on
+      // setupComplete.
+      void (async () => {
+        try {
+          const stream = await streamPromise;
+          if (attempt !== connectAttemptRef.current || endingRef.current) {
+            stream.getTracks().forEach(track => track.stop());
+            return;
           }
-          return undefined;
-        })
-        .catch(error => {
-          if (attempt === connectAttemptRef.current && !endingRef.current) {
-            console.error('Live Talk audio pipeline failed to start:', error);
+          streamRef.current = stream;
+          if (context.state === 'suspended') {
+            void context.resume().catch(() => undefined);
           }
-        });
+          await workletPromise;
+          if (attempt === connectAttemptRef.current && !endingRef.current) {
+            await startInputRef.current?.();
+          }
+        } catch (micError) {
+          if (attempt !== connectAttemptRef.current || endingRef.current) return;
+          console.error('Live Talk microphone failed to start:', micError);
+          setError(micError instanceof Error ? micError.message : 'Microphone access failed.');
+          setStatus('Unable to start');
+          cleanupAudioInput();
+          closeSocket();
+        }
+      })();
 
       const { token, model } = await tokenPromise;
       if (endingRef.current || attempt !== connectAttemptRef.current) return;
@@ -675,6 +678,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
       const socket = new WebSocket(
         `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}`
       );
+      socket.binaryType = 'arraybuffer';
       socketRef.current = socket;
 
       socket.onopen = () => {
@@ -708,8 +712,10 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
             realtimeInputConfig: {
               automaticActivityDetection: {
                 disabled: false,
-                prefixPaddingMs: 150,
-                silenceDurationMs: 500,
+                prefixPaddingMs: 100,
+                silenceDurationMs: 300,
+                startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH',
+                endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
               },
             },
           },
@@ -719,7 +725,9 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
       socket.onmessage = async event => {
         try {
           if (endingRef.current || attempt !== connectAttemptRef.current) return;
-          const message = await decodeLiveMessage(event.data);
+          const message = typeof event.data === 'string'
+            ? JSON.parse(event.data)
+            : await decodeLiveMessage(event.data);
 
           if (message.setupComplete) {
             setConnected(true);
