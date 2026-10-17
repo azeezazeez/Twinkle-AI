@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { Check, X, Link2, Globe } from 'lucide-react';
+import { Check, X, Link2, Globe, MessageSquarePlus, AlertCircle } from 'lucide-react';
 
 interface ShareChatModalProps {
   isOpen: boolean;
@@ -15,6 +15,10 @@ interface ShareChatModalProps {
   mode?: 'prompt' | 'conversation';
   /** Conversation mode: creates the public link when the user asks for it. */
   onCreateLink?: () => void;
+  /** True when there is no saved conversation yet, so there is nothing to share. */
+  emptyChat?: boolean;
+  /** Empty-chat state: closes the dialog and focuses the message box. */
+  onStartChat?: () => void;
   onClose: () => void;
 }
 
@@ -28,6 +32,8 @@ const ShareChatModal: React.FC<ShareChatModalProps> = ({
   error = null,
   mode = 'prompt',
   onCreateLink,
+  emptyChat = false,
+  onStartChat,
   onClose,
 }) => {
   const [copied, setCopied] = useState(false);
@@ -153,22 +159,47 @@ const ShareChatModal: React.FC<ShareChatModalProps> = ({
               <div className="mt-5 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-400" role="status">
                 Creating share link…
               </div>
+                  ) : emptyChat ? (
+              <div className="mt-5">
+                <div
+                  className="flex items-start gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-4 dark:border-zinc-700 dark:bg-zinc-800/60"
+                  role="status"
+                >
+                  <MessageSquarePlus className="mt-0.5 h-5 w-5 shrink-0 text-zinc-500 dark:text-zinc-400" strokeWidth={1.8} />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Nothing to share yet</p>
+                    <p className="mt-0.5 text-sm leading-5 text-zinc-600 dark:text-zinc-400">
+                      Send a message first, then come back to create a public link.
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={onStartChat ?? onClose}
+                    className="inline-flex h-9 items-center justify-center rounded-lg bg-zinc-900 px-4 text-[14px] font-medium text-white transition-colors hover:bg-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+                  >
+                    Start chatting
+                  </button>
+                </div>
+              </div>
                   ) : error ? (
                    <div className="mt-5">
                     <div
-                      className="rounded-xl border border-red-200 !bg-white px-4 py-4 text-sm !text-red-600 dark:border-red-900/50 dark:!bg-white dark:!text-red-600"
+                      className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3.5 text-sm leading-5 text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300"
                       role="alert"
                     >
-                      {error}
+                      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.9} />
+                      <span className="min-w-0">{error}</span>
                     </div>
                     {isConversation && onCreateLink && (
                       <div className="mt-3 flex justify-end">
                         <button
                           type="button"
                           onClick={onCreateLink}
-                          className="inline-flex h-9 items-center justify-center rounded-lg border border-zinc-300 px-4 text-[14px] font-medium text-zinc-800 transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:border-zinc-600 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                          className="inline-flex h-9 items-center justify-center rounded-lg bg-zinc-900 px-4 text-[14px] font-medium text-white transition-colors hover:bg-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
                         >
-                          Try again
+                          Create link again
                         </button>
                       </div>
                     )}
