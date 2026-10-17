@@ -14,7 +14,9 @@ import { chatApi } from '../lib/api';
 import SearchBar from './SearchBar';
 import LanguageModal from './LanguageModal';
 import { useLanguage, type AppLanguage } from '../lib/i18n';
-import { onShortcut, takePendingShortcut, type ShortcutAction } from '../lib/shortcuts';
+import { onShortcut, takePendingShortcut, isMac, type ShortcutAction } from '../lib/shortcuts';
+
+const TOGGLE_SIDEBAR_KEYS = isMac() ? '⌘B' : 'Ctrl+B';
 import { APP_LANGUAGES } from '../pages/Settings';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -175,12 +177,12 @@ function Tip({
       {pos && typeof document !== 'undefined' && createPortal(
         <div
           role="tooltip"
-          className="pointer-events-none fixed flex items-center gap-2 whitespace-nowrap rounded-full bg-[#111111] px-3.5 py-2 text-[14px] font-bold text-white shadow-[0_12px_32px_rgba(0,0,0,0.18)] [font-family:inherit]"
+          className="pointer-events-none fixed flex items-center gap-2.5 whitespace-nowrap rounded-lg bg-[#1F1E1D] px-3 py-1.5 text-[13px] font-medium text-white shadow-[0_8px_24px_rgba(0,0,0,0.22)] [font-family:inherit]"
           style={{ left: pos.x, top: pos.y, transform, zIndex: TOP_LAYER }}
         >
           <span>{label}</span>
           {shortcut && (
-            <kbd className="rounded-full bg-zinc-600 px-2.5 py-0.5 text-[13px] font-bold leading-5 text-white shadow-inner [font-family:inherit]">
+            <kbd className="text-[12px] font-normal text-zinc-400 [font-family:inherit]">
               {shortcut}
             </kbd>
           )}
@@ -404,7 +406,7 @@ function TypewriterText({ text, onDone }: { text: string; onDone?: () => void })
 function SidebarHeader({ onToggle, label }: { onToggle: () => void; label: string }) {
   return (
     <div className="flex shrink-0 items-center gap-2 px-3 pb-1 pt-[18px]">
-      <Tip label={label} shortcut="Ctrl+Shift+S" side="right">
+      <Tip label={label} shortcut={TOGGLE_SIDEBAR_KEYS} side="right">
         <button
           type="button"
           onClick={onToggle}
@@ -1530,7 +1532,7 @@ export default function Sidebar({
           animate={{ opacity: 1 }}
           transition={{ delay: 0.15, duration: 0.15 }}
         >
-          <Tip label="Open sidebar" shortcut="Ctrl+Shift+S" side="right">
+          <Tip label="Open sidebar" shortcut={TOGGLE_SIDEBAR_KEYS} side="right">
             <button
               type="button"
               onClick={expandDesktop}
@@ -1567,7 +1569,7 @@ export default function Sidebar({
           >
             <SidebarHeader
               onToggle={desktopCollapsed ? expandDesktop : collapseDesktop}
-              label={desktopCollapsed ? 'Pin sidebar open' : 'Close sidebar'}
+              label={desktopCollapsed ? 'Open sidebar' : 'Hide sidebar'}
             />
 
             {/* Desktop: keep the sidebar open after selecting a chat, starting a
