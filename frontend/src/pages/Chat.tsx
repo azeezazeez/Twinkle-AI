@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import StormLogo from '../components/StormLogo';
 import ConfirmationModal from '../components/ConfirmationModal';
 import ShareChatModal from '../components/ShareChatModal';
+import UploadFilesModal from '../components/UploadFilesModal';
 import LiveTalkModal from '../components/LiveTalkModal';
 import { getSavedLiveTalkColor } from '../lib/liveTalkColors';
 import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw'; 
@@ -2091,6 +2092,7 @@ ${textToRead}` }] }], turnComplete: true },
   const [previewText, setPreviewText] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const attachMenuRef = useRef<HTMLDivElement>(null);
 
   // Close the "+" menu on outside click or Escape.
@@ -2114,21 +2116,24 @@ ${textToRead}` }] }], turnComplete: true },
     };
   }, [attachMenuOpen]);
 
-  // Ctrl/Cmd+U opens the file picker, matching the shortcut shown in the menu.
+  // Ctrl/Cmd+U opens the "Upload or add files" popup, matching the shortcut shown in the menu.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'u') {
         event.preventDefault();
-        fileInputRef.current?.click();
+        setAttachMenuOpen(false);
+        setUploadModalOpen(true);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
+  // "Add files or photos" opens the upload popup. The popup's "Choose files"
+  // button (below) is what opens the native file picker.
   const handleChooseFiles = () => {
     setAttachMenuOpen(false);
-    fileInputRef.current?.click();
+    setUploadModalOpen(true);
   };
 
   // Captures one frame of a screen, window or tab the user picks and attaches it
@@ -4044,7 +4049,7 @@ if (isBlankDraft) {
       />
       <main
         className="relative ml-0 flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent transition-[margin] duration-300 ease-out lg:ml-[var(--desktop-sidebar-offset)]"
-        style={{ '--desktop-sidebar-offset': `${desktopSidebarExpanded ? desktopSidebarWidth : 52}px` } as React.CSSProperties}
+        style={{ '--desktop-sidebar-offset': `${desktopSidebarExpanded ? desktopSidebarWidth : 0}px` } as React.CSSProperties}
       >
         <div className="absolute right-6 top-4 z-[9998]">
           <button
@@ -4649,6 +4654,21 @@ if (isBlankDraft) {
                     void handleFileSelection(e.target.files);
                     e.currentTarget.value = '';
                     setAttachMenuOpen(false);
+                  }}
+                />
+
+                {/* Upload popup: drag & drop or choose files */}
+                <UploadFilesModal
+                  isOpen={uploadModalOpen}
+                  onClose={() => setUploadModalOpen(false)}
+                  onChooseFiles={() => {
+                    setUploadModalOpen(false);
+                    // Called synchronously inside the click so the browser allows the picker.
+                    fileInputRef.current?.click();
+                  }}
+                  onFilesDropped={(files) => {
+                    setUploadModalOpen(false);
+                    void handleFileSelection(files);
                   }}
                 />
 
