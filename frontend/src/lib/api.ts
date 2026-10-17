@@ -71,8 +71,8 @@ const getLiveContext = async (message: string): Promise<string | undefined> => {
 const getVerifiedLiveContext = async (message: string): Promise<string | undefined> => {
   const query = (message || '').toLowerCase();
   const asksTime = /\b(time|date|today|current day|what day|timezone|time zone|right now)\b/.test(query);
-  const asksWeather = /\b(weather|temperature|forecast|rain|raining|wind speed|humidity|sunrise|sunset)\b/.test(query);
-  const asksLocation = /\b(my location|current location|where am i|where do i live|near me|nearby|my coordinates|location here|which village|which mandal|which district)\b/.test(query);
+  const asksWeather = /\b(weather|temperature|forecast|rain|raining|rainy|umbrella|wind speed|windy|humidity|humid|sunny|cloudy|storm|snowing|sunrise|sunset|how (?:hot|cold|warm)|(?:hot|cold|warm|cool) (?:outside|today|now))\b/.test(query);
+  const asksLocation = /\b(my location|current location|where am i|where do i live|near me|nearby|nearest|closest|my coordinates|location here|which village|which mandal|which district)\b/.test(query);
   if (!asksTime && !asksWeather && !asksLocation) return undefined;
 
   const now = new Date();
@@ -88,7 +88,7 @@ const getVerifiedLiveContext = async (message: string): Promise<string | undefin
     let coordinates: { latitude: number; longitude: number; label: string } | null = null;
     // Prefer an explicitly named place (for example, "weather in Chennai") over the browser's location.
     if (asksWeather) {
-      const placeMatch = (message || '').match(/\b(?:weather|forecast|temperature|rain|raining)\b.*?\b(?:in|for|at)\s+([A-Za-z][A-Za-z .'-]{1,45}?)(?=\s+(?:today|tomorrow|now|this week|currently)\b|[?!.,]|$)/i);
+      const placeMatch = (message || '').match(/\b(?:weather|forecast|temperature|rain|raining|rainy|umbrella|humidity|hot|cold|warm)\b.*?\b(?:in|for|at)\s+([A-Za-z][A-Za-z .'-]{1,45}?)(?=\s+(?:today|tomorrow|now|this week|currently)\b|[?!.,]|$)/i);
       const place = placeMatch?.[1]?.trim();
       if (place && !/^(here|my location|near me|the area)$/i.test(place)) {
         try {
