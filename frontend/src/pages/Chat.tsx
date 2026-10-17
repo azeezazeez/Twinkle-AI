@@ -4,7 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { createPortal, flushSync } from 'react-dom';
 import { User, Session, Message } from '../types';
 import Sidebar from '../components/Sidebar'; 
-import { chatApi, authApi, createLiveToken, startLiveTokenKeepWarm, warmLiveToken, buildLiveSocketUrl, reportLiveSocketFailure, reportLiveSocketSuccess } from '../lib/api'; 
+import { takeWeatherSnapshot, type WeatherSnapshot, chatApi, authApi, createLiveToken, startLiveTokenKeepWarm, warmLiveToken, buildLiveSocketUrl, reportLiveSocketFailure, reportLiveSocketSuccess } from '../lib/api'; 
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react'; 
 import StormLogo from '../components/StormLogo';
 import ConfirmationModal from '../components/ConfirmationModal';
@@ -14,22 +14,44 @@ import LiveTalkModal from '../components/LiveTalkModal';
 import { onShortcut, takePendingShortcut, type ShortcutAction } from '../lib/shortcuts';
 import { getSavedLiveTalkColor } from '../lib/liveTalkColors';
 import { parseServerDate } from '../lib/time';
+import { loadPrefs } from '../lib/preferences';
+import { sanitizeAssistantText, friendlyErrorMessage } from '../lib/safeResponse';
 import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw'; 
 
 import {
   Copy, Check, Edit2, Pencil, Upload, Volume2, VolumeX, Share2, CheckCircle2, LoaderCircle,
   X, RotateCcw, RotateCw, Download, ChevronDown, Eye, Zap, Brain, Sparkles, Plus, FileText, Mic, AudioLines,
-  ThumbsUp, ThumbsDown, Paperclip, Camera,
+  ThumbsUp, ThumbsDown, Paperclip, Camera, Search as SearchIcon, ChevronUp,
 } from 'lucide-react';
 
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import AttachmentTile from '../components/AttachmentTile';
+import WeatherCard from '../components/WeatherCard';
 import type { Components } from 'react-markdown'; 
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import oneDark from 'react-syntax-highlighter/dist/esm/styles/prism/one-dark';
 
 
+
+// Small notice shown while the device has no internet connection.
+function OfflineBanner() {
+  const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
+  useEffect(() => {
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener('online', up);
+    window.addEventListener('offline', down);
+    return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down); };
+  }, []);
+  if (online) return null;
+  return createPortal(
+    <div role="status" aria-live="polite" className="fixed left-1/2 top-3 z-[2147483647] -translate-x-1/2 rounded-full bg-zinc-900 px-4 py-2 text-[13px] font-medium text-white shadow-lg dark:bg-zinc-100 dark:text-zinc-900">
+      You are offline. Messages will send once you are back online.
+    </div>,
+    document.body
+  );
+}
 
 // "9 minutes ago" label that keeps itself fresh without re-rendering the chat.
 const formatRelativeAgo = (value: string | number | Date | undefined | null): string => {
@@ -1764,10 +1786,13 @@ ${textToRead}` }] }], turnComplete: true },
             for (let i = 0; i < pcm.length; i++) channel[i] = pcm[i] / 32768;
             const source = context.createBufferSource();
             source.buffer = buffer;
+            // Read-aloud speed from Settings (1 = normal).
+            const speed = loadPrefs().readAloudSpeed || 1;
+            source.playbackRate.value = speed;
             source.connect(context.destination);
             const startAt = Math.max(context.currentTime + 0.008, speechNextStartRef.current);
             source.start(startAt);
-            speechNextStartRef.current = startAt + buffer.duration;
+            speechNextStartRef.current = startAt + buffer.duration / speed;
           }
           if (payload?.serverContent?.turnComplete || payload?.server_content?.turn_complete) {
             window.setTimeout(() => {
@@ -1821,6 +1846,27 @@ ${textToRead}` }] }], turnComplete: true },
   const [shareLoading, setShareLoading] = useState(false);
   const [shareMode, setShareMode] = useState<'prompt' | 'conversation'>('prompt');
   const [shareError, setShareError] = useState<string | null>(null);
+  // Long chats: show only the latest messages until the user asks for more.
+  const [showAllMessages, setShowAllMessages] = useState(false);
+  useEffect(() => { setShowAllMessages(false); }, [currentSessionId]);
+  const hiddenMessageCount = !showAllMessages && messages.length > 150 ? messages.length - 100 : 0;
+
+  // Weather cards: one per live-weather lookup, attached to the first reply after it.
+  const [weatherSnapshots, setWeatherSnapshots] = useState<WeatherSnapshot[]>([]);
+  useEffect(() => { setWeatherSnapshots([]); }, [currentSessionId]);
+  const weatherCardByMessageId: Record<string, WeatherSnapshot> = {};
+  for (const snapshot of weatherSnapshots) {
+    const reply = messages.find(item => item.role === 'assistant' && (parseServerDate(item.timestamp)?.getTime() ?? 0) >= snapshot.at - 1000);
+    if (reply) weatherCardByMessageId[String(reply.id)] = snapshot;
+  }
+
+  // Search inside the current chat.
+  const [chatSearchOpen, setChatSearchOpen] = useState(false);
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [chatSearchIndex, setChatSearchIndex] = useState(0);
+  const chatSearchInputRef = useRef<HTMLInputElement>(null);
+  const [copiedChat, setCopiedChat] = useState(false);
+  const [shareLinks, setShareLinks] = useState<Array<{ id: number; url: string; createdAt?: string; expiresAt?: string }>>([]);
   const [shareSuccessVisible, setShareSuccessVisible] = useState(false);
 
   // Auto-dismiss the "Public link copied" notification after 5 seconds.
@@ -4029,47 +4075,7 @@ const chooseModel = useCallback((modelId: string) => {
       console.error('Chat error:', err);
       cancelStreamRenderer();
 
-      const status = Number(err?.status);
-
-      let errMsg =
-        'Something went wrong. Please try again.';
-
-      if (status === 400) {
-        errMsg = 'The request could not be processed. Please check your message or attachment and try again.';
-      } else if (status === 401) {
-        errMsg =
-          'Your session has expired. Please log in again.';
-      } else if (status === 403) {
-        errMsg =
-          'You do not have permission to perform this action.';
-      } else if (status === 404) {
-        errMsg =
-          'The requested resource could not be found.';
-      } else if (status === 413) {
-        errMsg =
-          'The uploaded file is too large. Please choose a smaller file.';
-      } else if (status === 415) {
-        errMsg =
-          'This file type is not supported.';
-      } else if (status === 422) {
-        errMsg =
-          'The uploaded content could not be processed.';
-      } else if (status === 429) {
-        errMsg =
-          'The AI service is currently busy. Please wait a few seconds and try again.';
-      } else if (status === 502 || status === 503 || status === 504) {
-        errMsg = selectedModel === 'gemini-3.8-flash'
-          ? 'Sight is temporarily overloaded (Gemini returned 503). Please select Spark or Prime and try again, or retry Sight in a moment.'
-          : 'The AI service is temporarily unavailable. Please try again shortly.';
-      } else if (
-        typeof err?.message === 'string' &&
-        err.message.toLowerCase().includes('starting up')
-      ) {
-        errMsg =
-          'Twinkle is temporarily unavailable. Please try again in a moment.';
-      } else if (err instanceof TypeError || (typeof navigator !== 'undefined' && !navigator.onLine)) {
-        errMsg = 'Connection problem. Check your internet connection and try again.';
-      }
+      const errMsg = friendlyErrorMessage(err, typeof navigator === 'undefined' || navigator.onLine);
 
       setMessages(prev => dedupeMessages([...prev, {
           id: 'error-' + Date.now(),
@@ -4079,6 +4085,8 @@ const chooseModel = useCallback((modelId: string) => {
           timestamp: new Date().toISOString(),
         }]));
     } finally {
+      const weatherSnapshot = takeWeatherSnapshot();
+      if (weatherSnapshot) setWeatherSnapshots(prev => [...prev, weatherSnapshot]);
       isSendingRef.current = false;
       abortControllerRef.current = null;
       activeResponseSessionRef.current = null;
@@ -4242,6 +4250,118 @@ const chooseModel = useCallback((modelId: string) => {
     abortControllerRef.current = null;
     window.speechSynthesis?.cancel();
     setTimeout(() => inputRef.current?.focus(), 100);
+  };
+
+  // Esc stops a response that is being generated (unless a dialog is open).
+  const stopResponseRef = useRef(handleStopResponse);
+  stopResponseRef.current = handleStopResponse;
+  useEffect(() => {
+    if (!isTyping) return;
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (document.querySelector('[role="dialog"], [role="menu"]')) return;
+      event.preventDefault();
+      stopResponseRef.current();
+    };
+    window.addEventListener('keydown', onEscape);
+    return () => window.removeEventListener('keydown', onEscape);
+  }, [isTyping]);
+
+  // ---- Search in chat ----
+  const openChatSearch = () => {
+    setShowAllMessages(true);
+    setChatSearchOpen(true);
+    window.setTimeout(() => chatSearchInputRef.current?.focus(), 30);
+  };
+  const closeChatSearch = () => {
+    setChatSearchOpen(false);
+    setChatSearchQuery('');
+    setChatSearchIndex(0);
+  };
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        openChatSearch();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const chatSearchTerm = chatSearchQuery.trim().toLowerCase();
+  const chatSearchMatchIds: Array<string | number> = chatSearchOpen && chatSearchTerm
+    ? messages
+        .filter(item => cleanMessageContent(item.content).toLowerCase().includes(chatSearchTerm))
+        .map(item => item.id)
+    : [];
+  const chatSearchMatchKey = chatSearchMatchIds.join('|');
+
+  useEffect(() => {
+    const css = (globalThis as any).CSS;
+    const registry = css?.highlights;
+    const clear = () => { try { registry?.delete('twinkle-search'); registry?.delete('twinkle-search-current'); } catch { /* unsupported */ } };
+    if (!chatSearchOpen || !chatSearchTerm) { clear(); return; }
+
+    if (!document.getElementById('twinkle-search-style')) {
+      const style = document.createElement('style');
+      style.id = 'twinkle-search-style';
+      style.textContent = '::highlight(twinkle-search){background-color:#fde68a;color:#1f1e1d}::highlight(twinkle-search-current){background-color:#fb923c;color:#1f1e1d}';
+      document.head.appendChild(style);
+    }
+
+    const currentId = chatSearchMatchIds[Math.min(chatSearchIndex, Math.max(chatSearchMatchIds.length - 1, 0))];
+    const all: Range[] = [];
+    const current: Range[] = [];
+    if (registry && typeof (window as any).Highlight === 'function') {
+      document.querySelectorAll<HTMLElement>('[data-msg-id]').forEach(element => {
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        let node: Node | null;
+        while ((node = walker.nextNode())) {
+          const text = (node.textContent || '').toLowerCase();
+          let from = 0;
+          let at: number;
+          while ((at = text.indexOf(chatSearchTerm, from)) !== -1) {
+            const range = document.createRange();
+            range.setStart(node, at);
+            range.setEnd(node, at + chatSearchTerm.length);
+            (String(currentId) === element.dataset.msgId ? current : all).push(range);
+            from = at + chatSearchTerm.length;
+          }
+        }
+      });
+      try {
+        registry.set('twinkle-search', new (window as any).Highlight(...all));
+        registry.set('twinkle-search-current', new (window as any).Highlight(...current));
+      } catch { /* highlighting is optional */ }
+    }
+    if (currentId !== undefined) {
+      document.querySelector<HTMLElement>(`[data-msg-id="${String(currentId).replace(/"/g, '')}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+    return clear;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatSearchOpen, chatSearchTerm, chatSearchIndex, chatSearchMatchKey]);
+
+  const stepChatSearch = (direction: 1 | -1) => {
+    if (chatSearchMatchIds.length === 0) return;
+    setChatSearchIndex(index => (index + direction + chatSearchMatchIds.length) % chatSearchMatchIds.length);
+  };
+
+  // ---- Copy the whole chat as Markdown ----
+  const copyWholeChat = async () => {
+    const title = sessions.find(item => item.id === currentSessionId)?.sessionName || 'Chat';
+    const body = messages
+      .map(item => `**${item.role === 'user' ? 'You' : 'Twinkle'}**\n\n${cleanMessageContent(item.content)}`)
+      .filter(Boolean)
+      .join('\n\n---\n\n');
+    try {
+      await navigator.clipboard.writeText(`# ${title}\n\n${body}\n`);
+      setCopiedChat(true);
+      window.setTimeout(() => setCopiedChat(false), 1800);
+    } catch (error) {
+      console.error('Could not copy chat:', error);
+    }
   };
 
   const createNewSession = () => {
@@ -4416,22 +4536,59 @@ if (isBlankDraft) {
     setShareSessionId(currentSessionId);
   };
 
-  const createConversationLink = async () => {
+  const createConversationLink = async (expiresInDays?: number) => {
     const targetSessionId = shareSessionId !== null && shareSessionId > 0 ? shareSessionId : currentSessionId;
     if (targetSessionId === null || shareLoading) return;
     setShareLoading(true);
     setShareError(null);
     try {
-      const response = await chatApi.shareSession(targetSessionId) as any;
+      const response = await chatApi.shareSession(targetSessionId, expiresInDays) as any;
       const shareToken = response?.shareToken;
       if (!response?.success || !shareToken) {
         throw new Error(response?.error || 'Could not create a public link.');
       }
       setShareUrl(`${window.location.origin}/shared/${encodeURIComponent(shareToken)}`);
+      void loadShareLinks(targetSessionId);
     } catch (error) {
       setShareError(error instanceof Error ? error.message : 'Could not create the public link.');
     } finally {
       setShareLoading(false);
+    }
+  };
+
+  const loadShareLinks = useCallback(async (sid: number) => {
+    try {
+      const response = await chatApi.listShares(sid) as any;
+      const links = Array.isArray(response?.links) ? response.links : [];
+      setShareLinks(links.map((link: any) => ({
+        id: Number(link.id),
+        url: `${window.location.origin}/shared/${encodeURIComponent(link.shareToken)}`,
+        createdAt: link.createdAt ? (parseServerDate(link.createdAt)?.toISOString() ?? undefined) : undefined,
+        expiresAt: link.expiresAt ? (parseServerDate(link.expiresAt)?.toISOString() ?? undefined) : undefined,
+      })));
+    } catch {
+      setShareLinks([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (shareMode === 'conversation' && shareSessionId !== null && shareSessionId > 0) {
+      void loadShareLinks(shareSessionId);
+    } else {
+      setShareLinks([]);
+    }
+  }, [shareMode, shareSessionId, loadShareLinks]);
+
+  const revokeShareLink = async (linkId: number) => {
+    if (shareSessionId === null || shareSessionId <= 0) return;
+    const previous = shareLinks;
+    setShareLinks(prev => prev.filter(link => link.id !== linkId));
+    try {
+      const response = await chatApi.revokeShare(shareSessionId, linkId) as any;
+      if (response && response.success === false) throw new Error(response.error || 'failed');
+    } catch {
+      setShareLinks(previous);
+      setShareError('Could not turn off that link. Please try again.');
     }
   };
 
@@ -4442,6 +4599,7 @@ if (isBlankDraft) {
     setShareUrl(null);
     setShareError(null);
     setShareLoading(false);
+    setShareLinks([]);
   };
 
   const confirmClearAll = () => {
@@ -4688,7 +4846,29 @@ if (isBlankDraft) {
         className="relative ml-0 flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent transition-[margin] duration-300 ease-out lg:ml-[var(--desktop-sidebar-offset)]"
         style={{ '--desktop-sidebar-offset': `${desktopSidebarExpanded ? desktopSidebarWidth : 52}px` } as React.CSSProperties}
       >
-        <div className="absolute right-4 top-3 z-[9998]">
+        <div className="absolute right-4 top-3 z-[9998] flex items-center gap-2">
+          {messages.length > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={() => (chatSearchOpen ? closeChatSearch() : openChatSearch())}
+                aria-label="Search in chat"
+                title="Search in chat (Ctrl+Shift+F)"
+                className="hidden h-9 w-9 items-center justify-center rounded-lg border border-zinc-300/70 bg-white text-zinc-700 transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 sm:inline-flex dark:border-white/15 dark:bg-transparent dark:text-zinc-200 dark:hover:bg-white/5"
+              >
+                <SearchIcon className="h-4 w-4" strokeWidth={1.9} />
+              </button>
+              <button
+                type="button"
+                onClick={() => void copyWholeChat()}
+                aria-label="Copy whole chat"
+                title={copiedChat ? 'Copied!' : 'Copy whole chat as Markdown'}
+                className="hidden h-9 w-9 items-center justify-center rounded-lg border border-zinc-300/70 bg-white text-zinc-700 transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 sm:inline-flex dark:border-white/15 dark:bg-transparent dark:text-zinc-200 dark:hover:bg-white/5"
+              >
+                {copiedChat ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" strokeWidth={1.9} />}
+              </button>
+            </>
+          )}
           <button
             type="button"
             onClick={handleTopShare}
@@ -4721,6 +4901,30 @@ if (isBlankDraft) {
             </button>
           </div>,
           document.body
+        )}
+        <OfflineBanner />
+        {chatSearchOpen && (
+          <div role="search" className="absolute right-4 top-14 z-[9998] flex w-[min(380px,calc(100vw-32px))] items-center gap-1.5 rounded-xl border border-zinc-300/70 bg-white p-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.12)] dark:border-white/15 dark:bg-[#30302E]">
+            <SearchIcon className="ml-2 h-4 w-4 shrink-0 text-zinc-400" strokeWidth={1.9} />
+            <input
+              ref={chatSearchInputRef}
+              value={chatSearchQuery}
+              onChange={event => { setChatSearchQuery(event.target.value); setChatSearchIndex(0); }}
+              onKeyDown={event => {
+                if (event.key === 'Enter') { event.preventDefault(); stepChatSearch(event.shiftKey ? -1 : 1); }
+                if (event.key === 'Escape') { event.preventDefault(); closeChatSearch(); }
+              }}
+              placeholder="Search in this chat"
+              aria-label="Search in this chat"
+              className="min-w-0 flex-1 bg-transparent px-1 py-1.5 text-[14px] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100"
+            />
+            <span className="shrink-0 px-1 text-[12px] tabular-nums text-zinc-500 dark:text-zinc-400" aria-live="polite">
+              {chatSearchTerm ? (chatSearchMatchIds.length ? `${Math.min(chatSearchIndex, chatSearchMatchIds.length - 1) + 1} of ${chatSearchMatchIds.length}` : 'No results') : ''}
+            </span>
+            <button type="button" onClick={() => stepChatSearch(-1)} aria-label="Previous result" className="rounded-md p-1.5 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-white/10"><ChevronUp className="h-4 w-4" /></button>
+            <button type="button" onClick={() => stepChatSearch(1)} aria-label="Next result" className="rounded-md p-1.5 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-white/10"><ChevronDown className="h-4 w-4" /></button>
+            <button type="button" onClick={closeChatSearch} aria-label="Close search" className="rounded-md p-1.5 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-white/10"><X className="h-4 w-4" /></button>
+          </div>
         )}
         {/* Mobile header */}
         <header
@@ -4795,20 +4999,36 @@ if (isBlankDraft) {
               </div>
             ) : (
               <div className="twinkle-message-list space-y-6 pb-6 pt-2 font-normal text-[16px]">
+                {hiddenMessageCount > 0 && (
+                  <div className="flex justify-center">
+                    <button
+                      type="button"
+                      onClick={() => setShowAllMessages(true)}
+                      className="rounded-full border border-zinc-300/70 px-4 py-1.5 text-[13px] font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-white/15 dark:text-zinc-200 dark:hover:bg-white/5"
+                    >
+                      Show {hiddenMessageCount} earlier messages
+                    </button>
+                  </div>
+                )}
                 {messages.map((msg, index) => {
+                  if (index < hiddenMessageCount) return null;
                   const isEditing = editingMessage?.id === msg.id;
                   const shouldSpin = isTyping && msg.role === 'assistant' && index === messages.length - 1;
                   const attachedImages = messageAttachments[msg.id] || [];
                   const rawMessageContent = cleanMessageContent(msg.content);
+                  const safeMessageContent = msg.role === 'assistant'
+                    ? sanitizeAssistantText(rawMessageContent, shouldSpin)
+                    : rawMessageContent;
                   const displayContent =
                     attachedImages.length > 0 && rawMessageContent === 'Image uploaded'
                       ? ''
-                      : maskIncompleteImages(rawMessageContent);
+                      : maskIncompleteImages(safeMessageContent);
 
                   return (
                     <div
                       key={msg.id || `msg-${index}`}
                       data-twinkle-message
+                      data-msg-id={String(msg.id)}
       data-twinkle-user-content
                       className={`relative flex w-full min-w-0 ${
                         msg.role === 'user' ? 'justify-end' : 'justify-start'
@@ -4863,6 +5083,9 @@ if (isBlankDraft) {
                         <div className={`flex flex-col gap-1 min-w-0 max-w-full ${
                           msg.role === 'user' ? 'items-end w-full' : 'flex-1'
                         }`}>
+                          {msg.role === 'assistant' && weatherCardByMessageId[String(msg.id)] && (
+                            <WeatherCard data={weatherCardByMessageId[String(msg.id)]} />
+                          )}
                           {/* Message card: do not render an empty bubble for attachment-only messages. */}
                           {((isEditing || displayContent.trim().length > 0)) && (
                           <div
@@ -5629,11 +5852,11 @@ if (isBlankDraft) {
                         disabled={!input.trim() && (!Array.isArray(filePreviews) || filePreviews.length === 0) && !isTyping}
                         aria-label={isTyping ? 'Stop response' : 'Send message'}
                         data-tooltip={isTyping ? 'Stop response' : 'Send message'}
-                        className={`twinkle-tooltip-trigger twinkle-composer-submit relative z-[30] flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] border transition-all duration-200 sm:h-7 sm:w-7 ${isTyping ? 'border-[#E6E6E6] text-[#1F1E1D] shadow-none' : 'border-transparent text-white shadow-none hover:brightness-95 disabled:opacity-40'}`}
+                        className={`twinkle-tooltip-trigger twinkle-composer-submit relative z-[30] flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] border transition-all duration-200 sm:h-7 sm:w-7 ${isTyping ? 'bg-white ' : ''}${isTyping ? 'border-[#E6E6E6] text-[#1F1E1D] shadow-none dark:!border-white/20 dark:!bg-[#30302E] dark:text-zinc-100' : 'border-transparent text-white shadow-none hover:brightness-95 disabled:opacity-40'}`}
                         style={{
                           // Stop: white tile, light border, dark outlined square.
                           // Send: solid #C6613F tile, white up arrow.
-                          background: isTyping ? '#FFFFFF' : '#C6613F',
+                          background: isTyping ? undefined : '#C6613F',
                           boxShadow: 'none',
                         }}
                       >
@@ -5800,7 +6023,7 @@ if (isBlankDraft) {
         shareUrl={shareUrl}
         chatName="Share chat"
         mode={shareMode}
-        onCreateLink={() => void createConversationLink()}
+        onCreateLink={(days) => void createConversationLink(days)}
         emptyChat={shareMode === 'conversation' && shareSessionId === -1}
         onStartChat={() => {
           closeShareModal();
@@ -5810,6 +6033,8 @@ if (isBlankDraft) {
         shareDescription={shareMode === 'prompt' ? 'Anyone with this link can open Twinkle AI with this prompt ready to send.' : undefined}
         isLoading={shareLoading}
         error={shareError}
+        links={shareMode === 'conversation' ? shareLinks : []}
+        onRevokeLink={(id) => void revokeShareLink(id)}
         onClose={closeShareModal}
       />
 
