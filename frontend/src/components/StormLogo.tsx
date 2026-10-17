@@ -3,38 +3,34 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useId } from 'react';
 
 interface Props {
   className?: string;
 }
 
-/**
- * Shared Twinkle mark.
- * This is the exact monochrome mark used in the center of the Chat screen.
- * Keeping it in one component ensures Chat, Sidebar, Login, Signup,
- * OTP verification, password recovery, and loading states all use the same logo.
- */
 export default function StormLogo({ className = "" }: Props) {
+  const gradientId = `stellume-${useId().replace(/:/g, '')}`;
+
   return (
     <svg
       className={className}
-      viewBox="0 0 48 48"
+      viewBox="56 56 128 128"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      aria-label="Twinkle"
+      aria-label="Stellume"
       role="img"
     >
+      <defs>
+        <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#F472B6" />
+          <stop offset="1" stopColor="#6366F1" />
+        </linearGradient>
+      </defs>
       <path
-        d="M24 3.5C26.6 11.2 31.1 16.1 38.8 18.7C31.1 21.3 26.6 26.2 24 33.9C21.4 26.2 16.9 21.3 9.2 18.7C16.9 16.1 21.4 11.2 24 3.5Z"
-        fill="currentColor"
+        d="M120 56c6 36 20 50 56 56-36 6-50 20-56 56-6-36-20-50-56-56 36-6 50-20 56-56z"
+        fill={`url(#${gradientId})`}
       />
-      <path
-        d="M24 14.1C25.7 18.9 29 22 33.9 23.7C29 25.4 25.7 28.5 24 33.3C22.3 28.5 19 25.4 14.1 23.7C19 22 22.3 18.9 24 14.1Z"
-        fill="white"
-        fillOpacity=".96"
-      />
-      <circle cx="24" cy="23.7" r="3.1" fill="currentColor" />
     </svg>
   );
 }
