@@ -199,6 +199,7 @@ function MenuItem({
   danger = false,
   onClick,
   trailing,
+  roomy = false,
 }: {
   icon: ReactNode;
   label: string;
@@ -206,13 +207,14 @@ function MenuItem({
   danger?: boolean;
   onClick: () => void;
   trailing?: ReactNode;
+  roomy?: boolean;
 }) {
   return (
     <button
       type="button"
       role="menuitem"
       onClick={onClick}
-      className={`flex h-9 w-full items-center gap-3 rounded-lg px-3 text-left text-[14px] leading-none transition-colors focus-visible:outline-none ${
+      className={`flex ${roomy ? 'h-11' : 'h-9'} w-full items-center gap-3 rounded-lg px-3 text-left text-[14px] leading-none transition-colors focus-visible:outline-none ${
         danger
           ? 'text-[#B53333] hover:bg-[#B53333]/10 focus-visible:bg-[#B53333]/10 dark:text-[#F2877E] dark:hover:bg-[#F2877E]/10'
           : 'text-zinc-800 hover:bg-zinc-100 focus-visible:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:bg-zinc-800'
@@ -228,8 +230,8 @@ function MenuItem({
   );
 }
 
-function MenuDivider() {
-  return <div role="separator" className="mx-3 my-1 h-px bg-zinc-200 dark:bg-zinc-700/70" />;
+function MenuDivider({ roomy = false }: { roomy?: boolean }) {
+  return <div role="separator" className={`mx-3 ${roomy ? 'my-2' : 'my-1'} h-px bg-zinc-200 dark:bg-zinc-700/70`} />;
 }
 
 // ─── ChatContextMenu (the "⋮" dropdown on a chat row) ─────────────────────────
@@ -1013,19 +1015,21 @@ function AccountMenu({
             transition={{ duration: 0.12, ease: 'easeOut' }}
             role="menu"
             aria-label="Account"
-            className={`absolute bottom-[calc(100%+8px)] left-0 right-0 z-[60] max-h-[calc(100dvh-96px)] origin-bottom overflow-y-auto overscroll-contain ${MENU_SURFACE}`}
+            className={`absolute bottom-[calc(100%+8px)] left-0 right-0 z-[60] max-h-[calc(100dvh-96px)] origin-bottom overflow-y-auto overscroll-contain ${MENU_SURFACE.replace('p-1.5', 'p-2.5')}`}
           >
-            <div className="truncate px-3 pb-1.5 pt-2 text-[13px] font-medium leading-tight text-zinc-500 dark:text-zinc-400">
+            <div className="truncate px-3 pb-3 pt-2 text-[13px] font-medium leading-tight text-zinc-500 dark:text-zinc-400">
               {user.email || user.name || user.username}
             </div>
 
             <MenuItem
+              roomy
               icon={<Settings2 className="h-4 w-4" strokeWidth={1.7} />}
               label="Settings"
               shortcut="Ctrl+Shift+,"
               onClick={goSettings}
             />
             <MenuItem
+              roomy
               icon={<Globe className="h-4 w-4" strokeWidth={1.7} />}
               label="Language"
               onClick={openLanguage}
@@ -1037,18 +1041,20 @@ function AccountMenu({
               }
             />
 
-            <MenuDivider />
+            <MenuDivider roomy />
 
             <MenuItem
+              roomy
               icon={<Info className="h-4 w-4" strokeWidth={1.7} />}
               label="Learn more"
               onClick={learnMore}
               trailing={<ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-400 dark:text-zinc-500" strokeWidth={1.8} />}
             />
 
-            <MenuDivider />
+            <MenuDivider roomy />
 
             <MenuItem
+              roomy
               icon={<LogOut className="h-4 w-4" strokeWidth={1.7} />}
               label="Log out"
               onClick={logout}
