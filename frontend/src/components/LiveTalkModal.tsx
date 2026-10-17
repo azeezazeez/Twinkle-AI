@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Mic, MicOff } from 'lucide-react';
+import { Mic, MicOff, RotateCw, X } from 'lucide-react';
+import FoggyOrb from './FoggyOrb';
+import { getVoiceOrbPalette } from '../lib/voiceThemes';
+import { VOICES, DEFAULT_VOICE } from '../lib/voices';
 import { chatApi, createLiveToken } from '../lib/api';
 import { APP_LANGUAGE_KEY, getLanguageInstruction, type AppLanguage } from '../lib/i18n';
 import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw';
-import { getSavedLiveTalkColor } from '../lib/liveTalkColors';
 
 type Props = {
   open: boolean;
@@ -26,46 +28,7 @@ type WakeLockSentinelLike = {
   addEventListener?: (type: string, listener: EventListener) => void;
 };
 
-type VoiceOption = {
-  name: string;
-  description: string;
-};
-
-const VOICES: VoiceOption[] = [
-  { name: 'Zephyr', description: 'Bright' },
-  { name: 'Puck', description: 'Upbeat' },
-  { name: 'Charon', description: 'Informative · clear' },
-  { name: 'Kore', description: 'Firm' },
-  { name: 'Fenrir', description: 'Excitable' },
-  { name: 'Leda', description: 'Youthful' },
-  { name: 'Orus', description: 'Firm' },
-  { name: 'Aoede', description: 'Breezy' },
-  { name: 'Callirrhoe', description: 'Easy-going' },
-  { name: 'Autonoe', description: 'Bright' },
-  { name: 'Enceladus', description: 'Breathy' },
-  { name: 'Iapetus', description: 'Clear' },
-  { name: 'Umbriel', description: 'Easy-going' },
-  { name: 'Algieba', description: 'Smooth' },
-  { name: 'Despina', description: 'Smooth' },
-  { name: 'Erinome', description: 'Clear' },
-  { name: 'Algenib', description: 'Gravelly' },
-  { name: 'Rasalgethi', description: 'Informative' },
-  { name: 'Laomedeia', description: 'Upbeat' },
-  { name: 'Achernar', description: 'Soft' },
-  { name: 'Alnilam', description: 'Firm' },
-  { name: 'Schedar', description: 'Even' },
-  { name: 'Gacrux', description: 'Mature' },
-  { name: 'Pulcherrima', description: 'Forward' },
-  { name: 'Achird', description: 'Friendly' },
-  { name: 'Zubenelgenubi', description: 'Casual' },
-  { name: 'Vindemiatrix', description: 'Gentle' },
-  { name: 'Sadachbia', description: 'Lively' },
-  { name: 'Sadaltager', description: 'Knowledgeable' },
-  { name: 'Sulafat', description: 'Warm' },
-];
-
 const LIVE_MODEL = 'gemini-3.8-live';
-const DEFAULT_VOICE = 'Charon';
 
 const getSavedVoice = () => {
   try {
@@ -180,9 +143,11 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
       return 'auto';
     }
   });
-  const [liveTalkColor, setLiveTalkColor] = useState(() => getSavedLiveTalkColor());
   const [status, setStatus] = useState('Connecting…');
-  const [transcript, setTranscript] = useState('');
+  // Live captions: the latest thing said, by whom.
+  const [caption, setCaption] = useState<{ role: 'user' | 'assistant'; text: string }>({ role: 'user', text: '' });
+  const [elapsed, setElapsed] = useState(0);
+  const levelRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState('');
 
   // Creates the persistent chat session once. It is started when Live Talk
@@ -290,11 +255,6 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
       if (custom.detail) setAppLanguage(custom.detail);
     };
 
-    const handleColorChange = (event: Event) => {
-      const custom = event as CustomEvent<string>;
-      if (custom.detail) setLiveTalkColor(getSavedLiveTalkColor());
-    };
-
     const syncLanguage = () => {
       try {
         const saved = localStorage.getItem(APP_LANGUAGE_KEY) || 'auto';
@@ -307,11 +267,9 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
     syncLanguage();
     window.addEventListener('twinkle-voice-change', handleVoiceChange);
     window.addEventListener('twinkle-language-change', handleLanguageChange);
-    window.addEventListener('twinkle-live-talk-color-change', handleColorChange);
     return () => {
       window.removeEventListener('twinkle-voice-change', handleVoiceChange);
       window.removeEventListener('twinkle-language-change', handleLanguageChange);
-      window.removeEventListener('twinkle-live-talk-color-change', handleColorChange);
     };
   }, [open]);
 
@@ -803,12 +761,13 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
           if (serverContent.inputTranscription?.text) {
             const text = String(serverContent.inputTranscription.text);
             userTurnRef.current += text;
-            setTranscript(prev => `${prev}${text}`);
+            setCaption(prev => (prev.role === 'user' ? { role: 'user', text: prev.text + text } : { role: 'user', text }));
           }
 
           if (serverContent.outputTranscription?.text) {
             const text = String(serverContent.outputTranscription.text);
             assistantTurnRef.current += text;
+            setCaption(prev => (prev.role === 'assistant' ? { role: 'assistant', text: prev.text + text } : { role: 'assistant', text }));
           }
 
           if (serverContent.interrupted) {
@@ -871,7 +830,8 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
 
   useEffect(() => {
     if (!open) return;
-    setTranscript('');
+    setCaption({ role: 'user', text: '' });
+    setElapsed(0);
     setError('');
     // Activate the listening UI immediately; microphone/network initialization
     // continues underneath it without making the user wait for a connection.
@@ -962,109 +922,266 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
       });
   };
 
-  const selectedVoice = VOICES.find(voice => voice.name === voiceName) ?? VOICES[2];
+  // ── Keyboard: M toggles the microphone, Esc ends the conversation ─────────
+  const keyActionsRef = useRef({ close: () => {}, toggleMic: () => {} });
+  keyActionsRef.current = {
+    close: handleClose,
+    toggleMic: () => (listening ? stopInput() : void startInput()),
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        keyActionsRef.current.close();
+      } else if (event.key.toLowerCase() === 'm') {
+        event.preventDefault();
+        keyActionsRef.current.toggleMic();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open]);
+
+  // ── Call timer ───────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!open) return;
+    const id = window.setInterval(() => setElapsed(value => value + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [open]);
+
+  // ── Microphone level → orb size (written straight to the DOM, no re-render)
+  useEffect(() => {
+    if (!open) return;
+    let frame = 0;
+    let smooth = 0;
+    const makeBuffer = (size: number) => new Uint8Array(size);
+    let buffer: ReturnType<typeof makeBuffer> | null = null;
+
+    const tick = () => {
+      const analyser = inputAnalyserRef.current;
+      let level = 0;
+      if (analyser) {
+        if (!buffer || buffer.length !== analyser.fftSize) buffer = makeBuffer(analyser.fftSize);
+        analyser.getByteTimeDomainData(buffer);
+        let sum = 0;
+        for (let i = 0; i < buffer.length; i += 1) {
+          const v = (buffer[i] - 128) / 128;
+          sum += v * v;
+        }
+        level = Math.min(1, Math.sqrt(sum / buffer.length) * 6);
+      }
+      smooth += (level - smooth) * 0.25;
+      levelRef.current?.style.setProperty('--lvl', smooth.toFixed(3));
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [open]);
+
+  const retry = () => {
+    cleanupAudioInput();
+    closeSocket();
+    void connect();
+  };
+
+  const palette = getVoiceOrbPalette(voiceName);
+  const thinking = status === 'Thinking…' || status === 'Thinking';
+  const hasError = Boolean(error);
+
+  const label = hasError
+    ? status
+    : speaking
+      ? 'Speaking'
+      : thinking
+        ? 'Thinking'
+        : listening
+          ? connected || status === 'Listening' ? 'Listening' : status
+          : 'Microphone paused';
+
+  const hint = hasError
+    ? ''
+    : speaking
+      ? 'Start talking any time to interrupt.'
+      : thinking
+        ? ''
+        : listening
+          ? 'Just start talking.'
+          : 'Tap the microphone to talk again.';
+
+  const orbState = speaking ? 'speaking' : listening && !thinking ? 'listening' : 'idle';
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+  const ss = String(elapsed % 60).padStart(2, '0');
+  const captionText = caption.text.trim().slice(-240);
 
   return (
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-[100000] flex h-[100dvh] w-full items-center justify-center bg-white dark:bg-zinc-950"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Live Talk"
+          className="fixed inset-0 z-[100000] flex h-[100dvh] w-full flex-col overflow-hidden bg-[var(--bg-main)] text-zinc-900 dark:text-zinc-50"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
+          transition={{ duration: 0.18 }}
         >
-          <div className="relative flex h-full w-full flex-col overflow-hidden">
+          {/* Ambient light in the voice's color */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 transition-opacity duration-700"
+            style={{
+              background: `radial-gradient(55% 48% at 50% 40%, ${palette.glow}, transparent 72%)`,
+              opacity: speaking ? 0.9 : 0.5,
+            }}
+          />
 
-            <main className="relative flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-32 pt-8">
-              <div
-                className="absolute inset-0 pointer-events-none transition-all duration-500"
-                style={{
-                  background: `radial-gradient(circle at center, ${liveTalkColor.glow}, transparent 36%)`,
-                }}
+          {/* Top bar */}
+          <header className="relative z-10 flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4">
+            <div className="flex items-center gap-2.5 text-sm">
+              <span className="relative flex h-2 w-2" aria-hidden="true">
+                {connected && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500/60" />}
+                <span className={`relative inline-flex h-2 w-2 rounded-full ${hasError ? 'bg-red-500' : connected ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+              </span>
+              <span className="font-medium">Live Talk</span>
+              <span className="tabular-nums text-zinc-500 dark:text-zinc-400">{mm}:{ss}</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="inline-flex h-8 items-center gap-2 rounded-full border border-zinc-200 bg-white/70 pl-1.5 pr-3 text-[13px] text-zinc-700 backdrop-blur dark:border-white/10 dark:bg-white/5 dark:text-zinc-200">
+                <span className="h-5 w-5 rounded-full" style={{ background: palette.background }} aria-hidden="true" />
+                {voiceName}
+              </span>
+              <button
+                type="button"
+                onClick={handleClose}
+                aria-label="End conversation"
+                className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-600 transition-colors hover:bg-zinc-200/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 dark:text-zinc-300 dark:hover:bg-white/10"
+              >
+                <X className="h-[18px] w-[18px]" strokeWidth={1.8} />
+              </button>
+            </div>
+          </header>
+
+          {/* Stage */}
+          <main className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center px-6">
+            <div
+              ref={levelRef}
+              style={{ transform: 'scale(calc(1 + var(--lvl, 0) * 0.14))', transition: 'transform 90ms linear' }}
+            >
+              <FoggyOrb
+                palette={palette}
+                state={orbState}
+                className="h-48 w-48 sm:h-56 sm:w-56"
+                label={`${voiceName} voice`}
               />
+            </div>
 
-              <div className="relative z-10 flex flex-col items-center text-center">
-                <motion.div
-                  animate={
-                    speaking
-                      ? { scale: [1, 1.08, 1], boxShadow: [`0 0 0 0 ${liveTalkColor.glow}`, `0 0 0 28px transparent`, `0 0 0 0 ${liveTalkColor.glow}`] }
-                      : listening
-                        ? { scale: [1, 1.035, 1] }
-                        : { scale: 1 }
-                  }
-                  transition={{ duration: speaking ? 1.15 : 1.8, repeat: speaking || listening ? Infinity : 0, ease: 'easeInOut' }}
-                  className="h-28 w-28 rounded-full sm:h-36 sm:w-36"
-                  style={{
-                    background: liveTalkColor.background,
-                    boxShadow: `0 24px 80px ${liveTalkColor.glow}`, 
-                  }}
-                />
-
-                <div className="mt-9 flex h-12 items-end justify-center gap-1.5" aria-hidden="true">
-                  {Array.from({ length: 24 }).map((_, index) => (
-                    <motion.span
-                      key={index}
-                      animate={
-                        listening || speaking
-                          ? { height: [6, 8 + ((index * 7) % 22), 6] }
-                          : { height: 5 }
-                      }
-                      transition={{ duration: 0.7 + (index % 5) * 0.08, repeat: listening || speaking ? Infinity : 0, delay: index * 0.025, ease: 'easeInOut' }}
-                      className="w-1 rounded-full bg-zinc-950/75 dark:bg-white/75"
-                    />
-                  ))}
-                </div>
-
-                {status === 'Thinking…' || status === 'Thinking' ? (
-                  <div className="mt-7 flex flex-col items-center gap-3" role="status" aria-live="polite">
-                    <motion.span
-                      aria-hidden="true"
-                      className="h-2.5 w-2.5 rounded-full bg-white shadow-[0_0_14px_rgba(255,255,255,0.95)]"
-                      animate={{ opacity: [0.25, 1, 0.25], scale: [0.8, 1.15, 0.8] }}
-                      transition={{ duration: 1.05, repeat: Infinity, ease: 'easeInOut' }}
-                    />
-                    <motion.p key={status} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="max-w-xl text-lg font-medium tracking-tight text-zinc-900 dark:text-white sm:text-xl">
-                      Thinking
-                    </motion.p>
-                  </div>
-                ) : (
-                  <motion.p key={status} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="mt-7 max-w-xl text-lg font-medium tracking-tight text-zinc-900 dark:text-white sm:text-xl">
-                    {status}
-                  </motion.p>
+            <div className="mt-12 flex flex-col items-center text-center" role="status" aria-live="polite">
+              <motion.p
+                key={label}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.18 }}
+                className="flex items-center gap-2 text-xl font-medium tracking-tight sm:text-2xl"
+              >
+                {label}
+                {thinking && !hasError && (
+                  <span className="flex gap-1" aria-hidden="true">
+                    {[0, 1, 2].map(dot => (
+                      <motion.span
+                        key={dot}
+                        className="h-1.5 w-1.5 rounded-full bg-current"
+                        animate={{ opacity: [0.25, 1, 0.25] }}
+                        transition={{ duration: 1, repeat: Infinity, delay: dot * 0.18 }}
+                      />
+                    ))}
+                  </span>
                 )}
+              </motion.p>
+              {hint && <p className="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">{hint}</p>}
+            </div>
 
-                {transcript && (
-                  <p className="mt-3 max-h-24 max-w-2xl overflow-y-auto text-sm leading-6 text-zinc-400">
-                    {transcript}
-                  </p>
+            {/* Live captions */}
+            <div className="mt-6 flex min-h-[72px] w-full max-w-xl flex-col items-center text-center" aria-live="off">
+              <AnimatePresence mode="wait">
+                {captionText && !hasError && (
+                  <motion.div
+                    key={caption.role}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    <p className="text-xs font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                      {caption.role === 'user' ? 'You' : 'Twinkle'}
+                    </p>
+                    <p
+                      data-twinkle-user-content
+                      className={`mt-1 text-[15px] leading-6 ${
+                        caption.role === 'user' ? 'text-zinc-500 dark:text-zinc-400' : 'text-zinc-800 dark:text-zinc-100'
+                      }`}
+                    >
+                      {captionText}
+                    </p>
+                  </motion.div>
                 )}
+              </AnimatePresence>
+            </div>
 
-                {error && (
-                  <div className="mt-5 max-w-xl rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-5 text-red-700 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-300">
-                    {error}
-                  </div>
-                )}
+            {hasError && (
+              <div
+                role="alert"
+                className="mt-2 flex max-w-md flex-col items-center gap-3 rounded-2xl border border-[#ecc5c3] bg-[#fdf6f5] px-5 py-4 text-center text-sm leading-5 text-[#b3261e] dark:border-[#7f1d1d] dark:bg-[#2a0f12] dark:text-[#f2b8b5]"
+              >
+                <span>{error}</span>
+                <button
+                  type="button"
+                  onClick={retry}
+                  className="inline-flex h-8 items-center gap-2 rounded-lg border border-current/30 px-3 text-[13px] font-medium transition-colors hover:bg-black/5 dark:hover:bg-white/10"
+                >
+                  <RotateCw className="h-3.5 w-3.5" />
+                  Try again
+                </button>
               </div>
-            </main>
+            )}
+          </main>
 
-            <footer className="absolute bottom-0 inset-x-0 flex items-center justify-center gap-3 border-t border-zinc-200/70 bg-white/90 px-5 py-5 backdrop-blur-xl dark:border-zinc-800 dark:bg-zinc-950/90">
+          {/* Controls */}
+          <footer className="relative z-10 flex flex-col items-center gap-3 px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-3">
+            <div className="flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 p-1.5 shadow-[0_6px_28px_rgba(0,0,0,0.08)] backdrop-blur dark:border-white/10 dark:bg-[#30302E]/80">
               <button
                 type="button"
                 onClick={listening ? stopInput : () => void startInput()}
-                className="inline-flex min-w-[170px] items-center justify-center gap-2 rounded-full border border-zinc-200 bg-white px-5 py-3 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-45 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800"
+                aria-pressed={!listening}
+                aria-label={listening ? 'Pause microphone' : 'Resume microphone'}
+                title={listening ? 'Pause microphone (M)' : 'Resume microphone (M)'}
+                className={`flex h-11 w-11 items-center justify-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 ${
+                  listening
+                    ? 'bg-zinc-100 text-zinc-900 hover:bg-zinc-200 dark:bg-white/10 dark:text-white dark:hover:bg-white/15'
+                    : 'bg-[#fdecea] text-[#b3261e] hover:bg-[#fbd9d5] dark:bg-[#3a1a1a] dark:text-[#f2b8b5]'
+                }`}
               >
-                {listening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-                {listening ? 'Pause microphone' : 'Resume microphone'}
+                {listening ? <Mic className="h-[18px] w-[18px]" strokeWidth={1.8} /> : <MicOff className="h-[18px] w-[18px]" strokeWidth={1.8} />}
               </button>
               <button
                 type="button"
                 onClick={handleClose}
-                className="inline-flex items-center justify-center gap-2 rounded-full bg-zinc-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+                title="End conversation (Esc)"
+                className="inline-flex h-11 items-center gap-2 rounded-full bg-[#C6613F] px-6 text-sm font-medium text-white transition-colors hover:bg-[#b4553a] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#C6613F]/50"
               >
-                End conversation
+                End
               </button>
-            </footer>
-          </div>
+            </div>
+
+            <p className="hidden items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400 sm:flex">
+              <span><kbd className="rounded border border-zinc-300 px-1.5 py-0.5 font-sans dark:border-white/20">M</kbd> mute</span>
+              <span><kbd className="rounded border border-zinc-300 px-1.5 py-0.5 font-sans dark:border-white/20">Esc</kbd> end</span>
+            </p>
+          </footer>
         </motion.div>
       )}
     </AnimatePresence>
