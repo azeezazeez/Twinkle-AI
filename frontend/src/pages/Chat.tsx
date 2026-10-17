@@ -4234,7 +4234,7 @@ if (isBlankDraft) {
           ref={messagesContainerRef}
           onScroll={handleScroll}
         >
-          <div className={`relative mx-auto box-border w-[calc(100%-1rem)] max-w-[800px] px-0 sm:w-[calc(100%-2rem)] md:w-[calc(100%-3rem)] ${messages.length === 0 && !isTyping ? "pt-0 pb-0" : "pt-[92px] md:pt-8 pb-8 md:pb-10"}`}>
+          <div className={`relative mx-auto box-border w-[calc(100%-1rem)] max-w-[768px] px-0 sm:w-[calc(100%-2rem)] md:w-[calc(100%-3rem)] ${messages.length === 0 && !isTyping ? "pt-0 pb-0" : "pt-[92px] md:pt-8 pb-8 md:pb-10"}`}>
             {messages.length === 0 && !isTyping ? (
               <div
                 ref={emptyGreetingRef}
@@ -4339,7 +4339,7 @@ if (isBlankDraft) {
                                 : 'twinkle-assistant-body w-full px-0 py-0 text-zinc-900 dark:text-zinc-100'
                             }`}
                           >
-                            <div className="text-[16px] leading-[1.7] markdown-body twinkle-response-content max-w-none min-w-0 w-full break-words [overflow-wrap:anywhere]">
+                            <div className="font-serif text-[16px] leading-[1.7] markdown-body twinkle-response-content max-w-none min-w-0 w-full break-words [overflow-wrap:anywhere]">
                               {isEditing ? (
                                 <div className="flex w-full min-w-0 flex-col gap-3">
                                   <textarea
@@ -4705,7 +4705,7 @@ if (isBlankDraft) {
           style={messages.length === 0 && !isTyping && emptyComposerTop !== null ? { top: `${emptyComposerTop}px`, bottom: 'auto' } : undefined}
         >
           <div
-            className="twinkle-composer-shell relative mx-auto box-border min-w-0 w-full max-w-[800px]"
+            className="twinkle-composer-shell relative mx-auto box-border min-w-0 w-full max-w-[768px]"
             style={{ boxSizing: 'border-box' }}
           >
             {showScrollBottom && !isAtBottom && messages.length > 0 && (
