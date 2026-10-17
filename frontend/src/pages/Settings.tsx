@@ -80,7 +80,7 @@ type VoiceOption = {
 
 const APP_VERSION = '1.0';
 
-const APP_LANGUAGES = [
+export const APP_LANGUAGES = [
   { code: 'auto', label: 'Auto-detect', native: 'Auto-detect', prompt: '' },
   { code: 'en', label: 'English', native: 'English', prompt: 'English' },
   { code: 'hi', label: 'Hindi', native: 'हिन्दी', prompt: 'Hindi' },
