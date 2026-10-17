@@ -902,13 +902,13 @@
   -webkit-mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - 112px),
+    #000 calc(100% - 24px),
     transparent 100%
   );
   mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - 112px),
+    #000 calc(100% - 24px),
     transparent 100%
   );
   -webkit-mask-repeat: no-repeat;
@@ -1602,9 +1602,9 @@ body {
 }
 @media (min-width: 1024px) {
   .twinkle-composer-position {
-    left: var(--desktop-sidebar-offset, 0px) !important;
+    left: var(--desktop-sidebar-offset, 60px) !important;
     right: 0 !important;
-    width: calc(100% - var(--desktop-sidebar-offset, 0px)) !important;
+    width: calc(100% - var(--desktop-sidebar-offset, 60px)) !important;
   }
 }
 
@@ -1689,7 +1689,7 @@ body {
 }
 
 /* ---- Sidebar surface (Claude's warm sidebar tone) ---- */
-.twinkle-sidebar { background-color: #FAF9F5 !important; }
+.twinkle-sidebar { background-color: #F5F4ED !important; }
 .dark .twinkle-sidebar { background-color: #1F1E1D !important; }
 .twinkle-sidebar .twinkle-newchat-box { width: 20px !important; height: 20px !important; flex: 0 0 20px !important; }
 .twinkle-sidebar .twinkle-newchat-icon { width: 18px !important; height: 18px !important; }
@@ -1791,3 +1791,14 @@ body {
 
 /* ---- Account menu polish ---- */
 .twinkle-account-menu { backdrop-filter: saturate(1.1); }
+
+/* ---- Chat column / composer alignment ----------------------------------
+   The message viewport is shortened to end exactly where the composer starts
+   (see composerHeight in Chat.tsx), so messages are hidden at the composer's
+   top edge. A symmetric scrollbar gutter keeps the message column centred on
+   the same axis as the composer, which spans the full width of the page. */
+@media (min-width: 769px) {
+  .twinkle-message-scroll-area {
+    scrollbar-gutter: stable both-edges;
+  }
+}
