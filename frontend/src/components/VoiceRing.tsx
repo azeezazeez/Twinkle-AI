@@ -1,5 +1,17 @@
 import { useMemo, type CSSProperties } from 'react';
-import type { OrbPalette } from './FoggyOrb';
+
+export type OrbPalette = {
+  /** Base gradient painted on the core. */
+  background: string;
+  /** Lightest tone. */
+  soft: string;
+  /** Mid tone. */
+  mid: string;
+  /** Deepest tone. */
+  strong: string;
+  /** Soft colored light cast around the ring. */
+  glow: string;
+};
 
 export type VoiceRingState = 'idle' | 'listening' | 'speaking' | 'thinking';
 
