@@ -498,6 +498,10 @@ export default function Profile({
 }) {
 
   const [username, setUsername] = useState(user.username);
+  const [fullName, setFullName] = useState(user.name?.trim() || '');
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameError, setNameError] = useState('');
+  const [nameSaved, setNameSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -642,6 +646,10 @@ export default function Profile({
     setUsername(user.username);
   }, [user.username]);
 
+  useEffect(() => {
+    setFullName(user.name?.trim() || '');
+  }, [user.name]);
+
   const heatmap = useMemo(
     () =>
       buildHeatmap(
@@ -728,6 +736,30 @@ export default function Profile({
       }
     } finally {
       setSaving(false);
+    }
+  };
+
+  const saveFullName = async () => {
+    const next = fullName.trim().replace(/\s+/g, ' ');
+    if (next === (user.name?.trim() || '')) {
+      setNameError('');
+      return;
+    }
+    if (next.length < 2) {
+      setNameError('Full name must be at least 2 characters.');
+      return;
+    }
+    setNameError('');
+    setNameSaving(true);
+    try {
+      const res: any = await authApi.updateProfile({ name: next });
+      onUserUpdate(withLocalAvatar(res.user));
+      setNameSaved(true);
+      window.setTimeout(() => setNameSaved(false), 1800);
+    } catch (e: any) {
+      setNameError(String(e?.message || '') || 'Unable to update name.');
+    } finally {
+      setNameSaving(false);
     }
   };
 
@@ -957,15 +989,45 @@ export default function Profile({
 
         <Row title="Full name">
           <div className="w-full sm:w-[280px]">
-            <input
-              value={displayName}
-              readOnly
-              aria-label="Full name"
-              title="Your name comes from your sign-in provider"
-              className={`${inputClass} cursor-default`}
-            />
+            <div className="relative">
+              <input
+                id="profile-full-name"
+                value={fullName}
+                placeholder={displayName}
+                onChange={event => {
+                  setFullName(event.target.value);
+                  if (nameError) setNameError('');
+                }}
+                onBlur={() => void saveFullName()}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') event.currentTarget.blur();
+                  if (event.key === 'Escape') {
+                    setFullName(user.name?.trim() || '');
+                    setNameError('');
+                    event.currentTarget.blur();
+                  }
+                }}
+                aria-label="Full name"
+                aria-invalid={Boolean(nameError)}
+                className={`${inputClass} pr-9 ${nameError ? '!border-[#d9534f]' : ''}`}
+                autoComplete="name"
+                maxLength={100}
+              />
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400" aria-live="polite">
+                {nameSaving ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : nameSaved ? (
+                  <Check className="h-4 w-4 text-[#2e7d32] dark:text-[#81c784]" strokeWidth={2.2} />
+                ) : null}
+              </span>
+            </div>
           </div>
         </Row>
+        {nameError && (
+          <p role="alert" className="-mt-2 pb-3 text-sm text-[#b3261e] dark:text-[#f2b8b5] sm:text-right">
+            {nameError}
+          </p>
+        )}
 
         <Row title="What should Twinkle call you?">
           <div className="w-full sm:w-[280px]">
