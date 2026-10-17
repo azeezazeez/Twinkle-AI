@@ -6,7 +6,7 @@ import {
   ImageIcon,
   LogOut,
   Minus,
-  Pencil, 
+  Pencil,
   Plus,
   RefreshCw,
   Trash2,
@@ -346,7 +346,7 @@ function CropPhotoModal({
         className="w-full max-w-[500px] rounded-2xl bg-white p-[30px] shadow-2xl dark:bg-[#30302E]"
       >
         <h3 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">Crop photo</h3>
-        <p className="mt-2 text-[15px] leading-5 text-zinc-600 dark:text-zinc-400">
+        <p className="mt-2 text-[14px] leading-5 text-zinc-600 dark:text-zinc-400">
           Drag or use the arrow keys to reposition. Use the slider or scroll to zoom.
         </p>
 
@@ -420,7 +420,7 @@ function CropPhotoModal({
           <button
             type="button"
             onClick={reset}
-            className="rounded-lg px-2 py-1.5 text-[15px] text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+            className="rounded-lg px-2 py-1.5 text-[14px] text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
           >
             Reset
           </button>
@@ -864,7 +864,7 @@ export default function Profile({
   };
 
   const inputClass =
-    'h-10 w-full rounded-lg border border-zinc-300/70 bg-white px-3 text-[15px] text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-zinc-500 dark:border-white/15 dark:bg-transparent dark:text-white dark:focus:border-white/40';
+    'h-9 w-full rounded-lg border border-zinc-300/70 bg-white px-3 text-[14px] text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-zinc-500 dark:border-white/15 dark:bg-transparent dark:text-white dark:focus:border-white/40';
 
   const refreshAction = (
     <Btn onClick={() => void refreshStats()} disabled={refreshing} label="Refresh activity">
@@ -927,7 +927,7 @@ export default function Profile({
                       type="button"
                       role="menuitem"
                       onClick={item.action}
-                      className="flex h-10 w-full items-center gap-3 rounded-lg px-2.5 text-left text-[15px] text-zinc-900 transition-colors hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-white/10"
+                      className="flex h-10 w-full items-center gap-3 rounded-lg px-2.5 text-left text-[14px] text-zinc-900 transition-colors hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-white/10"
                     >
                       <item.icon className="h-[18px] w-[18px]" strokeWidth={1.6} />
                       {item.label}
@@ -938,7 +938,7 @@ export default function Profile({
                       type="button"
                       role="menuitem"
                       onClick={removePhoto}
-                      className="flex h-10 w-full items-center gap-3 rounded-lg px-2.5 text-left text-[15px] text-[#b3261e] transition-colors hover:bg-[#fdf1f0] dark:text-[#f2b8b5] dark:hover:bg-[#2a0f12]"
+                      className="flex h-10 w-full items-center gap-3 rounded-lg px-2.5 text-left text-[14px] text-[#b3261e] transition-colors hover:bg-[#fdf1f0] dark:text-[#f2b8b5] dark:hover:bg-[#2a0f12]"
                     >
                       <Trash2 className="h-[18px] w-[18px]" strokeWidth={1.6} />
                       Remove
@@ -1017,15 +1017,15 @@ export default function Profile({
       <Section title="Account">
         {user.email && (
           <Row title="Email">
-            <span className="break-all text-[15px] text-zinc-700 dark:text-zinc-300">{user.email}</span>
+            <span className="break-all text-[14px] text-zinc-700 dark:text-zinc-300">{user.email}</span>
           </Row>
         )}
         <Row title="Signed in with">
-          <span className="text-[15px] text-zinc-700 dark:text-zinc-300">{providerLabel}</span>
+          <span className="text-[14px] text-zinc-700 dark:text-zinc-300">{providerLabel}</span>
         </Row>
         {memberSinceLabel && (
           <Row title="Member since">
-            <span className="text-[15px] text-zinc-700 dark:text-zinc-300">{memberSinceLabel}</span>
+            <span className="text-[14px] text-zinc-700 dark:text-zinc-300">{memberSinceLabel}</span>
           </Row>
         )}
         <Row title="Log out" desc="Sign out of Twinkle on this device.">
@@ -1068,7 +1068,7 @@ export default function Profile({
                 <p className="text-sm text-zinc-500 dark:text-zinc-400">{label}</p>
                 <Icon className="h-4 w-4 text-zinc-400" strokeWidth={1.6} />
               </div>
-              <p className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">{value}</p>
+              <p className="mt-1 text-xl font-semibold tracking-tight text-zinc-900 dark:text-white">{value}</p>
             </div>
           ))}
         </div>
@@ -1076,7 +1076,7 @@ export default function Profile({
         <div className="mt-3 rounded-xl border border-zinc-200 bg-white p-5 dark:border-white/10 dark:bg-transparent">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h3 className="text-[15px] font-medium text-zinc-900 dark:text-white">Token activity</h3>
+              <h3 className="text-[14px] font-medium text-zinc-900 dark:text-white">Token activity</h3>
               <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
                 Darker squares mean heavier responses that day.
               </p>
@@ -1173,8 +1173,8 @@ export default function Profile({
             key={label}
             className="flex items-center justify-between gap-4 border-b border-zinc-200/70 py-4 last:border-0 dark:border-white/10"
           >
-            <p className="text-[15px] text-zinc-900 dark:text-zinc-50">{label}</p>
-            <p className="text-[15px] text-zinc-600 dark:text-zinc-300">{value}</p>
+            <p className="text-[14px] text-zinc-900 dark:text-zinc-50">{label}</p>
+            <p className="text-[14px] text-zinc-600 dark:text-zinc-300">{value}</p>
           </div>
         ))}
         <p className="mt-4 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
