@@ -39,7 +39,7 @@ const ShareChatModal: React.FC<ShareChatModalProps> = ({
   const [copied, setCopied] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const isConversation = mode === 'conversation';
-  const title = isConversation ? 'Share chat' : 'Share prompt';
+  const title = 'Share chat';
   const description = shareDescription || (isConversation
     ? 'Anyone with this link can view this conversation. Messages you send afterwards are not shared.'
     : 'Anyone with this link can open Twinkle AI with this prompt ready to send.');
@@ -143,14 +143,14 @@ const ShareChatModal: React.FC<ShareChatModalProps> = ({
             {/* Prompt preview, styled like the requested ChatGPT share dialog. */}
             <div className="mt-4 min-h-[150px] max-h-[42dvh] flex-1 overflow-y-auto rounded-xl border border-zinc-200 bg-[#fcfcfc] p-3 dark:border-zinc-700 dark:bg-zinc-950/30 sm:mt-5 sm:min-h-[230px] sm:p-5">
               <div className="ml-auto max-w-[min(100%,560px)] rounded-[22px] bg-[#f0f0f0] px-4 py-3 text-[14px] leading-6 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100 sm:px-5 sm:text-[15px] sm:leading-7">
-                <p className="whitespace-pre-wrap break-words">{promptText.trim() || (isConversation ? 'Untitled chat' : 'Your shared prompt preview will appear here.')}</p>
+                <p className="whitespace-pre-wrap break-words">{promptText.trim() || 'Untitled chat'}</p>
               </div>
             </div>
 
             <div className="mt-4 flex items-start gap-3 sm:mt-5">
               <Globe className="mt-0.5 h-5 w-5 shrink-0 text-zinc-900 dark:text-zinc-100" strokeWidth={1.8} />
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{isConversation ? 'Share a public link to this chat' : 'Share a public link to this prompt'}</p>
+                <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Share a public link to this chat</p>
                 <p className="mt-1 text-sm leading-5 text-zinc-500 dark:text-zinc-400">{description}</p>
               </div>
             </div>
