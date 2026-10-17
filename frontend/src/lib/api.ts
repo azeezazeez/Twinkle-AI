@@ -15,7 +15,50 @@ const MAX_TOTAL_IMAGE_BYTES = 15 * 1024 * 1024;
 
 /* Live context is fetched only for requests that ask about current weather,
    location, date, or time. Browser location is requested only when needed. */
+/* ---------- Custom assistant name ----------
+   When the user tells the assistant what to call it ("call yourself Nova",
+   "your name is Nova"), the name is stored in this browser and sent with every
+   request so every model, in every chat, answers to it. */
+const ASSISTANT_NAME_KEY = 'twinkle_assistant_name';
+const ASSISTANT_NAME_RESET = /\b(?:reset|forget|remove|clear)\s+(?:your|the)\s+(?:custom\s+)?(?:name|nickname)\b|\b(?:call|name)\s+(?:yourself|you)\s+(?:twinkle(?:\s+ai)?)\s+again\b/i;
+const ASSISTANT_NAME_PATTERN = /(?:\byour\s+name\s+(?:is|will\s+be|shall\s+be)|\bcall\s+yourself|\bchange\s+your\s+name\s+to|\brename\s+yourself\s+(?:to|as)|\bfrom\s+now\s+on,?\s+you(?:'re|\u2019re|\s+are)\s+(?:called|named)?|\b(?:i(?:'ll|\u2019ll|\s+will|\s+want\s+to|\s+wanna|'d\s+like\s+to|\s+would\s+like\s+to)?|let\s+me|(?:can|could|may)\s+i)\s+call\s+you|\bi\s+want\s+you\s+to\s+be\s+called|\byou(?:'re|\u2019re|\s+are)\s+now\s+(?:called|named)|\byou\s+will\s+be\s+called|\bgo\s+by)\s+["\u201c']?([A-Za-z][A-Za-z0-9'\u2019\- ]{0,29}?)["\u201d']?(?=\s*[.!,;]|\s*\?|\s+(?:from|and|ok|okay|please|now|instead|always|forever|ok)\b|\s*$)/i;
+const ASSISTANT_NAME_STOPWORDS = /^(?:a|an|the|it|that|this|what|who|not|called|named|ai|assistant|bot|chatbot|me|you|your|my|something|anything|different|another|else)$/i;
+
+const getAssistantName = (): string => {
+  try { return (localStorage.getItem(ASSISTANT_NAME_KEY) || '').trim(); } catch { return ''; }
+};
+const clearAssistantName = () => {
+  try { localStorage.removeItem(ASSISTANT_NAME_KEY); } catch { /* storage blocked */ }
+};
+
+const learnAssistantName = (message: string) => {
+  const text = (message || '').trim();
+  if (!text || text.length > 300) return;
+  if (ASSISTANT_NAME_RESET.test(text)) { clearAssistantName(); return; }
+  const match = ASSISTANT_NAME_PATTERN.exec(text);
+  if (!match) return;
+  // A plain question ("is your name Nova?") is not a request to rename.
+  if (/\?\s*$/.test(text) && !/\b(?:can|could|may)\s+i\s+call\s+you\b/i.test(text)) return;
+  const name = match[1].trim().replace(/\s+/g, ' ');
+  if (!name || name.length > 30 || ASSISTANT_NAME_STOPWORDS.test(name)) return;
+  if (/^twinkle(?:\s+ai)?$/i.test(name)) { clearAssistantName(); return; }
+  try { localStorage.setItem(ASSISTANT_NAME_KEY, name); } catch { /* storage blocked */ }
+};
+
+const assistantNameContext = (): string => {
+  const name = getAssistantName();
+  if (!name) return '';
+  return `ASSISTANT NAME SET BY THE USER: The user has chosen to call you "${name}". Use "${name}" as your own name from now on: when you introduce yourself or are asked your name, say you are ${name}. If the user has just asked you to take this name, accept it briefly and warmly (for example: "Got it, you can call me ${name}."). Do not call yourself Twinkle AI unless the user asks about the product.`;
+};
+
 const getLiveContext = async (message: string): Promise<string | undefined> => {
+  learnAssistantName(message);
+  const persona = assistantNameContext();
+  const live = await getVerifiedLiveContext(message);
+  return [persona, live].filter(Boolean).join('\n\n') || undefined;
+};
+
+const getVerifiedLiveContext = async (message: string): Promise<string | undefined> => {
   const query = (message || '').toLowerCase();
   const asksTime = /\b(time|date|today|current day|what day|timezone|time zone|right now)\b/.test(query);
   const asksWeather = /\b(weather|temperature|forecast|rain|raining|wind speed|humidity|sunrise|sunset)\b/.test(query);
@@ -863,25 +906,29 @@ export const authApi = {
      LOGOUT
      ======================================================= */
 
-  logout: () =>
-    fetchWithAuth(
+  logout: () => {
+    clearAssistantName();
+    return fetchWithAuth(
       `${API_BASE}/auth/logout`,
       {
         method: 'POST',
       }
-    ),
+    );
+  },
 
   /* =======================================================
      LOG OUT OF ALL DEVICES
      ======================================================= */
 
-  logoutAll: () =>
-    fetchWithAuth(
+  logoutAll: () => {
+    clearAssistantName();
+    return fetchWithAuth(
       `${API_BASE}/auth/logout-all`,
       {
         method: 'POST',
       }
-    ),
+    );
+  },
 
   /* =======================================================
      DELETE ACCOUNT (permanent)
