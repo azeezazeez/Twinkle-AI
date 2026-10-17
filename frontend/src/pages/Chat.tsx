@@ -495,7 +495,7 @@ function ImageGenerationProgress({ prompt }: { prompt: string }) {
 /** Hides an image whose Markdown is still streaming in (partial base64), so raw data is never shown. */
 function maskIncompleteImages(text: string): string {
   if (!text || text.indexOf('![') < 0) return text;
-  return text.replace(/!\[[^\]]*(?:\]\([^)]*)?$/, '\n\n*Generating image…*');
+  return text.replace(/!\[[^\]]*(?:\]\([^)]*)?$/, '\n\n*Generating image*');
 }
 
 /** "Generate a Person Image." -> "person-image"; falls back to the full text, then "twinkle-image". */
@@ -915,8 +915,19 @@ const ResponseStatusText = ({ hasFiles = false }: { hasFiles?: boolean }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasFiles]);
 
+  // Live elapsed-seconds counter shown after the status text.
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    setSeconds(0);
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      setSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   return (
-    <span className="inline-flex" aria-label={phrases[index]}>
+    <span className="inline-flex items-baseline gap-1.5" aria-label={`${phrases[index]}, ${seconds} seconds`}>
       <AnimatePresence mode="wait" initial={false}>
         <motion.span
           key={index}
@@ -932,6 +943,9 @@ const ResponseStatusText = ({ hasFiles = false }: { hasFiles?: boolean }) => {
           {phrases[index]}
         </motion.span>
       </AnimatePresence>
+      <span className="text-[13px] font-normal tabular-nums text-zinc-400 dark:text-zinc-500" aria-hidden="true">
+        {seconds}s
+      </span>
     </span>
   );
 };
@@ -4264,14 +4278,6 @@ if (isBlankDraft) {
 
 
   /**
-   * Called by LiveTalkModal only after its final turn has been persisted.
-   * Make that saved Live Talk session the active chat immediately so the
-   * normal chat area displays the complete transcript without a refresh.
-   */
-  const currentSessionIdRef = useRef<number | null>(currentSessionId);
-  currentSessionIdRef.current = currentSessionId;
-
-  /**
    * Fired the moment Live Talk ends. Shows the conversation immediately from
    * the local transcript while the final save/title work finishes in the
    * background; handleLiveSessionComplete then swaps in the saved copy.
@@ -4953,20 +4959,6 @@ if (isBlankDraft) {
                     </div>
                     <div className="flex min-h-[24px] items-center border-0 bg-transparent shadow-none rounded-none">
                       <ResponseStatusText hasFiles={responseHasFiles} />
-                      <motion.span
-                        className="ml-0.5 inline-flex gap-0.5 text-[14px] font-normal text-zinc-500 dark:text-zinc-400"
-                        aria-hidden="true"
-                      >
-                        {[0, 1, 2].map((dot) => (
-                          <motion.span
-                            key={dot}
-                            animate={{ opacity: [0.25, 1, 0.25], y: [0, -3, 0] }}
-                            transition={{ duration: 0.8, repeat: Infinity, delay: dot * 0.16, ease: 'easeInOut' }}
-                          >
-                            .
-                          </motion.span>
-                        ))}
-                      </motion.span>
                     </div>
                   </motion.div>
                 )}
