@@ -1,25 +1,19 @@
-// AudioWorklet source for Twinkle Live Talk.
-//
-// IMPORTANT:
-// This file intentionally contains JavaScript-compatible TypeScript only.
-// LiveTalkModal imports it with ?raw and loads it through a Blob with the
-// explicit application/javascript MIME type. This prevents Vite/Vercel from
-// guessing the MIME type from the .ts extension.
-
 class TwinklePcmCaptureProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
 
     this.inputRate = sampleRate;
     this.targetRate = 16000;
+   
+    this.chunkSamples = 320;
+    this.pending = new Int16Array(this.chunkSamples * 2);
+    this.pendingLength = 0;
   }
 
   process(inputs, outputs) {
     const input = inputs[0]?.[0];
     const output = outputs[0]?.[0];
 
-    // Keep the audio graph alive. LiveTalkModal routes this through a gain
-    // node whose value is 0, so microphone audio is never played back.
     if (output && input) {
       const length = Math.min(output.length, input.length);
 
@@ -74,10 +68,19 @@ class TwinklePcmCaptureProcessor extends AudioWorkletProcessor {
           : clamped * 0x7fff;
     }
 
-    this.port.postMessage(
-      pcm.buffer,
-      [pcm.buffer],
-    );
+    if (this.pendingLength + pcm.length > this.pending.length) {
+      const grown = new Int16Array((this.pendingLength + pcm.length) * 2);
+      grown.set(this.pending.subarray(0, this.pendingLength));
+      this.pending = grown;
+    }
+    this.pending.set(pcm, this.pendingLength);
+    this.pendingLength += pcm.length;
+
+    if (this.pendingLength >= this.chunkSamples) {
+      const out = this.pending.slice(0, this.pendingLength);
+      this.pendingLength = 0;
+      this.port.postMessage(out.buffer, [out.buffer]);
+    }
 
     return true;
   }
