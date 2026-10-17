@@ -19,6 +19,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import type { User } from '../types';
 import { authApi, chatApi } from '../lib/api';
 import UserAvatar from '../components/UserAvatar';
+import ConfirmationModal from '../components/ConfirmationModal';
 import { Btn, Row, Section, SettingsShell } from './Settings';
 
 // ── Local avatar helpers ────────────────────────────────────────────────────
@@ -507,6 +508,9 @@ export default function Profile({
   const [photoError, setPhotoError] = useState('');
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState('');
+  const [confirmAccount, setConfirmAccount] = useState<'logoutAll' | 'delete' | null>(null);
+  const [accountBusy, setAccountBusy] = useState(false);
+  const [accountError, setAccountError] = useState('');
   const fileInput = useRef<HTMLInputElement | null>(null);
   const photoMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -827,6 +831,38 @@ export default function Profile({
     }
   };
 
+  // "Log out of all devices": ends every session of this account, including this one.
+  const logOutEverywhere = async () => {
+    setAccountBusy(true);
+    setAccountError('');
+    try {
+      await authApi.logoutAll();
+      window.location.assign('/login');
+    } catch (e: any) {
+      setAccountError(String(e?.message || 'Could not log out of all devices. Please try again.'));
+      setAccountBusy(false);
+      setConfirmAccount(null);
+    }
+  };
+
+  // "Delete your account": permanently removes the account and all its data.
+  const deleteAccount = async () => {
+    setAccountBusy(true);
+    setAccountError('');
+    try {
+      await authApi.deleteAccount();
+      try {
+        localStorage.clear();
+        sessionStorage.clear();
+      } catch { /* storage may be blocked */ }
+      window.location.assign('/login');
+    } catch (e: any) {
+      setAccountError(String(e?.message || 'Could not delete your account. Please try again.'));
+      setAccountBusy(false);
+      setConfirmAccount(null);
+    }
+  };
+
   const inputClass =
     'h-10 w-full rounded-lg border border-zinc-300/70 bg-white px-3 text-[15px] text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-zinc-500 dark:border-white/15 dark:bg-transparent dark:text-white dark:focus:border-white/40';
 
@@ -1003,6 +1039,21 @@ export default function Profile({
             {logoutError}
           </p>
         )}
+        <Row title="Log out of all devices" desc="Sign out of Twinkle everywhere you are logged in, including this device.">
+          <Btn onClick={() => setConfirmAccount('logoutAll')} disabled={accountBusy}>
+            Log out
+          </Btn>
+        </Row>
+        <Row title="Delete your account" desc="Permanently delete your account, chats and knowledge-base files. This cannot be undone.">
+          <Btn variant="primary" onClick={() => setConfirmAccount('delete')} disabled={accountBusy}>
+            Delete account
+          </Btn>
+        </Row>
+        {accountError && (
+          <p role="alert" className="-mt-2 pb-3 text-sm text-[#b3261e] dark:text-[#f2b8b5] sm:text-right">
+            {accountError}
+          </p>
+        )}
       </Section>
 
       {/* ACTIVITY */}
@@ -1131,6 +1182,28 @@ export default function Profile({
           Live account data · Updates automatically every 30 seconds.
         </p>
       </Section>
+
+      <ConfirmationModal
+        isOpen={confirmAccount === 'logoutAll'}
+        onClose={() => setConfirmAccount(null)}
+        onConfirm={() => void logOutEverywhere()}
+        isLoading={accountBusy}
+        closeOnConfirm={false}
+        title="Log out of all devices?"
+        message="You will be signed out of Twinkle on every device, including this one, and will need to log in again."
+        confirmText="Log out everywhere"
+        isDestructive={false}
+      />
+      <ConfirmationModal
+        isOpen={confirmAccount === 'delete'}
+        onClose={() => setConfirmAccount(null)}
+        onConfirm={() => void deleteAccount()}
+        isLoading={accountBusy}
+        closeOnConfirm={false}
+        title="Delete your account?"
+        message="This permanently deletes your account, all of your chats and your knowledge-base files. This action cannot be undone."
+        confirmText="Delete account"
+      />
 
       <AnimatePresence>
         {cropSrc && <CropPhotoModal key="crop" src={cropSrc} onCancel={() => setCropSrc(null)} onSave={applyAvatar} />}
