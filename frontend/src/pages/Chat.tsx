@@ -17,7 +17,6 @@ import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw';
 import {
   Copy, Check, Edit2, Pencil, Upload, Volume2, VolumeX, Share2, CheckCircle2, LoaderCircle,
   X, RotateCcw, RotateCw, Download, ChevronDown, Eye, Zap, Brain, Plus, FileText, Mic, AudioLines,
-  Paperclip, Camera,
 } from 'lucide-react';
 
 import ReactMarkdown from 'react-markdown';
@@ -636,8 +635,7 @@ const ResponseStatusText = ({ hasFiles = false }: { hasFiles?: boolean }) => {
       <AnimatePresence mode="wait" initial={false}>
         <motion.span
           key={index}
-          className="twinkle-thinking-label text-[14px] font-normal"
-          style={{ color: 'var(--text-muted)' }}
+          className="twinkle-thinking-label text-[14px] font-normal text-zinc-500 dark:text-zinc-400"
           initial={{ opacity: 0, y: 4 }}
           animate={{ opacity: [0.55, 1, 0.55], y: 0 }}
           exit={{ opacity: 0, y: -4, transition: { duration: 0.16 } }}
@@ -1323,7 +1321,15 @@ ${textToRead}` }] }], turnComplete: true },
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareLoading, setShareLoading] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
-  const [shareMode, setShareMode] = useState<'prompt' | 'conversation'>('prompt');
+  const [shareSuccessVisible, setShareSuccessVisible] = useState(false);
+
+  // Auto-dismiss the "Public link copied" notification after 5 seconds.
+  useEffect(() => {
+    if (!shareSuccessVisible) return;
+    const timer = window.setTimeout(() => setShareSuccessVisible(false), 5000);
+    return () => window.clearTimeout(timer);
+  }, [shareSuccessVisible]);
+  const [topShareBusy, setTopShareBusy] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [desktopSidebarExpanded, setDesktopSidebarExpanded] = useState(false);
   const [desktopSidebarWidth, setDesktopSidebarWidth] = useState<number>(() => {
@@ -2091,107 +2097,7 @@ ${textToRead}` }] }], turnComplete: true },
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewText, setPreviewText] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
-  const attachMenuRef = useRef<HTMLDivElement>(null);
-
-  // Close the "+" menu on outside click or Escape.
-  useEffect(() => {
-    if (!attachMenuOpen) return;
-    const onPointerDown = (event: MouseEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.closest?.('[data-attach-trigger]')) return; // the + button toggles the menu itself
-      if (attachMenuRef.current && !attachMenuRef.current.contains(target as Node)) {
-        setAttachMenuOpen(false);
-      }
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setAttachMenuOpen(false);
-    };
-    document.addEventListener('mousedown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [attachMenuOpen]);
-
-  // Ctrl/Cmd+U opens the "Upload or add files" popup, matching the shortcut shown in the menu.
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'u') {
-        event.preventDefault();
-        setAttachMenuOpen(false);
-        setUploadModalOpen(true);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
-
-  // "Add files or photos" opens the upload popup. The popup's "Choose files"
-  // button (below) is what opens the native file picker.
-  const handleChooseFiles = () => {
-    setAttachMenuOpen(false);
-    setUploadModalOpen(true);
-  };
-
-  // Captures one frame of a screen, window or tab the user picks and attaches it
-  // as a PNG through the same pipeline as normally selected files.
-  const handleTakeScreenshot = async () => {
-    setAttachMenuOpen(false);
-    if (!navigator.mediaDevices?.getDisplayMedia) {
-      window.alert('Screenshots are not supported in this browser.');
-      return;
-    }
-
-    let stream: MediaStream | null = null;
-    try {
-      stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-    } catch (error: any) {
-      // Cancelling the browser's picker is not an error.
-      if (error?.name !== 'NotAllowedError' && error?.name !== 'AbortError') {
-        console.error('Screenshot capture failed:', error);
-        window.alert('The screenshot could not be captured. Please try again.');
-      }
-      return;
-    }
-
-    try {
-      const video = document.createElement('video');
-      video.srcObject = stream;
-      video.muted = true;
-      video.playsInline = true;
-      await video.play();
-      // Give the first real frame a moment to arrive after the picker closes.
-      await new Promise(resolve => window.setTimeout(resolve, 350));
-
-      const width = video.videoWidth;
-      const height = video.videoHeight;
-      if (!width || !height) throw new Error('No frame available');
-
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const context = canvas.getContext('2d');
-      if (!context) throw new Error('Canvas unavailable');
-      context.drawImage(video, 0, 0, width, height);
-
-      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
-      if (!blob) throw new Error('Could not encode screenshot');
-
-      const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
-      const file = new File([blob], `Screenshot ${stamp}.png`, { type: 'image/png', lastModified: Date.now() });
-      const transfer = new DataTransfer();
-      transfer.items.add(file);
-      await handleFileSelection(transfer.files);
-    } catch (error) {
-      console.error('Screenshot capture failed:', error);
-      window.alert('The screenshot could not be captured. Please try again.');
-    } finally {
-      stream.getTracks().forEach(track => track.stop());
-    }
-  };
 
 
   // Theme
@@ -3729,7 +3635,6 @@ if (isBlankDraft) {
       return null;
     }
 
-    setShareMode('prompt');
     setShareSessionId(_sid);
     setShareCutoffMessageId(messageId ?? null);
     setSharePromptText(prompt);
@@ -3751,46 +3656,48 @@ if (isBlankDraft) {
     return url;
   };
 
-  // Top-right Share: only opens the share dialog for the current conversation.
-  // A public link is created when the user asks for it inside the dialog.
-  const handleTopShare = () => {
-    setShareMode('conversation');
-    setShareCutoffMessageId(null);
-    setShareUrl(null);
-    setShareLoading(false);
-    setSharePromptText(
-      sessions.find(session => session.id === currentSessionId)?.sessionName || ''
-    );
+  const handleTopShare = async () => {
+    if (topShareBusy) return;
     if (currentSessionId === null) {
       setShareError('Start a conversation before creating a public link.');
       setShareSessionId(-1);
       return;
     }
-    setShareError(null);
-    setShareSessionId(currentSessionId);
-  };
 
-  // Creates the real public share for the current conversation on the backend.
-  const handleCreateShareLink = async () => {
-    if (currentSessionId === null || shareLoading) return;
-    setShareLoading(true);
+    setTopShareBusy(true);
+    setShareSuccessVisible(false);
     setShareError(null);
     try {
+      // Create a real public share for the whole current session on the backend.
       const response = await chatApi.shareSession(currentSessionId) as any;
       const shareToken = response?.shareToken;
       if (!response?.success || !shareToken) {
         throw new Error(response?.error || 'Could not create a public link.');
       }
-      setShareUrl(`${window.location.origin}/shared/${encodeURIComponent(shareToken)}`);
+
+      const url = `${window.location.origin}/shared/${encodeURIComponent(shareToken)}`;
+      if (!navigator.clipboard?.writeText) {
+        setShareUrl(url);
+        setShareSessionId(currentSessionId);
+        setSharePromptText('');
+        setShareError('The public link was created, but clipboard access is unavailable. Copy the link from the share dialog.');
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+
+      setShareUrl(url);
+      setShareSuccessVisible(true);
+      setShareSessionId(null);
+      setShareError(null);
     } catch (error) {
-      setShareError(error instanceof Error ? error.message : 'Could not create a public link. Please try again.');
+      setShareError(error instanceof Error ? error.message : 'Could not create or copy the public link.');
+      setShareSessionId(currentSessionId);
     } finally {
-      setShareLoading(false);
+      setTopShareBusy(false);
     }
   };
 
   const closeShareModal = () => {
-    setShareMode('prompt');
     setShareSessionId(null);
     setShareCutoffMessageId(null);
     setSharePromptText('');
@@ -4049,20 +3956,42 @@ if (isBlankDraft) {
       />
       <main
         className="relative ml-0 flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent transition-[margin] duration-300 ease-out lg:ml-[var(--desktop-sidebar-offset)]"
-        style={{ '--desktop-sidebar-offset': `${desktopSidebarExpanded ? desktopSidebarWidth : 0}px` } as React.CSSProperties}
+        style={{ '--desktop-sidebar-offset': `${desktopSidebarExpanded ? desktopSidebarWidth : 52}px` } as React.CSSProperties}
       >
-        <div className="absolute right-6 top-4 z-[9998]">
+        <div className="absolute right-4 top-3 z-[9998]">
           <button
             type="button"
-            onClick={handleTopShare}
-            className="group relative hidden sm:inline-flex h-9 items-center gap-2 rounded-lg px-3 text-[14px] font-medium text-zinc-900 transition-colors hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
+            onClick={() => void handleTopShare()}
+            disabled={topShareBusy}
+            className="group relative hidden h-9 items-center gap-2 rounded-lg border border-zinc-300/70 bg-white px-3.5 text-sm font-medium text-zinc-900 transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 disabled:cursor-wait disabled:opacity-70 sm:inline-flex dark:border-white/15 dark:bg-transparent dark:text-zinc-100 dark:hover:bg-white/5"
             aria-label="Share"
-            aria-haspopup="dialog"
           >
-            <Upload className="h-4 w-4" strokeWidth={1.8} aria-hidden="true" />
-            <span>Share</span>
+            {topShareBusy && <LoaderCircle className="h-4 w-4 animate-spin" strokeWidth={2} aria-hidden="true" />}
+            <span>{topShareBusy ? 'Creating link…' : 'Share'}</span>
+            <span className="pointer-events-none absolute right-0 top-[calc(100%+8px)] hidden whitespace-nowrap rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white shadow-lg group-hover:block group-focus-visible:block dark:bg-white dark:text-zinc-900">
+              Create a public link
+            </span>
           </button>
         </div>
+        {shareSuccessVisible && typeof document !== 'undefined' && createPortal(
+          <div role="status" aria-live="polite" className="fixed left-1/2 top-4 sm:top-6 z-[2147483647] flex w-[min(680px,calc(100vw-24px))] max-w-full -translate-x-1/2 items-center gap-3 sm:gap-4 rounded-2xl px-4 py-3 sm:px-5 sm:py-4 text-white shadow-[0_16px_48px_rgba(0,0,0,0.28)]" style={{ backgroundColor: "#16a34a", color: "#ffffff" }}>
+            <CheckCircle2 className="h-6 w-6 shrink-0" strokeWidth={2.2} />
+            <div className="min-w-0 flex-1">
+              <p className="text-base font-semibold">Public link copied</p>
+              <p className="text-sm leading-snug">Anyone with the link can view this conversation.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => { setShareSuccessVisible(false); setShareError(null); setShareSessionId(currentSessionId ?? -1); }}
+              className="shrink-0 rounded-full border border-white/50 !bg-[#16a34a] px-3 py-2 text-sm font-semibold !text-white transition-colors hover:!bg-[#15803d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:px-4"
+              style={{ backgroundColor: '#16a34a', color: '#ffffff' }}
+            >Manage links</button>
+            <button type="button" onClick={() => setShareSuccessVisible(false)} aria-label="Close notification" className="shrink-0 rounded-full !bg-[#16a34a] p-1.5 !text-white transition-colors hover:!bg-[#15803d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white" style={{ backgroundColor: '#16a34a', color: '#ffffff' }}>
+              <X className="h-5 w-5 text-white" />
+            </button>
+          </div>,
+          document.body
+        )}
         {/* Mobile header */}
         <header
           className="lg:hidden absolute top-0 inset-x-0 z-[9997] h-14 flex items-center justify-between px-3 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800"
@@ -4113,7 +4042,7 @@ if (isBlankDraft) {
             {messages.length === 0 && !isTyping ? (
               <div
                 ref={emptyGreetingRef}
-                className="twinkle-greeting mx-auto flex w-full min-w-0 -translate-y-[32px] items-center justify-center gap-2.5 px-2 text-left"
+                className="twinkle-greeting mx-auto flex w-full min-w-0 -translate-y-[32px] items-center justify-center gap-3 px-2 text-left"
               >
                 <motion.span
                   initial={{ scale: 0.8, opacity: 0, rotate: -24 }}
@@ -4122,13 +4051,13 @@ if (isBlankDraft) {
                   className="twinkle-greeting-logo flex shrink-0 items-center justify-center text-[#D97757]"
                   aria-hidden="true"
                 >
-                  <StormLogo className="twinkle-chat-logo h-8 w-8 sm:h-9 sm:w-9" />
+                  <StormLogo className="twinkle-chat-logo h-9 w-9 sm:h-10 sm:w-10" />
                 </motion.span>
                 <motion.h2
                   key={chatGreeting}
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="twinkle-greeting-text min-w-0 font-serif text-[1.875rem] font-normal leading-[1.15] tracking-[-0.01em] text-zinc-900 sm:text-[2.5rem] dark:text-zinc-100"
+                  className="twinkle-greeting-text min-w-0 font-serif text-[1.875rem] font-normal leading-[1.15] tracking-[-0.01em] text-zinc-900 sm:text-[2.375rem] dark:text-zinc-100"
                 >
                   {chatGreeting.replace(/\s*(?:\p{Extended_Pictographic}\uFE0F?(?:\u200D\p{Extended_Pictographic}\uFE0F?)*)+\s*$/u, '')}
                 </motion.h2>
@@ -4460,6 +4389,12 @@ if (isBlankDraft) {
                                       className="twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-300 transition-all touch-manipulation">
                                       {copiedId === msg.id ? <Check className="w-4 h-4 md:w-3.5 md:h-3.5" /> : <Copy className="w-4 h-4 md:w-3.5 md:h-3.5" />}
                                     </button>
+                                    <button type="button" onClick={() => {
+                                      if (currentSessionId !== null) void shareSession(currentSessionId, msg.id, msg.content);
+                                    }} data-tooltip="Share prompt" aria-label="Share prompt"
+                                      className="twinkle-tooltip-trigger hidden sm:inline-flex p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-300 transition-all touch-manipulation">
+                                      <Upload className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                                    </button>
                                     {!isEditing && !isTyping && (
                                       <button type="button" onClick={() => void handleRetryMessage(msg)} data-tooltip="Retry" aria-label="Retry message"
                                         className="twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-300 transition-all touch-manipulation">
@@ -4539,8 +4474,7 @@ if (isBlankDraft) {
                     <div className="flex min-h-[24px] items-center border-0 bg-transparent shadow-none rounded-none">
                       <ResponseStatusText hasFiles={responseHasFiles} />
                       <motion.span
-                        className="ml-0.5 inline-flex gap-0.5 text-[14px] font-normal"
-                        style={{ color: 'var(--text-muted)' }}
+                        className="ml-0.5 inline-flex gap-0.5 text-[14px] font-normal text-zinc-500 dark:text-zinc-400"
                         aria-hidden="true"
                       >
                         {[0, 1, 2].map((dot) => (
@@ -4653,60 +4587,9 @@ if (isBlankDraft) {
                   onChange={(e) => {
                     void handleFileSelection(e.target.files);
                     e.currentTarget.value = '';
-                    setAttachMenuOpen(false);
+                    setUploadModalOpen(false);
                   }}
                 />
-
-                {/* Upload popup: drag & drop or choose files */}
-                <UploadFilesModal
-                  isOpen={uploadModalOpen}
-                  onClose={() => setUploadModalOpen(false)}
-                  onChooseFiles={() => {
-                    setUploadModalOpen(false);
-                    // Called synchronously inside the click so the browser allows the picker.
-                    fileInputRef.current?.click();
-                  }}
-                  onFilesDropped={(files) => {
-                    setUploadModalOpen(false);
-                    void handleFileSelection(files);
-                  }}
-                />
-
-                {/* "+" menu: add files or take a screenshot */}
-                <AnimatePresence>
-                  {attachMenuOpen && (
-                    <motion.div
-                      ref={attachMenuRef}
-                      role="menu"
-                      aria-label="Add to message"
-                      initial={{ opacity: 0, y: 6, scale: 0.97 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 6, scale: 0.97 }}
-                      transition={{ duration: 0.14, ease: 'easeOut' }}
-                      className="absolute bottom-[54px] left-2.5 z-[300] w-[min(260px,calc(100vw-32px))] origin-bottom-left rounded-xl border border-zinc-200 bg-white p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.14)] dark:border-zinc-700 dark:bg-zinc-900"
-                    >
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={handleChooseFiles}
-                        className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[14px] text-zinc-800 transition-colors hover:bg-zinc-100 focus-visible:bg-zinc-100 focus-visible:outline-none dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:bg-zinc-800"
-                      >
-                        <Paperclip className="h-4 w-4 shrink-0 text-zinc-500 dark:text-zinc-400" strokeWidth={1.8} />
-                        <span className="flex-1">Add files or photos</span>
-                        <span className="text-[12px] text-zinc-400 dark:text-zinc-500">Ctrl+U</span>
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => void handleTakeScreenshot()}
-                        className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[14px] text-zinc-800 transition-colors hover:bg-zinc-100 focus-visible:bg-zinc-100 focus-visible:outline-none dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:bg-zinc-800"
-                      >
-                        <Camera className="h-4 w-4 shrink-0 text-zinc-500 dark:text-zinc-400" strokeWidth={1.8} />
-                        <span className="flex-1">Take a screenshot</span>
-                      </button>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
 
                 {/* Main prompt area — always above the action row */}
                 {voiceInputActive ? (
@@ -4736,13 +4619,10 @@ if (isBlankDraft) {
                     {/* Bottom row: + · dotted listening line · ✕ · ✓ */}
                     <motion.button
                       type="button"
-                      onClick={() => setAttachMenuOpen(open => !open)}
+                      onClick={() => setUploadModalOpen(true)}
                       disabled={isProcessingFiles}
-                      aria-label="Add files and more"
-                      aria-haspopup="menu"
-                      aria-expanded={attachMenuOpen}
-                      data-attach-trigger
-                      data-tooltip="Add files and more"
+                      aria-label="Attach files"
+                      data-tooltip="Attach files"
                       whileTap={{ scale: 0.94 }}
                       className="twinkle-tooltip-trigger twinkle-composer-plus flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
                     >
@@ -4827,13 +4707,10 @@ if (isBlankDraft) {
                   {/* + attachment button */}
                   <motion.button
                     type="button"
-                    onClick={() => setAttachMenuOpen(open => !open)}
+                    onClick={() => setUploadModalOpen(true)}
                     disabled={isTyping || isProcessingFiles}
-                    aria-label="Add files and more"
-                    aria-haspopup="menu"
-                    aria-expanded={attachMenuOpen}
-                    data-attach-trigger
-                    data-tooltip="Add files and more"
+                    aria-label="Attach files"
+                    data-tooltip="Attach files"
                     whileHover={{ scale: 1.04 }}
                     whileTap={{ scale: 0.94 }}
                     className="twinkle-tooltip-trigger twinkle-composer-plus group relative self-center flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-700 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-900 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-zinc-800 dark:hover:text-white"
@@ -5160,16 +5037,23 @@ if (isBlankDraft) {
       <ShareChatModal
         isOpen={shareSessionId !== null}
         shareUrl={shareUrl}
-        mode={shareMode}
-        chatName={shareMode === 'conversation' ? 'Share chat' : 'Share prompt'}
+        chatName="Share prompt"
         promptText={sharePromptText}
-        shareDescription={shareMode === 'prompt' ? 'Anyone with this link can open Twinkle AI with this prompt ready to send.' : undefined}
-        onCreateLink={shareMode === 'conversation' && currentSessionId !== null ? () => void handleCreateShareLink() : undefined}
+        shareDescription="Anyone with this link can open Twinkle AI with this prompt ready to send."
         isLoading={shareLoading}
         error={shareError}
         onClose={closeShareModal}
       />
 
+      <UploadFilesModal
+        isOpen={uploadModalOpen}
+        onClose={() => setUploadModalOpen(false)}
+        onChooseFiles={() => fileInputRef.current?.click()}
+        onFilesDropped={(files) => {
+          void handleFileSelection(files);
+          setUploadModalOpen(false);
+        }}
+      />
       <ConfirmationModal
         isOpen={modalType === 'delete-single'}
         onClose={() => setModalType('none')}
