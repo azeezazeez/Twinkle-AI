@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { Loader2, X } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
 interface ConfirmationModalProps {
   isOpen: boolean;
@@ -73,7 +73,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
             exit={{ opacity: 0 }}
             transition={{ duration: 0.15 }}
             onClick={onClose}
-            className="absolute inset-0 cursor-default border-0 bg-black/30 backdrop-blur-[1.5px]"
+            className="absolute inset-0 cursor-default border-0 bg-black/40"
           />
 
           <motion.div
@@ -84,36 +84,28 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.98, y: 5 }}
             transition={{ duration: 0.16, ease: 'easeOut' }}
-            className="relative w-full max-w-[540px] rounded-[22px] border border-zinc-200 bg-white px-6 py-6 shadow-[0_18px_45px_rgba(0,0,0,0.14)] dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-[0_18px_45px_rgba(0,0,0,0.45)] sm:px-7 sm:py-6"
+            className="relative w-full max-w-[500px] rounded-2xl bg-white p-6 shadow-[0_18px_45px_rgba(0,0,0,0.22)] dark:bg-[#30302E] dark:shadow-[0_18px_45px_rgba(0,0,0,0.5)]"
           >
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close"
-              className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full text-zinc-800 transition-colors hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-400/40 dark:text-zinc-200 dark:hover:bg-zinc-800"
-            >
-              <X className="h-[18px] w-[18px]" strokeWidth={1.8} />
-            </button>
 
             <h2
               id="confirmation-modal-title"
-              className="pr-10 text-[23px] font-normal leading-tight tracking-[-0.025em] text-zinc-900 dark:text-zinc-100"
+              className="text-[17px] font-semibold leading-snug text-zinc-900 dark:text-zinc-50"
             >
               {title}
             </h2>
 
-            <div className="mt-3.5 max-w-[470px] text-[16px] font-normal leading-[1.5] tracking-[-0.01em] text-zinc-500 dark:text-zinc-400">
+            <div className="mt-2 text-[15px] font-normal leading-[1.5] text-zinc-500 dark:text-zinc-400">
               {message}
             </div>
 
-            <div className="mt-5 flex items-center justify-end gap-2.5">
+            <div className="mt-7 flex items-center justify-end gap-3">
               <motion.button
                 ref={cancelButtonRef}
                 type="button"
                 whileTap={{ scale: 0.98 }}
                 onClick={onClose}
                 disabled={isLoading}
-                className="min-w-[92px] disabled:cursor-not-allowed disabled:opacity-50 min-w-[92px] rounded-full border border-zinc-300 bg-white px-5 py-2.5 text-[15px] font-medium text-zinc-900 transition-colors hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-400/40 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                className="h-10 min-w-[84px] rounded-lg border border-zinc-300 bg-white px-5 text-[15px] font-medium text-zinc-900 shadow-sm transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/20 dark:bg-transparent dark:text-zinc-100 dark:hover:bg-white/5"
               >
                 {cancelText}
               </motion.button>
@@ -123,10 +115,10 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                 whileTap={{ scale: 0.98 }}
                 onClick={handleConfirm}
                 disabled={isLoading}
-                className={`min-w-[108px] disabled:cursor-not-allowed disabled:opacity-70 rounded-full border-0 px-5 py-2.5 text-[15px] font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-red-500/20 ${
+                className={`h-10 min-w-[84px] rounded-lg border-0 px-5 text-[15px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-70 dark:focus-visible:ring-offset-[#30302E] ${
                   isDestructive
-                    ? 'bg-[#fbe5e7] text-[#e62f3d] hover:bg-[#f8dadd] dark:bg-[#3a2023] dark:text-[#ff6672] dark:hover:bg-[#48272b]'
-                    : 'bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200'
+                    ? 'bg-[#C93C3C] text-white hover:bg-[#B63434] focus-visible:ring-[#C93C3C]'
+                    : 'bg-zinc-900 text-white hover:bg-zinc-800 focus-visible:ring-zinc-500 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200'
                 }`}
               >
                 <span className="inline-flex items-center justify-center gap-2">
