@@ -676,7 +676,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
       if (endingRef.current || attempt !== connectAttemptRef.current) return;
 
       const socket = new WebSocket(
-        `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}`
+        `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}`
       );
       socket.binaryType = 'arraybuffer';
       socketRef.current = socket;
