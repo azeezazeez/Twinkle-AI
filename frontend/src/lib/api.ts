@@ -2,8 +2,14 @@ const API_BASE = (
   import.meta.env.VITE_API_BASE_URL || '/api'
 ).replace(/\/$/, '');
 
-const GEMINI_LIVE_WS_ENDPOINT =
-  'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained';
+export type LiveApiVersion = 'v1beta' | 'v1alpha';
+
+
+export const buildLiveSocketUrl = (
+  token: string,
+  apiVersion: LiveApiVersion = 'v1beta'
+): string =>
+  `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.${apiVersion}.GenerativeService.BidiGenerateContentConstrained?access_token=${token}`;
 
 const CHAT_RETRIES = 1;
 const RETRY_DELAY_MS = 450;
@@ -1678,6 +1684,7 @@ const previewBase64ToInt16 = (base64: string): Int16Array => {
 type CachedLiveToken = {
   token: string;
   model: string;
+  apiVersion: LiveApiVersion;
   expiresAt: string;
   newSessionExpiresAt: string;
   usesRemaining: number;
@@ -1695,6 +1702,32 @@ const invalidateCachedLiveToken = (token?: string) => {
   if (!token || cachedLiveToken.token === token) cachedLiveToken = null;
 };
 
+// Which Live API version the backend should mint tokens for. Left unset the
+// backend tries v1beta first and falls back to v1alpha. After a WebSocket
+// handshake failure the other version is tried automatically; once a version
+// connects it is pinned.
+let preferredLiveApiVersion: LiveApiVersion | null = null;
+
+const otherLiveApiVersion = (version: LiveApiVersion): LiveApiVersion =>
+  version === 'v1beta' ? 'v1alpha' : 'v1beta';
+
+/**
+ * Call when a Live WebSocket closed before it ever opened (a handshake
+ * failure, which browsers report only as code 1006). Drops the cached token
+ * and makes the next token use the other Live API version.
+ */
+export function reportLiveSocketFailure(apiVersion?: LiveApiVersion, token?: string): void {
+  invalidateCachedLiveToken(token);
+  cachedLiveToken = null;
+  const failed = apiVersion ?? preferredLiveApiVersion ?? 'v1beta';
+  preferredLiveApiVersion = otherLiveApiVersion(failed);
+}
+
+/** Call when a Live WebSocket opened successfully, so its API version is kept. */
+export function reportLiveSocketSuccess(apiVersion: LiveApiVersion): void {
+  preferredLiveApiVersion = apiVersion;
+}
+
 const requestLiveToken = async (): Promise<CachedLiveToken> => {
   let response: Response;
 
@@ -1709,7 +1742,7 @@ const requestLiveToken = async (): Promise<CachedLiveToken> => {
       },
       // Voice and language are deliberately NOT sent here. The ephemeral
       // token leaves speechConfig unlocked so the client can choose any voice.
-      body: JSON.stringify({}),
+      body: JSON.stringify(preferredLiveApiVersion ? { apiVersion: preferredLiveApiVersion } : {}),
     });
   } catch (error) {
     console.error('Live token network error:', error);
@@ -1735,6 +1768,7 @@ const requestLiveToken = async (): Promise<CachedLiveToken> => {
   return {
     token: String(data.token),
     model: String(data.model || 'gemini-3.8-live'),
+    apiVersion: data.apiVersion === 'v1alpha' ? 'v1alpha' : 'v1beta',
     expiresAt: String(data.expiresAt || ''),
     newSessionExpiresAt: String(data.newSessionExpiresAt || ''),
     usesRemaining: Math.max(1, Number(data.uses || 10)),
@@ -1759,6 +1793,13 @@ const LIVE_TOKEN_WARM_MIN_VALIDITY_MS = 25_000;
  */
 export function warmLiveToken(): void {
   const now = Date.now();
+  if (
+    cachedLiveToken &&
+    preferredLiveApiVersion &&
+    cachedLiveToken.apiVersion !== preferredLiveApiVersion
+  ) {
+    cachedLiveToken = null;
+  }
   if (
     cachedLiveToken &&
     cachedLiveToken.usesRemaining > 0 &&
@@ -1801,10 +1842,19 @@ export async function createLiveToken(
 ): Promise<{
   token: string;
   model: string;
+  apiVersion: LiveApiVersion;
   expiresAt: string;
   newSessionExpiresAt?: string;
 }> {
   const now = Date.now();
+
+  if (
+    cachedLiveToken &&
+    preferredLiveApiVersion &&
+    cachedLiveToken.apiVersion !== preferredLiveApiVersion
+  ) {
+    cachedLiveToken = null;
+  }
 
   if (!forceRefresh && cachedLiveToken) {
     const expiresAt = Date.parse(cachedLiveToken.expiresAt);
@@ -1926,7 +1976,7 @@ export async function previewGeminiVoice(
     return playCachedVoicePreview(context, cachedChunks);
   }
 
-  const { token, model } = await createLiveToken(voiceName, language);
+  const { token, model, apiVersion } = await createLiveToken(voiceName, language);
 
   // A newer voice selection may have happened while the token request was
   // in flight. Do not open an obsolete Gemini session in that case.
@@ -1956,9 +2006,8 @@ export async function previewGeminiVoice(
     let completedTurn = false;
     const collected: Int16Array[] = [];
     const sources = new Set<AudioBufferSourceNode>();
-    const socket = new WebSocket(
-      `${GEMINI_LIVE_WS_ENDPOINT}?access_token=${encodeURIComponent(token)}`
-    );
+    const socket = new WebSocket(buildLiveSocketUrl(token, apiVersion));
+    let opened = false;
     let timeoutId = 0;
 
     const finish = (error?: Error) => {
@@ -1989,6 +2038,8 @@ export async function previewGeminiVoice(
     }, 12_000);
 
     socket.onopen = () => {
+      opened = true;
+      reportLiveSocketSuccess(apiVersion);
       socket.send(JSON.stringify({
         setup: {
           model: `models/${model || 'gemini-3.8-live'}`,
@@ -2015,13 +2066,16 @@ export async function previewGeminiVoice(
     };
 
     socket.onerror = () => {
-      invalidateCachedLiveToken(token);
+      // Never opened = handshake rejected: try the other Live API version next time.
+      if (!opened) reportLiveSocketFailure(apiVersion, token);
+      else invalidateCachedLiveToken(token);
       finish(new Error(`Gemini could not preview ${voiceName}. Check the Live token and browser audio permission.`));
     };
 
     socket.onclose = event => {
       if (!settled && event.code !== 1000) {
-        invalidateCachedLiveToken(token);
+        if (!opened) reportLiveSocketFailure(apiVersion, token);
+        else invalidateCachedLiveToken(token);
         const reason = event.reason ? `: ${event.reason}` : '';
         finish(new Error(`Gemini voice preview disconnected (${event.code})${reason}.`));
       }
