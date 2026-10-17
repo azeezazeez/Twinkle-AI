@@ -13,6 +13,7 @@ import UserAvatar from './UserAvatar';
 import { chatApi } from '../lib/api';
 import SearchBar from './SearchBar';
 import { useLanguage, type AppLanguage } from '../lib/i18n';
+import { onShortcut, takePendingShortcut, type ShortcutAction } from '../lib/shortcuts';
 import { APP_LANGUAGES } from '../pages/Settings';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1418,18 +1419,90 @@ export default function Sidebar({
     onDesktopWidthChange?.(desktopWidth);
   }, [desktopWidth, onDesktopWidthChange]);
 
-  // Auto-close the desktop sidebar when the window becomes narrow.
+  // ── Hover peek ────────────────────────────────────────────────────────────
+  // While the sidebar is collapsed, hovering the toggle icon slides it out over
+  // the page; moving the mouse away slides it back. Clicking the icon pins it.
+  const [peek, setPeek] = useState(false);
+  const peekTimerRef = useRef<number | null>(null);
+
+  const cancelPeekClose = useCallback(() => {
+    if (peekTimerRef.current != null) {
+      window.clearTimeout(peekTimerRef.current);
+      peekTimerRef.current = null;
+    }
+  }, []);
+
+  const openPeek = useCallback(() => {
+    cancelPeekClose();
+    setPeek(true);
+  }, [cancelPeekClose]);
+
+  const schedulePeekClose = useCallback(() => {
+    cancelPeekClose();
+    peekTimerRef.current = window.setTimeout(() => {
+      peekTimerRef.current = null;
+      // Keep it open while a menu or dialog started from the sidebar is open.
+      if (document.querySelector('[role="menu"], [role="dialog"]')) return;
+      setPeek(false);
+    }, 220);
+  }, [cancelPeekClose]);
+
+  useEffect(() => cancelPeekClose, [cancelPeekClose]);
+
   useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth <= 1200 && !desktopCollapsed) {
+    if (!peek) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest?.('[data-desktop-sidebar], [role="menu"], [role="dialog"]')) return;
+      setPeek(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !document.querySelector('[role="menu"], [role="dialog"]')) setPeek(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [peek]);
+
+  // ── Browser zoom ──────────────────────────────────────────────────────────
+  // At 200% zoom (or more) the sidebar collapses by itself. When the zoom drops
+  // back below 200% it re-opens, at the same width it had, but only if it was
+  // open before the zoom collapsed it. Opening/closing it by hand cancels this.
+  const collapsedRef = useRef(desktopCollapsed);
+  collapsedRef.current = desktopCollapsed;
+  const autoCollapsedRef = useRef(false);
+
+  useEffect(() => {
+    // outerWidth does not change with browser zoom but innerWidth (CSS px) does,
+    // so their ratio is the zoom level (1 = 100%, 2 = 200%).
+    const zoomLevel = () =>
+      window.innerWidth > 0 && window.outerWidth > 0
+        ? window.outerWidth / window.innerWidth
+        : window.devicePixelRatio || 1;
+
+    const syncWithZoom = () => {
+      const zoomedIn = zoomLevel() >= 1.95;
+      if (zoomedIn && !collapsedRef.current) {
+        autoCollapsedRef.current = true;
         setDesktopCollapsed(true);
+        setPeek(false);
         onDesktopStateChange?.(false);
+      } else if (!zoomedIn && autoCollapsedRef.current) {
+        autoCollapsedRef.current = false;
+        if (collapsedRef.current) {
+          setDesktopCollapsed(false);
+          onDesktopStateChange?.(true);
+        }
       }
     };
 
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [desktopCollapsed, onDesktopStateChange]);
+    window.addEventListener('resize', syncWithZoom);
+    syncWithZoom();
+    return () => window.removeEventListener('resize', syncWithZoom);
+  }, [onDesktopStateChange]);
 
   const handleResizeStart = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -1458,12 +1531,16 @@ export default function Sidebar({
   useEffect(() => { onDesktopStateChange?.(false); }, [onDesktopStateChange]);
 
   const expandDesktop = useCallback(() => {
+    autoCollapsedRef.current = false;
+    cancelPeekClose();
+    setPeek(false);
     setDesktopCollapsed(false);
     onDesktopStateChange?.(true);
     try { localStorage.setItem(SIDEBAR_SEEN_KEY, '1'); } catch { /* storage unavailable */ }
-  }, [onDesktopStateChange]);
+  }, [onDesktopStateChange, cancelPeekClose]);
 
   const collapseDesktop = useCallback(() => {
+    autoCollapsedRef.current = false;
     setDesktopCollapsed(true);
     onDesktopStateChange?.(false);
     onClose();
@@ -1497,34 +1574,20 @@ export default function Sidebar({
     onMobileClose?.();
   }, [onMobileClose]);
 
+  // Shortcuts are detected once for the whole app (GlobalShortcuts in App.tsx)
+  // and broadcast here, so they also work when pressed from Settings/Profile.
+  const shortcutActions = useRef({ toggleDesktop, openSearch });
+  shortcutActions.current = { toggleDesktop, openSearch };
+
   useEffect(() => {
-    const handleShortcut = (event: KeyboardEvent) => {
-      const modifier = event.ctrlKey || event.metaKey;
-      if (!modifier) return;
-
-      if (event.shiftKey && event.key.toLowerCase() === 's') {
-        event.preventDefault();
-        toggleDesktop();
-        return;
-      }
-
-      // Ctrl/Cmd + Shift + , opens Settings (shown in the account menu).
-      // event.code is used because Shift turns "," into "<" in event.key.
-      if (event.shiftKey && event.code === 'Comma') {
-        event.preventDefault();
-        handleSettings();
-        return;
-      }
-
-      if (!event.shiftKey && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
-        openSearch();
-      }
+    const run = (action: ShortcutAction) => {
+      if (action === 'search') shortcutActions.current.openSearch();
+      else if (action === 'toggle-sidebar') shortcutActions.current.toggleDesktop();
     };
-
-    window.addEventListener('keydown', handleShortcut);
-    return () => window.removeEventListener('keydown', handleShortcut);
-  }, [toggleDesktop, openSearch, handleSettings]);
+    const pending = takePendingShortcut();
+    if (pending) run(pending);
+    return onShortcut(run);
+  }, []);
 
   const listProps = {
     user,
@@ -1598,7 +1661,7 @@ export default function Sidebar({
           The sidebar is removed completely. Only a small panel icon stays in
           the top-left corner to bring it back.
       ═══════════════════════════════════════════════════ */}
-      {desktopCollapsed && (
+      {desktopCollapsed && !peek && (
         <motion.div
           className="fixed left-3 top-[18px] z-[9990] hidden lg:block"
           initial={{ opacity: 0 }}
@@ -1609,6 +1672,8 @@ export default function Sidebar({
             <button
               type="button"
               onClick={expandDesktop}
+              onPointerEnter={event => { if (event.pointerType === 'mouse') openPeek(); }}
+              onPointerLeave={event => { if (event.pointerType === 'mouse') schedulePeekClose(); }}
               aria-label="Open sidebar"
               className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-600 transition-colors hover:bg-zinc-200/60 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
             >
@@ -1622,18 +1687,26 @@ export default function Sidebar({
           DESKTOP — OPEN  (lg+ only)
       ═══════════════════════════════════════════════════ */}
       <AnimatePresence initial={false}>
-        {!desktopCollapsed && (
+        {(!desktopCollapsed || peek) && (
           <motion.aside
             key="desktop-sidebar"
+            data-desktop-sidebar
+            onPointerEnter={event => { if (event.pointerType === 'mouse') cancelPeekClose(); }}
+            onPointerLeave={event => { if (peek && event.pointerType === 'mouse') schedulePeekClose(); }}
             initial={{ x: -desktopWidth }}
             animate={{ x: 0 }}
             exit={{ x: -desktopWidth }}
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-            className="twinkle-sidebar fixed inset-y-0 left-0 z-[9990] hidden h-full flex-col border-r border-zinc-200 bg-white shadow-none dark:border-zinc-800 dark:bg-zinc-950 lg:flex"
+            className={`twinkle-sidebar fixed inset-y-0 left-0 z-[9990] hidden h-full flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 lg:flex ${
+              desktopCollapsed ? 'shadow-[8px_0_30px_rgba(0,0,0,0.12)] dark:shadow-[8px_0_30px_rgba(0,0,0,0.5)]' : 'shadow-none'
+            }`}
             style={{ width: `${desktopWidth}px` }}
             onClick={e => e.stopPropagation()}
           >
-            <SidebarHeader onToggle={collapseDesktop} label="Close sidebar" />
+            <SidebarHeader
+              onToggle={desktopCollapsed ? expandDesktop : collapseDesktop}
+              label={desktopCollapsed ? 'Pin sidebar open' : 'Close sidebar'}
+            />
 
             {/* Desktop: keep the sidebar open after selecting a chat, starting a
                 new chat, renaming, etc. It only closes via the toggle button. */}
