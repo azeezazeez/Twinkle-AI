@@ -401,6 +401,8 @@ You can ask me questions, give me a file or image to analyze, ask for help with 
 const IMAGE_MODEL_ID = '@cf/black-forest-labs/flux-1-schnell';
 const IMAGE_CHAT_PATTERN = /^\s*(hi+|hello+|hey+|hii+|yo|hola|namaste|sup|howdy|good\s+(morning|afternoon|evening|night)|how\s+are\s+you|who\s+are\s+you|what\s+can\s+you\s+do|what.?s\s+up|thanks?|thank\s+you|ok(ay)?|bye|help|test|testing)\b[\s\p{P}]*(there|twinkle|buddy|friend|bro)?[\s\p{P}]*$/iu;
 const IMAGE_GENERATION_INTENT = /^\s*(?:(?:please|can you|could you|would you|i (?:want|need)(?: you to)?|let'?s|just)\s+)*(?:(?:generate|create|make|draw|paint|design|render|produce|illustrate|sketch)\b[^.?!\n]{0,40}?\b(?:image|images|picture|pictures|photo|photos|illustration|logo|wallpaper|portrait|poster|artwork|avatar|drawing|painting)\b|(?:draw|paint|sketch|illustrate)\s+(?:me\s+|a\s+|an\s+|the\s+)\w+)/i;
+// Bare "Generate a coffee" / "Draw me a cat" style prompts (no image noun), minus text/code tasks.
+const IMAGE_BARE_GENERATE = /^\s*(?:(?:please|can you|could you|would you)\s+)*(?:generate|create|make|draw|paint|sketch|illustrate|imagine|visuali[sz]e)\s+(?:me\s+)?(?:a|an|the|some)\s+(?!.*\b(?:function|code|script|report|summary|list|email|story|essay|recipe|text|names?|ideas?|sql|quer(?:y|ies)|regex|program|class|component|api|tests?|document|outline|plan|table|poem|song|joke|post|caption|prompt|schedule|quiz|resume|letter|message|article|question|example|password|number|word|sentence|paragraph|title|slogan|summary)\b)[^.?!\n]{1,60}$/i;
 const IMAGE_WORDS_PATTERN = /\b(image|picture|photo|draw|paint|sketch|illustration|logo|wallpaper|render|portrait|poster|generate|create|make)\b/i;
 
 /** Mirrors the backend: greetings/small talk get a text reply, everything else an image. */
@@ -2346,7 +2348,31 @@ ${textToRead}` }] }], turnComplete: true },
   });
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [modelMoreOpen, setModelMoreOpen] = useState(false);
-  useEffect(() => { if (!modelPickerOpen) setModelMoreOpen(false); }, [modelPickerOpen]);
+  // Desktop: "More models" opens a flyout (portal, so the popup's scroll area can't clip it).
+  const [modelFlyout, setModelFlyout] = useState<{ left: number; bottom: number } | null>(null);
+  const moreRowRef = useRef<HTMLButtonElement>(null);
+  const flyoutCloseTimer = useRef<number | null>(null);
+  useEffect(() => { if (!modelPickerOpen) { setModelMoreOpen(false); setModelFlyout(null); } }, [modelPickerOpen]);
+
+  const cancelFlyoutClose = () => {
+    if (flyoutCloseTimer.current !== null) { window.clearTimeout(flyoutCloseTimer.current); flyoutCloseTimer.current = null; }
+  };
+  const scheduleFlyoutClose = () => {
+    cancelFlyoutClose();
+    flyoutCloseTimer.current = window.setTimeout(() => setModelFlyout(null), 160);
+  };
+  const openModelFlyout = (): boolean => {
+    const row = moreRowRef.current;
+    if (!row || window.innerWidth < 768) return false;
+    cancelFlyoutClose();
+    const rect = row.getBoundingClientRect();
+    const width = 300;
+    let left = rect.right + 8;
+    if (left + width > window.innerWidth - 8) left = rect.left - 8 - width;
+    if (left < 8) return false;
+    setModelFlyout({ left, bottom: Math.max(8, window.innerHeight - rect.bottom - 8) });
+    return true;
+  };
   const [emptyChatPrompt, setEmptyChatPrompt] = useState(() =>
     EMPTY_CHAT_PROMPTS[Math.floor(Math.random() * EMPTY_CHAT_PROMPTS.length)]
   );
@@ -2418,6 +2444,7 @@ ${textToRead}` }] }], turnComplete: true },
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
+      if ((target as Element).closest?.('[data-model-flyout]')) return;
       if (modelPickerRef.current && !modelPickerRef.current.contains(target)) {
         setModelPickerOpen(false);
       }
@@ -3265,7 +3292,7 @@ const chooseModel = useCallback((modelId: string) => {
     }
 
     // Text/vision models cannot generate images: point to the exact image model.
-    if (!includesImage && selectedModel !== IMAGE_MODEL_ID && IMAGE_GENERATION_INTENT.test(messageText)) {
+    if (!includesImage && selectedModel !== IMAGE_MODEL_ID && (IMAGE_GENERATION_INTENT.test(messageText) || IMAGE_BARE_GENERATE.test(messageText))) {
       const imageModel = MODEL_OPTIONS.find(option => option.id === IMAGE_MODEL_ID);
       const now = Date.now();
       setMessages(prev => [...prev,
@@ -3274,7 +3301,7 @@ const chooseModel = useCallback((modelId: string) => {
           id: `image-model-hint-${now}`,
           sessionId: currentSessionId || 0,
           role: 'assistant',
-          content: `${activeModel.name} can’t generate images. **${imageModel?.name ?? 'Canvas'}** is the image-generation model. Switch to it from the model menu in the message box, then send your prompt again.`,
+          content: `${activeModel.name} can’t generate images. **${imageModel?.name ?? 'Canvas'}** can — it turns your words into images. Switch to ${imageModel?.name ?? 'Canvas'} from the model menu in the message box, then send your prompt again.`,
           timestamp: new Date().toISOString(),
         },
       ]);
@@ -5217,19 +5244,25 @@ if (isBlankDraft) {
                                 {renderOption(activeModel, true)}
                                 <div className="mx-2 my-1.5 h-px bg-zinc-200/80 dark:bg-white/10" />
                                 <button
+                                  ref={moreRowRef}
                                   type="button"
-                                  aria-expanded={modelMoreOpen}
+                                  aria-haspopup="listbox"
+                                  aria-expanded={modelFlyout !== null || modelMoreOpen}
+                                  onMouseEnter={() => { openModelFlyout(); }}
+                                  onMouseLeave={scheduleFlyoutClose}
+                                  onFocus={() => { openModelFlyout(); }}
                                   onClick={(event) => {
                                     event.stopPropagation();
+                                    if (openModelFlyout()) return;
                                     setModelMoreOpen(prev => !prev);
                                   }}
-                                  className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-[14px] font-medium text-zinc-900 transition-colors hover:bg-zinc-50 dark:text-zinc-100 dark:hover:bg-white/5"
+                                  className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-[14px] font-medium text-zinc-900 transition-colors hover:bg-zinc-50 dark:text-zinc-100 dark:hover:bg-white/5 ${modelFlyout ? 'bg-zinc-50 dark:bg-white/5' : ''}`}
                                 >
                                   More models
-                                  <ChevronDown className={`h-4 w-4 text-zinc-500 transition-transform duration-200 dark:text-zinc-400 ${modelMoreOpen ? 'rotate-180' : ''}`} />
+                                  <ChevronDown className={`h-4 w-4 text-zinc-500 transition-transform duration-200 dark:text-zinc-400 ${modelFlyout ? '-rotate-90' : modelMoreOpen ? 'rotate-180' : ''}`} />
                                 </button>
                                 <AnimatePresence initial={false}>
-                                  {modelMoreOpen && (
+                                  {modelMoreOpen && !modelFlyout && (
                                     <motion.div
                                       key="more-models"
                                       initial={{ height: 0, opacity: 0 }}
@@ -5244,6 +5277,25 @@ if (isBlankDraft) {
                                     </motion.div>
                                   )}
                                 </AnimatePresence>
+                                {modelFlyout && typeof document !== 'undefined' && createPortal(
+                                  <motion.div
+                                    data-model-flyout
+                                    role="listbox"
+                                    aria-label="More models"
+                                    initial={{ opacity: 0, x: -4 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    transition={{ duration: 0.14, ease: 'easeOut' }}
+                                    onMouseEnter={cancelFlyoutClose}
+                                    onMouseLeave={scheduleFlyoutClose}
+                                    style={{ position: 'fixed', left: modelFlyout.left, bottom: modelFlyout.bottom, width: 300, zIndex: 2147483000 }}
+                                    className="max-h-[calc(100dvh-24px)] overflow-y-auto rounded-2xl border border-zinc-200/90 bg-white p-2 shadow-2xl shadow-zinc-900/20 dark:border-zinc-700/90 dark:bg-zinc-900 dark:shadow-black/50"
+                                  >
+                                    <div className="space-y-0.5">
+                                      {otherModels.map(option => renderOption(option, false))}
+                                    </div>
+                                  </motion.div>,
+                                  document.body
+                                )}
                               </>
                             );
                           })()}
@@ -5517,7 +5569,7 @@ if (isBlankDraft) {
             role="menuitem"
             onClick={() => {
               setPlusMenu(null);
-              fileInputRef.current?.click();
+              setUploadModalOpen(true);
             }}
             className="flex h-10 w-full items-center gap-3 rounded-lg px-2.5 text-left text-[15px] text-zinc-900 transition-colors hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-white/10"
           >
