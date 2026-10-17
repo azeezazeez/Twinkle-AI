@@ -12,7 +12,6 @@ import { createPortal } from 'react-dom';
 import SearchBar from '../components/SearchBar';
 import { useLanguage, type AppLanguage } from '../lib/i18n';
 import {
-  ArrowLeft,
   BarChart3,
   Check,
   ChevronDown,
@@ -30,8 +29,9 @@ import {
   Mic,
   Monitor,
   Moon,
-  Palette,
   RefreshCw,
+  Search as SearchIcon,
+  Settings as SettingsIcon,
   ShieldCheck,
   SlidersHorizontal,
   Sun,
@@ -63,7 +63,6 @@ import ConfirmationModal from '../components/ConfirmationModal';
 
 type SettingsSection =
   | 'general'
-  | 'appearance'
   | 'voice'
   | 'usage'
   | 'analytics'
@@ -151,37 +150,37 @@ const APP_STORAGE_KEYS = [
   'Twinkle_sidebar_width',
 ];
 
-const SECTION_GROUPS: Array<{
-  heading: string;
-  items: Array<{ label: string; id: SettingsSection; icon: typeof SlidersHorizontal; blurb: string }>;
-}> = [
+export type NavId = SettingsSection | 'account';
+
+type NavItem = { label: string; id: NavId; icon: typeof SlidersHorizontal };
+
+// Same structure as Claude's settings dialog: one list of sections with a
+// search box above it. "Account" opens the profile page.
+const NAV_GROUPS: Array<{ heading: string; items: NavItem[] }> = [
   {
-    heading: 'Preferences',
+    heading: 'Settings',
     items: [
-      { label: 'General', id: 'general', icon: SlidersHorizontal, blurb: 'Account, language and interface basics.' },
-      { label: 'Appearance', id: 'appearance', icon: Palette, blurb: 'Theme, text size and motion.' },
-      { label: 'Voice', id: 'voice', icon: Mic, blurb: 'Pick the Gemini voice used by Live Talk.' },
-      { label: 'Shortcuts', id: 'shortcuts', icon: Keyboard, blurb: 'Keyboard shortcuts to move faster.' },
+      { label: 'General', id: 'general', icon: SettingsIcon },
+      { label: 'Account', id: 'account', icon: UserRound },
+      { label: 'Voice', id: 'voice', icon: Mic },
+      { label: 'Data controls', id: 'data', icon: ShieldCheck },
+      { label: 'Shortcuts', id: 'shortcuts', icon: Keyboard },
+      { label: 'About', id: 'about', icon: Info },
     ],
   },
   {
     heading: 'Insights',
     items: [
-      { label: 'Usage', id: 'usage', icon: BarChart3, blurb: 'Live totals from your conversations.' },
-      { label: 'Analytics', id: 'analytics', icon: BarChart3, blurb: 'Activity trends for the last 7 days.' },
-      { label: 'Storage', id: 'storage', icon: HardDrive, blurb: 'Estimated space used by your data.' },
-    ],
-  },
-  {
-    heading: 'Account',
-    items: [
-      { label: 'Data controls', id: 'data', icon: ShieldCheck, blurb: 'Export, delete and reset your data.' },
-      { label: 'About', id: 'about', icon: Info, blurb: 'Version and account details.' },
+      { label: 'Usage', id: 'usage', icon: BarChart3 },
+      { label: 'Analytics', id: 'analytics', icon: BarChart3 },
+      { label: 'Storage', id: 'storage', icon: HardDrive },
     ],
   },
 ];
 
-const ALL_SECTIONS = SECTION_GROUPS.flatMap(group => group.items);
+const ALL_SECTIONS = NAV_GROUPS.flatMap(group => group.items).filter(
+  (item): item is NavItem & { id: SettingsSection } => item.id !== 'account'
+);
 const isSection = (value: string | null): value is SettingsSection =>
   ALL_SECTIONS.some(item => item.id === value);
 
@@ -362,9 +361,9 @@ const isMac = () =>
   typeof navigator !== 'undefined' && /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent);
 
 const buttonBase =
-  'inline-flex items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/50 disabled:cursor-not-allowed disabled:opacity-50';
+  'inline-flex h-9 items-center justify-center gap-2 rounded-lg px-3.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 disabled:cursor-not-allowed disabled:opacity-50';
 
-function Btn({
+export function Btn({
   children,
   onClick,
   variant = 'default',
@@ -381,11 +380,11 @@ function Btn({
 }) {
   const styles = {
     default:
-      'border border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900',
+      'border border-zinc-300/70 bg-white text-zinc-900 hover:bg-zinc-50 dark:border-white/15 dark:bg-transparent dark:text-zinc-100 dark:hover:bg-white/5',
     primary:
-      'bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200',
+      'bg-zinc-950 text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200',
     danger:
-      'border border-[#fecaca] bg-[#fef2f2] text-[#dc2626] hover:bg-[#fee2e2] dark:border-[#7f1d1d] dark:bg-[#2a0f12] dark:text-[#f87171] dark:hover:bg-[#3a1418]',
+      'border border-[#e8b4b4] bg-transparent text-[#b3261e] hover:bg-[#fdf1f0] dark:border-[#7f1d1d] dark:text-[#f2b8b5] dark:hover:bg-[#2a0f12]',
   }[variant];
 
   return (
@@ -534,27 +533,11 @@ function LanguageSelect({ value, onChange }: { value: string; onChange: (code: s
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label="Interface language"
-        className={`group flex min-w-[220px] items-center gap-3 rounded-2xl border bg-white px-3.5 py-2.5 text-left shadow-sm transition-all hover:border-zinc-400 hover:shadow dark:bg-zinc-950 dark:hover:border-zinc-600 ${
-          open
-            ? 'border-zinc-900 ring-4 ring-zinc-900/5 dark:border-zinc-300 dark:ring-white/10'
-            : 'border-zinc-200 dark:border-zinc-800'
-        }`}
+        className="group inline-flex h-9 items-center gap-2 rounded-lg px-2.5 text-[15px] text-zinc-900 transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 dark:text-zinc-100 dark:hover:bg-white/5"
       >
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
-          <Globe2 className="h-4 w-4" strokeWidth={1.8} />
-        </span>
-        <span data-no-translate className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-            {selected.native}
-          </span>
-          {selected.native !== selected.label && (
-            <span className="block truncate text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-              {selected.label}
-            </span>
-          )}
-        </span>
+        <span data-no-translate>{selected.native}</span>
         <ChevronDown
-          className={`h-4 w-4 shrink-0 text-zinc-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+          className={`h-4 w-4 shrink-0 text-zinc-500 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
           strokeWidth={1.8}
           aria-hidden="true"
         />
@@ -575,9 +558,9 @@ function LanguageSelect({ value, onChange }: { value: string; onChange: (code: s
               maxHeight: pos.maxHeight,
               zIndex: 1000,
             }}
-            className="flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl shadow-black/15 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/60"
+            className="flex flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl shadow-black/10 dark:border-white/10 dark:bg-[#30302E] dark:shadow-black/60"
           >
-            <div className="border-b border-zinc-100 p-2.5 dark:border-zinc-900">
+            <div className="border-b border-zinc-100 p-2.5 dark:border-white/10">
               <SearchBar
                 ref={searchRef}
                 value={query}
@@ -594,7 +577,7 @@ function LanguageSelect({ value, onChange }: { value: string; onChange: (code: s
 
               {groups.map(group => (
                 <div key={group.title} className="mb-1">
-                  <p className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+                  <p className="px-3 pb-1 pt-2 text-xs text-zinc-500">
                     {group.title}
                   </p>
                   {group.items.map(item => {
@@ -613,11 +596,11 @@ function LanguageSelect({ value, onChange }: { value: string; onChange: (code: s
                         onMouseEnter={() => setActive(index)}
                         onClick={() => choose(item.code)}
                         className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors ${
-                          isActive ? 'bg-zinc-100 dark:bg-zinc-900' : ''
+                          isActive ? 'bg-zinc-100 dark:bg-white/10' : ''
                         }`}
                       >
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                          <span className="block truncate text-sm text-zinc-900 dark:text-zinc-100">
                             {item.native}
                           </span>
                           {item.native !== item.label && (
@@ -645,41 +628,67 @@ function LanguageSelect({ value, onChange }: { value: string; onChange: (code: s
   );
 }
 
-function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
+// Bordered panel used for charts and grouped stats.
+function Panel({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
-    <div className={`rounded-3xl border border-zinc-200 bg-white px-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 ${className}`}>
+    <div className={`rounded-xl border border-zinc-200 bg-white p-5 dark:border-white/10 dark:bg-transparent ${className}`}>
       {children}
     </div>
   );
 }
 
-function Row({
+// A titled group of rows, e.g. "Appearance" or "Voice" in Claude's dialog.
+export function Section({
+  title,
+  action,
+  children,
+  first = false,
+}: {
+  title?: string;
+  action?: ReactNode;
+  children: ReactNode;
+  first?: boolean;
+}) {
+  return (
+    <section className={first ? '' : 'mt-10'}>
+      {title && (
+        <div className="flex min-h-[28px] items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">{title}</h2>
+          {action}
+        </div>
+      )}
+      <div className={title ? 'mt-3' : ''}>{children}</div>
+    </section>
+  );
+}
+
+export function Row({
   title,
   desc,
   children,
   stack = false,
 }: {
   title: string;
-  desc: ReactNode;
+  desc?: ReactNode;
   children?: ReactNode;
   stack?: boolean;
 }) {
   return (
     <div
-      className={`gap-4 border-b border-zinc-100 py-5 last:border-0 dark:border-zinc-800 ${
-        stack ? 'flex flex-col' : 'flex flex-col sm:flex-row sm:items-center sm:justify-between sm:gap-6'
+      className={`border-b border-zinc-200/70 py-[18px] last:border-0 dark:border-white/10 ${
+        stack ? 'flex flex-col gap-4' : 'flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-8'
       }`}
     >
       <div className="min-w-0">
-        <p className="text-sm font-semibold text-zinc-900 dark:text-white">{title}</p>
-        <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">{desc}</p>
+        <p className="text-[15px] text-zinc-900 dark:text-zinc-50">{title}</p>
+        {desc && <p className="mt-0.5 text-sm leading-5 text-zinc-500 dark:text-zinc-400">{desc}</p>}
       </div>
       {children !== undefined && <div className="shrink-0">{children}</div>}
     </div>
   );
 }
 
-function Switch({
+export function Switch({
   checked,
   onChange,
   label,
@@ -695,27 +704,31 @@ function Switch({
       aria-checked={checked}
       aria-label={label}
       onClick={() => onChange(!checked)}
-      className={`relative h-6 w-11 shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/50 ${
-        checked ? 'bg-violet-500' : 'bg-zinc-300 dark:bg-zinc-700'
+      className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 ${
+        checked
+          ? 'border-[#2C84DB] bg-[#2C84DB]'
+          : 'border-zinc-300 bg-zinc-200 dark:border-white/15 dark:bg-white/10'
       }`}
     >
       <span
-        className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-          checked ? 'translate-x-5' : 'translate-x-0'
+        className={`absolute left-0.5 top-1/2 h-[18px] w-[18px] -translate-y-1/2 rounded-full bg-white shadow-sm transition-transform ${
+          checked ? 'translate-x-[20px]' : 'translate-x-0'
         }`}
       />
     </button>
   );
 }
 
-function Segmented<T extends string>({
+// Segmented control. An option with an empty label renders as icon-only
+// (like Claude's theme switcher) and uses `title` as its accessible name.
+export function Segmented<T extends string>({
   value,
   options,
   onChange,
   label,
 }: {
   value: T;
-  options: Array<{ value: T; label: string; icon?: typeof Sun }>;
+  options: Array<{ value: T; label: string; icon?: typeof Sun; title?: string }>;
   onChange: (next: T) => void;
   label: string;
 }) {
@@ -723,7 +736,7 @@ function Segmented<T extends string>({
     <div
       role="radiogroup"
       aria-label={label}
-      className="inline-flex rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900"
+      className="inline-flex gap-0.5 rounded-xl bg-zinc-100 p-[3px] dark:bg-white/5"
     >
       {options.map(option => {
         const Icon = option.icon;
@@ -734,14 +747,18 @@ function Segmented<T extends string>({
             type="button"
             role="radio"
             aria-checked={selected}
+            aria-label={option.title || option.label}
+            title={option.title || option.label}
             onClick={() => onChange(option.value)}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/50 ${
+            className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-[9px] border text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 ${
+              option.label ? 'px-3.5' : 'w-9'
+            } ${
               selected
-                ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-white'
-                : 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200'
+                ? 'border-zinc-200 bg-white text-zinc-900 shadow-[0_1px_2px_rgba(0,0,0,0.05)] dark:border-white/10 dark:bg-white/15 dark:text-white'
+                : 'border-transparent text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
             }`}
           >
-            {Icon && <Icon className="h-3.5 w-3.5" />}
+            {Icon && <Icon className="h-[18px] w-[18px]" strokeWidth={1.7} />}
             {option.label}
           </button>
         );
@@ -762,12 +779,12 @@ function StatCard({
   loading?: boolean;
 }) {
   return (
-    <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-zinc-400">{label}</p>
+    <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-white/10 dark:bg-transparent">
+      <p className="text-sm text-zinc-500 dark:text-zinc-400">{label}</p>
       {loading ? (
-        <div className="mt-3 h-7 w-16 animate-pulse rounded-lg bg-zinc-100 dark:bg-zinc-900" />
+        <div className="mt-2 h-7 w-16 animate-pulse rounded-lg bg-zinc-100 dark:bg-white/10" />
       ) : (
-        <p className="mt-2 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">{value}</p>
+        <p className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">{value}</p>
       )}
       {detail && <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{detail}</p>}
     </div>
@@ -776,9 +793,111 @@ function StatCard({
 
 function Kbd({ children }: { children: ReactNode }) {
   return (
-    <kbd className="inline-flex min-w-[26px] items-center justify-center rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-1 text-[11px] font-semibold text-zinc-700 shadow-[0_1px_0_rgba(0,0,0,0.06)] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
+    <kbd className="inline-flex min-w-[26px] items-center justify-center rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-medium text-zinc-700 dark:border-white/15 dark:bg-white/5 dark:text-zinc-200">
       {children}
     </kbd>
+  );
+}
+
+/**
+ * The shared frame for Settings and Profile: a dimmed backdrop with a centred
+ * panel, a left list of sections with a search box, and a close button.
+ * Mirrors Claude's settings dialog.
+ */
+export function SettingsShell({ activeId, children }: { activeId: NavId; children: ReactNode }) {
+  const navigate = useNavigate();
+  const [query, setQuery] = useState('');
+
+  const go = (id: NavId) => {
+    if (id === activeId) return;
+    if (id === 'account') navigate('/profile');
+    else navigate(`/settings?tab=${id}`, { replace: activeId !== 'account' });
+  };
+
+  const q = query.trim().toLowerCase();
+  const groups = NAV_GROUPS.map(group => ({
+    ...group,
+    items: group.items.filter(item => !q || item.label.toLowerCase().includes(q)),
+  })).filter(group => group.items.length > 0);
+  const flatItems = NAV_GROUPS.flatMap(group => group.items);
+
+  return (
+    <div className="fixed inset-0 flex items-center justify-center bg-white md:bg-black/45 md:p-5 dark:bg-[#262624] md:dark:bg-black/60">
+      <div className="relative flex h-full w-full overflow-hidden bg-white dark:bg-[#30302E] md:h-[calc(100dvh-40px)] md:max-h-[940px] md:max-w-[1280px] md:rounded-2xl md:border md:border-zinc-200/60 md:shadow-2xl dark:md:border-white/10">
+        <aside className="hidden w-[250px] shrink-0 flex-col overflow-y-auto border-r border-zinc-200/70 bg-zinc-50/60 px-3.5 py-4 dark:border-white/10 dark:bg-black/10 md:flex">
+          <label className="flex h-10 items-center gap-2.5 rounded-lg border border-zinc-300/70 bg-white px-3 focus-within:border-zinc-400 dark:border-white/15 dark:bg-transparent dark:focus-within:border-white/30">
+            <SearchIcon className="h-[17px] w-[17px] shrink-0 text-zinc-500" strokeWidth={1.7} />
+            <input
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder="Search"
+              aria-label="Search settings"
+              autoComplete="off"
+              spellCheck={false}
+              className="min-w-0 flex-1 bg-transparent text-[15px] text-zinc-900 outline-none placeholder:text-zinc-500 dark:text-zinc-100"
+            />
+          </label>
+
+          <nav aria-label="Settings sections" className="mt-5">
+            {groups.map(group => (
+              <div key={group.heading} className="mb-5">
+                <p className="px-3 pb-1.5 text-[13px] text-zinc-500 dark:text-zinc-400">{group.heading}</p>
+                <div className="space-y-0.5">
+                  {group.items.map(({ label, id, icon: Icon }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => go(id)}
+                      aria-current={activeId === id ? 'page' : undefined}
+                      className={`flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 ${
+                        activeId === id
+                          ? 'bg-zinc-200/60 font-medium text-zinc-900 dark:bg-white/10 dark:text-white'
+                          : 'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-white/5'
+                      }`}
+                    >
+                      <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.6} />
+                      <span className="truncate">{label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {groups.length === 0 && <p className="px-3 text-sm text-zinc-500">No matches</p>}
+          </nav>
+        </aside>
+
+        <button
+          type="button"
+          onClick={() => navigate('/')}
+          aria-label="Close settings"
+          className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-lg text-zinc-700 transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 dark:text-zinc-200 dark:hover:bg-white/10"
+        >
+          <X className="h-5 w-5" strokeWidth={1.7} />
+        </button>
+
+        <main className="min-w-0 flex-1 overflow-y-auto">
+          {/* Phone layout: section chips replace the left list */}
+          <div className="flex gap-2 overflow-x-auto px-4 pb-1 pr-16 pt-4 [scrollbar-width:none] md:hidden">
+            {flatItems.map(({ label, id }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => go(id)}
+                aria-current={activeId === id ? 'page' : undefined}
+                className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm transition-colors ${
+                  activeId === id
+                    ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900'
+                    : 'border border-zinc-300/70 text-zinc-700 dark:border-white/15 dark:text-zinc-300'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="px-5 pb-12 pt-6 md:px-8 md:pt-[26px]">{children}</div>
+        </main>
+      </div>
+    </div>
   );
 }
 
@@ -808,7 +927,7 @@ function VoiceDots({
             aria-selected={selected}
             onClick={() => onPick(voice.name)}
             className={`h-2.5 rounded-full transition-all ${
-              selected ? 'w-5 bg-zinc-900 dark:bg-white' : 'w-2.5 bg-zinc-300 hover:bg-zinc-400 dark:bg-zinc-700 dark:hover:bg-zinc-500'
+              selected ? 'w-5 bg-zinc-900 dark:bg-white' : 'w-2.5 bg-zinc-300 hover:bg-zinc-400 dark:bg-white/20 dark:hover:bg-white/40'
             }`}
             aria-label={`Select ${voice.name}`}
           />
@@ -863,7 +982,7 @@ function VoicePickerModal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[100001] flex items-center justify-center bg-black/35 p-4 backdrop-blur-xl"
+          className="fixed inset-0 z-[100001] flex items-center justify-center bg-black/45 p-4"
           onMouseDown={event => {
             if (event.target === event.currentTarget) onClose();
           }}
@@ -872,11 +991,11 @@ function VoicePickerModal({
             initial={{ opacity: 0, y: 16, scale: 0.985 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 16, scale: 0.985 }}
-            className="w-full max-w-[720px] overflow-hidden rounded-[28px] border border-zinc-200 bg-white shadow-[0_30px_90px_rgba(0,0,0,.18)] dark:border-zinc-800 dark:bg-zinc-950"
+            className="w-full max-w-[720px] overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-white/10 dark:bg-[#30302E]"
           >
             <div className="flex items-center justify-between border-b border-zinc-100 px-6 py-5 dark:border-zinc-800">
               <div>
-                <h2 className="text-[17px] font-semibold tracking-tight text-zinc-950 dark:text-white">Voice</h2>
+                <h2 className="text-lg font-semibold tracking-tight text-zinc-950 dark:text-white">Voice</h2>
                 <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Choose the Gemini voice used by Live Talk.</p>
               </div>
               <button
@@ -1036,7 +1155,7 @@ export default function Settings({
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
-  const active: SettingsSection = isSection(tabParam) ? tabParam : 'general';
+  const active: SettingsSection = isSection(tabParam) ? tabParam : 'general'; // old ?tab=appearance links fall back to General
   const setActive = (id: SettingsSection) => setSearchParams({ tab: id }, { replace: true });
   const activeMeta = ALL_SECTIONS.find(item => item.id === active) ?? ALL_SECTIONS[0];
 
@@ -1475,7 +1594,7 @@ export default function Settings({
   );
 
   const updatedLabel = (
-    <p className="text-xs text-zinc-400">
+    <p className="text-sm text-zinc-500 dark:text-zinc-400">
       {metrics.lastUpdated ? `Updated ${formatRelativeTime(metrics.lastUpdated)}` : 'Loading live data…'}
     </p>
   );
@@ -1489,665 +1608,507 @@ export default function Settings({
     </div>
   );
 
-  return (
-    <div className="min-h-[100dvh] w-full bg-zinc-50/60 dark:bg-zinc-950">
-      <div className="flex min-h-[100dvh] w-full">
-        {/* Navigation */}
-        <aside className="sticky top-0 hidden h-[100dvh] w-[292px] shrink-0 overflow-y-auto border-r border-zinc-200 bg-white px-4 py-6 dark:border-zinc-800 dark:bg-zinc-950 md:block">
-          <button
-            type="button"
-            onClick={() => navigate('/')}
-            className="mb-6 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-900"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to chat
-          </button>
+  const dangerZone = 'rounded-xl border border-[#ecc5c3] bg-[#fdf6f5] px-5 dark:border-[#7f1d1d] dark:bg-[#2a0f12]';
 
-          <nav aria-label="Settings sections" className="space-y-6">
-            {SECTION_GROUPS.map(group => (
-              <div key={group.heading}>
-                <p className="px-3 pb-2 text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-400">
-                  {group.heading}
-                </p>
-                <div className="space-y-1">
-                  {group.items.map(({ label, id, icon: Icon }) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => setActive(id)}
-                      aria-current={active === id ? 'page' : undefined}
-                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/50 ${
-                        active === id
-                          ? 'bg-zinc-100 font-semibold text-zinc-900 dark:bg-zinc-900 dark:text-white'
-                          : 'text-zinc-600 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-900/60'
-                      }`}
-                    >
-                      <Icon className="h-4 w-4" />
-                      {label}
-                    </button>
+  return (
+    <SettingsShell activeId={active}>
+      <motion.div
+        key={active}
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.16, ease: 'easeOut' }}
+      >
+        {/* GENERAL */}
+        {active === 'general' && (
+          <>
+            <Section title="Appearance" first>
+              <Row title="Theme" desc={`Currently ${theme === 'system' ? 'following your device' : theme}.`}>
+                <Segmented<ThemeChoice>
+                  label="Theme"
+                  value={theme}
+                  onChange={changeTheme}
+                  options={[
+                    { value: 'system', label: '', icon: Monitor, title: 'Match system' },
+                    { value: 'light', label: '', icon: Sun, title: 'Light' },
+                    { value: 'dark', label: '', icon: Moon, title: 'Dark' },
+                  ]}
+                />
+              </Row>
+              <Row title="Text size" desc="Scales text across the whole app on this device.">
+                <Segmented<FontSizePref>
+                  label="Text size"
+                  value={prefs.fontSize}
+                  onChange={fontSize => updatePrefs({ fontSize })}
+                  options={[
+                    { value: 'small', label: 'Small' },
+                    { value: 'default', label: 'Default' },
+                    { value: 'large', label: 'Large' },
+                  ]}
+                />
+              </Row>
+              <Row title="Motion" desc="Reduce animation in streaming responses and other interface elements.">
+                <Segmented<'system' | 'reduced'>
+                  label="Motion"
+                  value={prefs.reduceMotion ? 'reduced' : 'system'}
+                  onChange={next => updatePrefs({ reduceMotion: next === 'reduced' })}
+                  options={[
+                    { value: 'system', label: 'System' },
+                    { value: 'reduced', label: 'Reduced' },
+                  ]}
+                />
+              </Row>
+              <Row title="Reset appearance" desc="Return theme, text size and motion to their defaults.">
+                <Btn onClick={resetAppearance}>
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Reset
+                </Btn>
+              </Row>
+            </Section>
+
+            <Section title="Language">
+              <Row
+                title="Language"
+                desc="Choose the interface language and preferred language for Live Talk responses."
+              >
+                <LanguageSelect value={appLanguage} onChange={changeAppLanguage} />
+              </Row>
+            </Section>
+
+            <Section title="Voice">
+              <Row title="Voice" desc="Choose the Gemini voice used by Live Talk.">
+                <button
+                  type="button"
+                  onClick={() => setActive('voice')}
+                  className="inline-flex h-9 items-center gap-2 rounded-lg px-2.5 text-[15px] text-zinc-900 transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 dark:text-zinc-100 dark:hover:bg-white/5"
+                >
+                  {activeVoice.name}
+                  <ChevronRight className="h-4 w-4 text-zinc-500" strokeWidth={1.8} />
+                </button>
+              </Row>
+            </Section>
+          </>
+        )}
+
+        {/* VOICE */}
+        {active === 'voice' && (
+          <Section title="Voice" first>
+            <div className="flex flex-col items-center pt-4">
+              <div className="flex items-center justify-center gap-4 sm:gap-10">
+                <button
+                  type="button"
+                  onClick={() => stepVoice(-1)}
+                  className="flex h-11 w-11 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-white/10 dark:hover:text-zinc-100"
+                  aria-label="Previous voice"
+                >
+                  <ChevronRight className="h-6 w-6 rotate-180" />
+                </button>
+
+                <div className="flex w-48 flex-col items-center text-center sm:w-60">
+                  <FoggyOrb
+                    palette={getVoiceOrbPalette(activeVoice.name)}
+                    state={previewingVoice === activeVoice.name ? 'speaking' : 'idle'}
+                    className="h-36 w-36 sm:h-40 sm:w-40"
+                    label={`${activeVoice.name} voice`}
+                  />
+                  <motion.h3
+                    key={activeVoice.name}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.16 }}
+                    className="mt-9 text-3xl font-semibold tracking-tight text-zinc-950 dark:text-white"
+                  >
+                    {activeVoice.name}
+                  </motion.h3>
+                  <p className="mt-1 text-base text-zinc-500 dark:text-zinc-400">{activeVoice.description}</p>
+
+                  <div className="mt-5">
+                    <VoiceDots
+                      selectedIndex={Math.max(0, VOICES.findIndex(voice => voice.name === activeVoice.name))}
+                      onPick={voice => saveVoice(voice)}
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => stepVoice(1)}
+                  className="flex h-11 w-11 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-white/10 dark:hover:text-zinc-100"
+                  aria-label="Next voice"
+                >
+                  <ChevronRight className="h-6 w-6" />
+                </button>
+              </div>
+
+              <div className="mt-6 flex gap-2">
+                <Btn
+                  variant="primary"
+                  onClick={() => {
+                    clearPreviewTimer();
+                    void previewVoice(activeVoice.name);
+                  }}
+                >
+                  <Volume2 className="h-3.5 w-3.5" />
+                  {previewingVoice === activeVoice.name ? 'Playing…' : 'Play sample'}
+                </Btn>
+                <Btn onClick={() => setVoicePickerOpen(true)}>
+                  Browse all voices
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Btn>
+              </div>
+
+              {voiceError && (
+                <div
+                  role="alert"
+                  className="mt-4 w-full rounded-xl border border-[#ecc5c3] bg-[#fdf6f5] px-4 py-3 text-center text-sm leading-5 text-[#b3261e] dark:border-[#7f1d1d] dark:bg-[#2a0f12] dark:text-[#f2b8b5]"
+                >
+                  {voiceError}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-8">
+              <Row title="Model" desc="Live Talk uses Gemini's native audio model.">
+                <span className="text-[15px] text-zinc-800 dark:text-zinc-200">Gemini 3.8 Live</span>
+              </Row>
+              <Row
+                title="Language"
+                desc="Live Talk follows your selected language when one is chosen; Auto-detect follows your speech."
+              >
+                <Btn onClick={() => setActive('general')}>
+                  {selectedLanguage.label}
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Btn>
+              </Row>
+              <Row title="Model color" desc="The color of the Live Talk orb.">
+                <Btn onClick={() => navigate('/live-talk-color', { state: { from: '/settings?tab=voice' } })}>
+                  <span
+                    className="h-3 w-3 rounded-full ring-1 ring-black/10 dark:ring-white/20"
+                    style={{ background: liveTalkColor.swatch }}
+                  />
+                  {liveTalkColor.name}
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Btn>
+              </Row>
+            </div>
+
+            <p className="mt-4 text-sm leading-5 text-zinc-500 dark:text-zinc-400">
+              30 Gemini native voices are available. Picking a voice saves it and plays a short personalized greeting.
+            </p>
+          </Section>
+        )}
+
+        {/* SHORTCUTS */}
+        {active === 'shortcuts' && (
+          <Section title="Shortcuts" first>
+            {[
+              { title: 'Search chats', desc: 'Open the chat search from anywhere.', keys: [modKey, 'K'] },
+              { title: 'New chat', desc: 'Start a fresh conversation.', keys: [modKey, 'Shift', 'O'] },
+              { title: 'Toggle sidebar', desc: 'Collapse or expand the chat list.', keys: [modKey, 'Shift', 'S'] },
+              { title: 'Send message', desc: 'Send what you typed in the composer.', keys: ['Enter'] },
+              { title: 'New line', desc: 'Add a line break without sending.', keys: ['Shift', 'Enter'] },
+              { title: 'Close dialog', desc: 'Dismiss pop-ups such as upload and confirmations.', keys: ['Esc'] },
+            ].map(item => (
+              <Row key={item.title} title={item.title} desc={item.desc}>
+                <div className="flex items-center gap-1.5">
+                  {item.keys.map((key, index) => (
+                    <span key={key} className="flex items-center gap-1.5">
+                      {index > 0 && <span className="text-xs text-zinc-300 dark:text-zinc-600">+</span>}
+                      <Kbd>{key}</Kbd>
+                    </span>
                   ))}
                 </div>
-              </div>
+              </Row>
             ))}
-          </nav>
-        </aside>
+          </Section>
+        )}
 
-        <main className="min-w-0 flex-1 overflow-y-auto px-5 pb-16 pt-5 sm:px-10 sm:pt-10">
-          <div className="mx-auto w-full max-w-[900px]">
-            {/* Mobile header + section tabs */}
-            <div className="md:hidden">
-              <button
-                type="button"
-                onClick={() => navigate('/')}
-                className="mb-4 flex items-center gap-2 text-sm font-medium text-zinc-500"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Back to chat
-              </button>
-              <div className="-mx-5 mb-6 flex gap-2 overflow-x-auto px-5 pb-1 [scrollbar-width:none]">
-                {ALL_SECTIONS.map(({ label, id }) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setActive(id)}
-                    aria-current={active === id ? 'page' : undefined}
-                    className={`shrink-0 rounded-full px-4 py-2 text-xs font-semibold transition ${
-                      active === id
-                        ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900'
-                        : 'border border-zinc-200 bg-white text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
+        {/* USAGE */}
+        {active === 'usage' && (
+          <Section title="Usage" action={RefreshButton} first>
+            <div className="space-y-3">
+              {updatedLabel}
+              {errorBanner}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <StatCard
+                  label="Total chats"
+                  loading={firstLoad}
+                  value={String(metrics.sessions.length)}
+                  detail={`${metrics.todaySessions} today · ${metrics.weekSessions} in 7 days`}
+                />
+                <StatCard
+                  label="Total messages"
+                  loading={firstLoad}
+                  value={String(metrics.messageCount)}
+                  detail={`${metrics.userMessages} user · ${metrics.assistantMessages} assistant`}
+                />
+                <StatCard
+                  label="Messages today"
+                  loading={firstLoad}
+                  value={String(metrics.todayMessages)}
+                  detail={`${metrics.weekMessages} in the last 7 days`}
+                />
+                <StatCard
+                  label="Average per chat"
+                  loading={firstLoad}
+                  value={metrics.sessions.length ? averageMessages.toFixed(1) : '0'}
+                  detail="Based on loaded conversation history"
+                />
               </div>
             </div>
+          </Section>
+        )}
 
-            <div className="mb-8">
-              <h1 className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-white">
-                {activeMeta.label}
-              </h1>
-              <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">{activeMeta.blurb}</p>
-            </div>
+        {/* ANALYTICS */}
+        {active === 'analytics' && (
+          <Section title="Analytics" action={RefreshButton} first>
+            <div className="space-y-3">
+              {updatedLabel}
+              {errorBanner}
 
-            <motion.div
-              key={active}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.18, ease: 'easeOut' }}
-            >
-              {/* GENERAL */}
-              {active === 'general' && (
-                <div className="space-y-4">
-                  <Card className="flex flex-col gap-4 py-6 sm:flex-row sm:items-center">
-                    {user.avatarUrl ? (
-                      <img
-                        src={user.avatarUrl}
-                        alt=""
-                        referrerPolicy="no-referrer"
-                        className="h-14 w-14 shrink-0 rounded-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 via-violet-500 to-sky-500 text-lg font-semibold text-white">
-                        {accountInitial}
-                      </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-base font-semibold text-zinc-900 dark:text-white">
-                        {user.name || user.username}
-                      </p>
-                      <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">{user.email}</p>
-                      <span className="mt-2 inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-0.5 text-[10px] font-semibold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
-                        Signed in with {providerLabel}
-                      </span>
-                    </div>
-                    <Btn onClick={() => navigate('/profile')} label="Open profile">
-                      <UserRound className="h-4 w-4" />
-                      Edit profile
-                      <ChevronRight className="h-3 w-3" />
-                    </Btn>
-                  </Card>
-
-                  <Card>
-                    <Row
-                      title="Language"
-                      desc="Choose the interface language and preferred language for Live Talk responses."
-                    >
-                      <LanguageSelect
-                        value={appLanguage}
-                        onChange={changeAppLanguage}
-                      />
-                    </Row>
-
-                    <Row title="Theme" desc={`Currently ${theme === 'system' ? 'following your device' : theme}.`}>
-                      <Segmented<ThemeChoice>
-                        label="Theme"
-                        value={theme}
-                        onChange={changeTheme}
-                        options={[
-                          { value: 'light', label: 'Light', icon: Sun },
-                          { value: 'dark', label: 'Dark', icon: Moon },
-                          { value: 'system', label: 'System', icon: Monitor },
-                        ]}
-                      />
-                    </Row>
-                  </Card>
-                </div>
-              )}
-
-              {/* APPEARANCE */}
-              {active === 'appearance' && (
-                <div className="space-y-4">
-                  <Card>
-                    <Row title="Theme" desc="Match your device automatically, or pick one." stack>
-                      <div className="grid grid-cols-3 gap-3">
-                        {(
-                          [
-                            { value: 'light', label: 'Light', icon: Sun, bg: 'bg-white', bar: 'bg-zinc-200', line: 'bg-zinc-300' },
-                            { value: 'dark', label: 'Dark', icon: Moon, bg: 'bg-zinc-900', bar: 'bg-zinc-700', line: 'bg-zinc-600' },
-                            { value: 'system', label: 'System', icon: Monitor, bg: 'bg-gradient-to-r from-white to-zinc-900', bar: 'bg-zinc-400', line: 'bg-zinc-500' },
-                          ] as const
-                        ).map(option => {
-                          const selected = theme === option.value;
-                          return (
-                            <button
-                              key={option.value}
-                              type="button"
-                              onClick={() => changeTheme(option.value)}
-                              aria-pressed={selected}
-                              className={`rounded-2xl border p-2.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/50 ${
-                                selected
-                                  ? 'border-violet-500 ring-2 ring-violet-500/25'
-                                  : 'border-zinc-200 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700'
-                              }`}
-                            >
-                              <div className={`h-16 rounded-xl border border-zinc-200/70 p-2 dark:border-zinc-700 ${option.bg}`}>
-                                <div className={`h-2 w-1/2 rounded-full ${option.bar}`} />
-                                <div className={`mt-2 h-2 w-3/4 rounded-full ${option.line}`} />
-                                <div className={`mt-1.5 h-2 w-2/5 rounded-full ${option.line}`} />
-                              </div>
-                              <span className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-zinc-800 dark:text-zinc-200">
-                                <option.icon className="h-3.5 w-3.5" />
-                                {option.label}
-                                {selected && <Check className="ml-auto h-3.5 w-3.5 text-violet-500" />}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </Row>
-
-                    <Row title="Text size" desc="Scales text across the whole app on this device.">
-                      <Segmented<FontSizePref>
-                        label="Text size"
-                        value={prefs.fontSize}
-                        onChange={fontSize => updatePrefs({ fontSize })}
-                        options={[
-                          { value: 'small', label: 'Small' },
-                          { value: 'default', label: 'Default' },
-                          { value: 'large', label: 'Large' },
-                        ]}
-                      />
-                    </Row>
-
-                    <Row title="Reduce motion" desc="Turns off most animations and transitions for a calmer interface.">
-                      <Switch
-                        label="Reduce motion"
-                        checked={prefs.reduceMotion}
-                        onChange={reduceMotion => updatePrefs({ reduceMotion })}
-                      />
-                    </Row>
-
-                    <Row title="Reset appearance" desc="Return theme, text size and motion to their defaults.">
-                      <Btn onClick={resetAppearance}>
-                        <RefreshCw className="h-3.5 w-3.5" />
-                        Reset
-                      </Btn>
-                    </Row>
-                  </Card>
-                </div>
-              )}
-
-              {/* VOICE */}
-              {active === 'voice' && (
-                <div className="w-full">
-                  <div className="flex flex-col items-center">
-                    <div className="flex items-center justify-center gap-4 sm:gap-10">
-                      <button
-                        type="button"
-                        onClick={() => stepVoice(-1)}
-                        className="flex h-11 w-11 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
-                        aria-label="Previous voice"
-                      >
-                        <ChevronRight className="h-6 w-6 rotate-180" />
-                      </button>
-
-                      <div className="flex w-48 flex-col items-center text-center sm:w-60">
-                        <FoggyOrb
-                          palette={getVoiceOrbPalette(activeVoice.name)}
-                          state={previewingVoice === activeVoice.name ? 'speaking' : 'idle'}
-                          className="h-36 w-36 sm:h-40 sm:w-40"
-                          label={`${activeVoice.name} voice`}
-                        />
-                        <motion.h2
-                          key={activeVoice.name}
-                          initial={{ opacity: 0, y: 6 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.16 }}
-                          className="mt-9 text-3xl font-semibold tracking-tight text-zinc-950 dark:text-white"
-                        >
-                          {activeVoice.name}
-                        </motion.h2>
-                        <p className="mt-1 text-base text-zinc-500 dark:text-zinc-400">{activeVoice.description}</p>
-
-                        <div className="mt-5">
-                          <VoiceDots
-                            selectedIndex={Math.max(0, VOICES.findIndex(voice => voice.name === activeVoice.name))}
-                            onPick={voice => saveVoice(voice)}
-                          />
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => stepVoice(1)}
-                        className="flex h-11 w-11 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
-                        aria-label="Next voice"
-                      >
-                        <ChevronRight className="h-6 w-6" />
-                      </button>
-                    </div>
-
-                    <div className="mt-6 flex gap-2">
-                      <Btn
-                        variant="primary"
-                        onClick={() => {
-                          clearPreviewTimer();
-                          void previewVoice(activeVoice.name);
-                        }}
-                      >
-                        <Volume2 className="h-3.5 w-3.5" />
-                        {previewingVoice === activeVoice.name ? 'Playing…' : 'Play sample'}
-                      </Btn>
-                      <Btn onClick={() => setVoicePickerOpen(true)}>
-                        Browse all voices
-                        <ChevronRight className="h-3.5 w-3.5" />
-                      </Btn>
-                    </div>
-
-                    {voiceError && (
-                      <div
-                        role="alert"
-                        className="mt-4 w-full max-w-[760px] rounded-2xl border border-[#fecaca] bg-[#fef2f2] px-4 py-3 text-center text-xs leading-5 text-[#b91c1c] dark:border-[#7f1d1d] dark:bg-[#2a0f12] dark:text-[#fca5a5]"
-                      >
-                        {voiceError}
-                      </div>
-                    )}
-
-                    <Card className="mt-8 w-full max-w-[860px]">
-                      <Row title="Model" desc="Live Talk uses Gemini's native audio model.">
-                        <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Gemini 3.8 Live</span>
-                      </Row>
-                      <Row
-                        title="Language"
-                        desc="Live Talk follows your selected language when one is chosen; Auto-detect follows your speech."
-                      >
-                        <Btn onClick={() => setActive('general')}>
-                          {selectedLanguage.label}
-                          <ChevronRight className="h-3.5 w-3.5" />
-                        </Btn>
-                      </Row>
-                      <Row title="Model color" desc="The color of the Live Talk orb.">
-                        <Btn onClick={() => navigate('/live-talk-color', { state: { from: '/settings?tab=voice' } })}>
-                          <span
-                            className="h-3 w-3 rounded-full ring-1 ring-black/10 dark:ring-white/20"
-                            style={{ background: liveTalkColor.swatch }}
-                          />
-                          {liveTalkColor.name}
-                          <ChevronRight className="h-3.5 w-3.5" />
-                        </Btn>
-                      </Row>
-                    </Card>
-
-                    <p className="mt-6 max-w-[760px] text-center text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                      30 Gemini native voices are available. Picking a voice saves it and plays a short personalized greeting.
+              <Panel>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="text-[15px] font-medium text-zinc-900 dark:text-white">Messages per day</h3>
+                    <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
+                      Calculated from your live message history.
                     </p>
                   </div>
+                  <BarChart3 className="h-5 w-5 text-zinc-400" strokeWidth={1.6} />
                 </div>
-              )}
 
-              {/* SHORTCUTS */}
-              {active === 'shortcuts' && (
-                <Card>
-                  {[
-                    { title: 'Search chats', desc: 'Open the chat search from anywhere.', keys: [modKey, 'K'] },
-                    { title: 'New chat', desc: 'Start a fresh conversation.', keys: [modKey, 'Shift', 'O'] },
-                    { title: 'Toggle sidebar', desc: 'Collapse or expand the chat list.', keys: [modKey, 'Shift', 'S'] },
-                    { title: 'Send message', desc: 'Send what you typed in the composer.', keys: ['Enter'] },
-                    { title: 'New line', desc: 'Add a line break without sending.', keys: ['Shift', 'Enter'] },
-                    { title: 'Close dialog', desc: 'Dismiss pop-ups such as upload and confirmations.', keys: ['Esc'] },
-                  ].map(item => (
-                    <Row key={item.title} title={item.title} desc={item.desc}>
-                      <div className="flex items-center gap-1.5">
-                        {item.keys.map((key, index) => (
-                          <span key={key} className="flex items-center gap-1.5">
-                            {index > 0 && <span className="text-xs text-zinc-300 dark:text-zinc-600">+</span>}
-                            <Kbd>{key}</Kbd>
-                          </span>
-                        ))}
+                <div className="mt-6 flex h-40 items-end gap-2 sm:gap-4" role="img" aria-label="Messages per day for the last 7 days">
+                  {dailyLabels.map((day, index) => {
+                    const count = metrics.dailyMessages[index];
+                    return (
+                      <div key={day.toISOString()} className="flex h-full flex-1 flex-col items-center justify-end gap-2">
+                        <span className="text-xs text-zinc-500">{count}</span>
+                        <div
+                          title={`${day.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}: ${count} messages, ${dailySessions[index]} new chats`}
+                          className={`w-full max-w-[44px] rounded-t-md transition-all ${
+                            count > 0 ? 'bg-[#C6613F]' : 'bg-zinc-100 dark:bg-white/10'
+                          }`}
+                          style={{ height: `${Math.max(4, (count / maxDaily) * 100)}%` }}
+                        />
+                        <span className="text-xs text-zinc-500">
+                          {day.toLocaleDateString(undefined, { weekday: 'short' })}
+                        </span>
                       </div>
-                    </Row>
-                  ))}
-                </Card>
-              )}
-
-              {/* USAGE */}
-              {active === 'usage' && (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    {updatedLabel}
-                    {RefreshButton}
-                  </div>
-                  {errorBanner}
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <StatCard
-                      label="Total chats"
-                      loading={firstLoad}
-                      value={String(metrics.sessions.length)}
-                      detail={`${metrics.todaySessions} today · ${metrics.weekSessions} in 7 days`}
-                    />
-                    <StatCard
-                      label="Total messages"
-                      loading={firstLoad}
-                      value={String(metrics.messageCount)}
-                      detail={`${metrics.userMessages} user · ${metrics.assistantMessages} assistant`}
-                    />
-                    <StatCard
-                      label="Messages today"
-                      loading={firstLoad}
-                      value={String(metrics.todayMessages)}
-                      detail={`${metrics.weekMessages} in the last 7 days`}
-                    />
-                    <StatCard
-                      label="Average per chat"
-                      loading={firstLoad}
-                      value={metrics.sessions.length ? averageMessages.toFixed(1) : '0'}
-                      detail="Based on loaded conversation history"
-                    />
-                  </div>
+                    );
+                  })}
                 </div>
-              )}
+              </Panel>
 
-              {/* ANALYTICS */}
-              {active === 'analytics' && (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    {updatedLabel}
-                    {RefreshButton}
-                  </div>
-                  {errorBanner}
+              <div className="grid gap-3 sm:grid-cols-3">
+                <StatCard label="User messages" loading={firstLoad} value={String(metrics.userMessages)} />
+                <StatCard label="AI messages" loading={firstLoad} value={String(metrics.assistantMessages)} />
+                <StatCard label="7-day chats" loading={firstLoad} value={String(metrics.weekSessions)} />
+              </div>
 
-                  <Card className="py-6">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h3 className="font-semibold text-zinc-900 dark:text-white">Messages per day</h3>
-                        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                          Calculated from your live message history.
-                        </p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <StatCard
+                  label="Most active day"
+                  loading={firstLoad}
+                  value={metrics.weekMessages > 0 ? dailyLabels[busiestIndex].toLocaleDateString(undefined, { weekday: 'long' }) : '—'}
+                  detail={metrics.weekMessages > 0 ? `${metrics.dailyMessages[busiestIndex]} messages` : 'No activity yet'}
+                />
+                <StatCard
+                  label="Daily average"
+                  loading={firstLoad}
+                  value={(metrics.weekMessages / 7).toFixed(1)}
+                  detail="Messages per day, last 7 days"
+                />
+                <StatCard
+                  label="Longest chat"
+                  loading={firstLoad}
+                  value={String(topConversations[0]?.count ?? 0)}
+                  detail="Messages in one conversation"
+                />
+              </div>
+
+              <Panel>
+                <h3 className="text-[15px] font-medium text-zinc-900 dark:text-white">Top conversations</h3>
+                <div className="mt-3 space-y-0.5">
+                  {topConversations.length === 0 || topConversations[0].count === 0 ? (
+                    <p className="text-sm text-zinc-500">No conversations yet.</p>
+                  ) : (
+                    topConversations.map(item => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        disabled={!item.publicId}
+                        onClick={() => item.publicId && navigate(`/c/${item.publicId}`)}
+                        className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition enabled:hover:bg-zinc-50 dark:enabled:hover:bg-white/5"
+                      >
+                        <FileText className="h-[18px] w-[18px] shrink-0 text-zinc-500" strokeWidth={1.6} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm text-zinc-900 dark:text-zinc-100">{item.name}</p>
+                          <p className="text-xs text-zinc-500">
+                            {item.last ? `Last message ${item.last.toLocaleString()}` : 'No dated messages'}
+                          </p>
+                        </div>
+                        <span className="text-sm text-zinc-500 dark:text-zinc-400">{item.count} msgs</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </Panel>
+
+              <Panel>
+                <h3 className="text-[15px] font-medium text-zinc-900 dark:text-white">Recent activity</h3>
+                <div className="mt-3 space-y-0.5">
+                  {recentSessions.length === 0 ? (
+                    <p className="text-sm text-zinc-500">No dated sessions are available yet.</p>
+                  ) : (
+                    recentSessions.map(session => (
+                      <div key={session.id} className="flex items-center gap-3 rounded-lg px-2.5 py-2">
+                        <Database className="h-[18px] w-[18px] shrink-0 text-zinc-500" strokeWidth={1.6} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm text-zinc-900 dark:text-zinc-100">{session.sessionName}</p>
+                          <p className="text-xs text-zinc-500">{getSessionDate(session)?.toLocaleString()}</p>
+                        </div>
                       </div>
-                      <BarChart3 className="h-5 w-5 text-zinc-400" />
-                    </div>
-
-                    <div className="mt-6 flex h-40 items-end gap-2 sm:gap-4" role="img" aria-label="Messages per day for the last 7 days">
-                      {dailyLabels.map((day, index) => {
-                        const count = metrics.dailyMessages[index];
-                        return (
-                          <div key={day.toISOString()} className="flex h-full flex-1 flex-col items-center justify-end gap-2">
-                            <span className="text-[11px] font-semibold text-zinc-500">{count}</span>
-                            <div
-                              title={`${day.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}: ${count} messages, ${dailySessions[index]} new chats`}
-                              className={`w-full max-w-[44px] rounded-t-lg transition-all ${
-                                count > 0
-                                  ? 'bg-gradient-to-t from-violet-500 to-fuchsia-400'
-                                  : 'bg-zinc-100 dark:bg-zinc-900'
-                              }`}
-                              style={{ height: `${Math.max(4, (count / maxDaily) * 100)}%` }}
-                            />
-                            <span className="text-[10px] font-semibold text-zinc-400">
-                              {day.toLocaleDateString(undefined, { weekday: 'short' })}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </Card>
-
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <StatCard label="User messages" loading={firstLoad} value={String(metrics.userMessages)} />
-                    <StatCard label="AI messages" loading={firstLoad} value={String(metrics.assistantMessages)} />
-                    <StatCard label="7-day chats" loading={firstLoad} value={String(metrics.weekSessions)} />
-                  </div>
-
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <StatCard
-                      label="Most active day"
-                      loading={firstLoad}
-                      value={metrics.weekMessages > 0 ? dailyLabels[busiestIndex].toLocaleDateString(undefined, { weekday: 'long' }) : '—'}
-                      detail={metrics.weekMessages > 0 ? `${metrics.dailyMessages[busiestIndex]} messages` : 'No activity yet'}
-                    />
-                    <StatCard
-                      label="Daily average"
-                      loading={firstLoad}
-                      value={(metrics.weekMessages / 7).toFixed(1)}
-                      detail="Messages per day, last 7 days"
-                    />
-                    <StatCard
-                      label="Longest chat"
-                      loading={firstLoad}
-                      value={String(topConversations[0]?.count ?? 0)}
-                      detail="Messages in one conversation"
-                    />
-                  </div>
-
-                  <Card className="py-6">
-                    <h3 className="font-semibold text-zinc-900 dark:text-white">Top conversations</h3>
-                    <div className="mt-4 space-y-1">
-                      {topConversations.length === 0 || topConversations[0].count === 0 ? (
-                        <p className="text-sm text-zinc-500">No conversations yet.</p>
-                      ) : (
-                        topConversations.map(item => (
-                          <button
-                            key={item.id}
-                            type="button"
-                            disabled={!item.publicId}
-                            onClick={() => item.publicId && navigate(`/c/${item.publicId}`)}
-                            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition enabled:hover:bg-zinc-50 dark:enabled:hover:bg-zinc-900"
-                          >
-                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
-                              <FileText className="h-4 w-4" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-xs font-semibold text-zinc-800 dark:text-zinc-200">{item.name}</p>
-                              <p className="text-[10px] text-zinc-400">
-                                {item.last ? `Last message ${item.last.toLocaleString()}` : 'No dated messages'}
-                              </p>
-                            </div>
-                            <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
-                              {item.count} msgs
-                            </span>
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  </Card>
-
-                  <Card className="py-6">
-                    <h3 className="font-semibold text-zinc-900 dark:text-white">Recent activity</h3>
-                    <div className="mt-4 space-y-1">
-                      {recentSessions.length === 0 ? (
-                        <p className="text-sm text-zinc-500">No dated sessions are available yet.</p>
-                      ) : (
-                        recentSessions.map(session => (
-                          <div key={session.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5">
-                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
-                              <Database className="h-4 w-4" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-xs font-semibold text-zinc-800 dark:text-zinc-200">{session.sessionName}</p>
-                              <p className="text-[10px] text-zinc-400">{getSessionDate(session)?.toLocaleString()}</p>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </Card>
+                    ))
+                  )}
                 </div>
-              )}
+              </Panel>
+            </div>
+          </Section>
+        )}
 
-              {/* STORAGE */}
-              {active === 'storage' && (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    {updatedLabel}
-                    {RefreshButton}
+        {/* STORAGE */}
+        {active === 'storage' && (
+          <Section title="Storage" action={RefreshButton} first>
+            <div className="space-y-3">
+              {updatedLabel}
+              {errorBanner}
+
+              <Panel>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-zinc-500 dark:text-zinc-400">Estimated conversation storage</p>
+                    <p className="mt-1 text-3xl font-semibold tracking-tight text-zinc-900 dark:text-white">
+                      {formatBytes(totalStorageBytes)}
+                    </p>
+                    <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                      Live estimate from your loaded account data and browser preferences.
+                    </p>
                   </div>
-                  {errorBanner}
-
-                  <Card className="py-6">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-zinc-400">
-                          Estimated conversation storage
-                        </p>
-                        <p className="mt-2 text-3xl font-semibold tracking-tight text-zinc-900 dark:text-white">
-                          {formatBytes(totalStorageBytes)}
-                        </p>
-                        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                          Live estimate from your loaded account data and browser preferences.
-                        </p>
-                      </div>
-                      <HardDrive className="h-6 w-6 text-zinc-400" />
-                    </div>
-
-                    <div className="mt-6 flex h-3 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-900" role="img" aria-label="Storage breakdown">
-                      {totalStorageBytes > 0 && (
-                        <>
-                          <div className="h-full bg-violet-500 transition-all" style={{ width: `${(metrics.messageBytes / totalStorageBytes) * 100}%` }} />
-                          <div className="h-full bg-fuchsia-400 transition-all" style={{ width: `${(metrics.conversationBytes / totalStorageBytes) * 100}%` }} />
-                          <div className="h-full bg-sky-400 transition-all" style={{ width: `${(browserBytes / totalStorageBytes) * 100}%` }} />
-                        </>
-                      )}
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-zinc-500 dark:text-zinc-400">
-                      <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-violet-500" />Messages</span>
-                      <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-fuchsia-400" />Sessions</span>
-                      <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-sky-400" />Browser data</span>
-                    </div>
-                  </Card>
-
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <StatCard label="Sessions" loading={firstLoad} value={formatBytes(metrics.conversationBytes)} detail={`${metrics.sessions.length} chats`} />
-                    <StatCard label="Messages" loading={firstLoad} value={formatBytes(metrics.messageBytes)} detail={`${metrics.messageCount} messages`} />
-                    <StatCard label="Browser data" value={formatBytes(browserBytes)} detail="local + session storage" />
-                  </div>
-
-                  <Card>
-                    <Row title="Manage your data" desc="Export a copy of your chats, delete them, or clear data stored on this device.">
-                      <Btn onClick={() => setActive('data')}>
-                        Data controls
-                        <ChevronRight className="h-3.5 w-3.5" />
-                      </Btn>
-                    </Row>
-                    <Row title="Automatic refresh" desc="Metrics refresh every minute while this page is open.">
-                      <Btn onClick={() => void refreshMetrics()} disabled={loadingMetrics}>
-                        <RefreshCw className={`h-3.5 w-3.5 ${loadingMetrics ? 'animate-spin' : ''}`} />
-                        Refresh now
-                      </Btn>
-                    </Row>
-                  </Card>
+                  <HardDrive className="h-6 w-6 text-zinc-400" strokeWidth={1.5} />
                 </div>
-              )}
 
-              {/* DATA CONTROLS */}
-              {active === 'data' && (
-                <div className="space-y-4">
-                  <Card>
-                    <Row
-                      title="Export your chats"
-                      desc={exporting ? exportProgress : 'Download every conversation as a file you keep.'}
-                    >
-                      <div className="flex flex-wrap gap-2">
-                        <Btn onClick={() => void exportChats('json')} disabled={Boolean(exporting)}>
-                          {exporting === 'json' ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <FileJson className="h-3.5 w-3.5" />}
-                          JSON
-                        </Btn>
-                        <Btn onClick={() => void exportChats('markdown')} disabled={Boolean(exporting)}>
-                          {exporting === 'markdown' ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-                          Markdown
-                        </Btn>
-                      </div>
-                    </Row>
-
-                    <Row
-                      title="Clear browser data"
-                      desc="Resets pinned chats, sidebar layout and the last-opened chat on this device. Your chats stay safe."
-                    >
-                      <Btn onClick={() => setConfirm('browser')}>
-                        <HardDrive className="h-3.5 w-3.5" />
-                        Clear
-                      </Btn>
-                    </Row>
-
-                    <Row title="Sign out" desc="Sign out of Twinkle on this device.">
-                      <Btn onClick={() => setConfirm('signout')}>
-                        <LogOut className="h-3.5 w-3.5" />
-                        Sign out
-                      </Btn>
-                    </Row>
-                  </Card>
-
-                  <div className="rounded-3xl border border-[#fecaca] bg-[#fef2f2] px-6 dark:border-[#7f1d1d] dark:bg-[#2a0f12]">
-                    <Row
-                      title="Delete all chats"
-                      desc="Permanently removes every conversation and its messages from your account. This cannot be undone."
-                    >
-                      <Btn variant="danger" onClick={() => setConfirm('delete')} disabled={deleting}>
-                        {deleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                        Delete all
-                      </Btn>
-                    </Row>
-                  </div>
+                <div className="mt-6 flex h-2.5 overflow-hidden rounded-full bg-zinc-100 dark:bg-white/10" role="img" aria-label="Storage breakdown">
+                  {totalStorageBytes > 0 && (
+                    <>
+                      <div className="h-full bg-[#C6613F] transition-all" style={{ width: `${(metrics.messageBytes / totalStorageBytes) * 100}%` }} />
+                      <div className="h-full bg-[#E3A68F] transition-all" style={{ width: `${(metrics.conversationBytes / totalStorageBytes) * 100}%` }} />
+                      <div className="h-full bg-[#A8A396] transition-all" style={{ width: `${(browserBytes / totalStorageBytes) * 100}%` }} />
+                    </>
+                  )}
                 </div>
-              )}
-
-              {/* ABOUT */}
-              {active === 'about' && (
-                <div className="space-y-4">
-                  <Card>
-                    <Row title="Twinkle AI" desc="Multi-model AI chat with Live Talk voice conversations.">
-                      <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
-                        v{APP_VERSION}
-                      </span>
-                    </Row>
-                    <Row title="Signed in as" desc={user.email}>
-                      <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">{providerLabel}</span>
-                    </Row>
-                    <Row title="Member since" desc="The date your account was created.">
-                      <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">{memberSinceLabel}</span>
-                    </Row>
-                    <Row title="Keyboard shortcuts" desc="See every shortcut in one place.">
-                      <Btn onClick={() => setActive('shortcuts')}>
-                        <Command className="h-3.5 w-3.5" />
-                        View shortcuts
-                      </Btn>
-                    </Row>
-                  </Card>
+                <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#C6613F]" />Messages</span>
+                  <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#E3A68F]" />Sessions</span>
+                  <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#A8A396]" />Browser data</span>
                 </div>
-              )}
-            </motion.div>
-          </div>
-        </main>
-      </div>
+              </Panel>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <StatCard label="Sessions" loading={firstLoad} value={formatBytes(metrics.conversationBytes)} detail={`${metrics.sessions.length} chats`} />
+                <StatCard label="Messages" loading={firstLoad} value={formatBytes(metrics.messageBytes)} detail={`${metrics.messageCount} messages`} />
+                <StatCard label="Browser data" value={formatBytes(browserBytes)} detail="local + session storage" />
+              </div>
+
+              <div>
+                <Row title="Manage your data" desc="Export a copy of your chats, delete them, or clear data stored on this device.">
+                  <Btn onClick={() => setActive('data')}>
+                    Data controls
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Btn>
+                </Row>
+                <Row title="Automatic refresh" desc="Metrics refresh every minute while this page is open.">
+                  <Btn onClick={() => void refreshMetrics()} disabled={loadingMetrics}>
+                    <RefreshCw className={`h-3.5 w-3.5 ${loadingMetrics ? 'animate-spin' : ''}`} />
+                    Refresh now
+                  </Btn>
+                </Row>
+              </div>
+            </div>
+          </Section>
+        )}
+
+        {/* DATA CONTROLS */}
+        {active === 'data' && (
+          <>
+            <Section title="Data controls" first>
+              <Row
+                title="Export your chats"
+                desc={exporting ? exportProgress : 'Download every conversation as a file you keep.'}
+              >
+                <div className="flex flex-wrap gap-2">
+                  <Btn onClick={() => void exportChats('json')} disabled={Boolean(exporting)}>
+                    {exporting === 'json' ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <FileJson className="h-3.5 w-3.5" />}
+                    JSON
+                  </Btn>
+                  <Btn onClick={() => void exportChats('markdown')} disabled={Boolean(exporting)}>
+                    {exporting === 'markdown' ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                    Markdown
+                  </Btn>
+                </div>
+              </Row>
+
+              <Row
+                title="Clear browser data"
+                desc="Resets pinned chats, sidebar layout and the last-opened chat on this device. Your chats stay safe."
+              >
+                <Btn onClick={() => setConfirm('browser')}>
+                  <HardDrive className="h-3.5 w-3.5" />
+                  Clear
+                </Btn>
+              </Row>
+
+              <Row title="Sign out" desc="Sign out of Twinkle on this device.">
+                <Btn onClick={() => setConfirm('signout')}>
+                  <LogOut className="h-3.5 w-3.5" />
+                  Sign out
+                </Btn>
+              </Row>
+            </Section>
+
+            <div className={`mt-8 ${dangerZone}`}>
+              <Row
+                title="Delete all chats"
+                desc="Permanently removes every conversation and its messages from your account. This cannot be undone."
+              >
+                <Btn variant="danger" onClick={() => setConfirm('delete')} disabled={deleting}>
+                  {deleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                  Delete all
+                </Btn>
+              </Row>
+            </div>
+          </>
+        )}
+
+        {/* ABOUT */}
+        {active === 'about' && (
+          <Section title="About" first>
+            <Row title="Twinkle AI" desc="Multi-model AI chat with Live Talk voice conversations.">
+              <span className="text-[15px] text-zinc-800 dark:text-zinc-200">v{APP_VERSION}</span>
+            </Row>
+            <Row title="Signed in as" desc={user.email}>
+              <span className="text-[15px] text-zinc-800 dark:text-zinc-200">{providerLabel}</span>
+            </Row>
+            <Row title="Member since" desc="The date your account was created.">
+              <span className="text-[15px] text-zinc-800 dark:text-zinc-200">{memberSinceLabel}</span>
+            </Row>
+            <Row title="Keyboard shortcuts" desc="See every shortcut in one place.">
+              <Btn onClick={() => setActive('shortcuts')}>
+                <Command className="h-3.5 w-3.5" />
+                View shortcuts
+              </Btn>
+            </Row>
+          </Section>
+        )}
+      </motion.div>
 
       <VoicePickerModal
         open={voicePickerOpen}
@@ -2205,6 +2166,6 @@ export default function Settings({
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </SettingsShell>
   );
 }
