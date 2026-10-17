@@ -7,8 +7,7 @@
   --font-serif: "Source Serif 4", ui-serif, Georgia, Cambria, "Times New Roman", serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
-  /* Claude-style warm neutral palette. Every existing zinc-* / black class in
-     the app picks these up automatically in both light and dark mode. */
+
   --color-black: #1F1E1D;
   --color-zinc-50: #F7F6F1;
   --color-zinc-100: #F0EEE6;
