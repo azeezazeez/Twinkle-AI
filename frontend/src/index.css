@@ -1678,10 +1678,13 @@ body {
   --twinkle-accent: #D97757;
 }
 
-html { font-size: 16px; }
+/* Claude-sized UI: 15px root keeps every rem-based size (Tailwind text-sm,
+   spacing, h-10 ...) about 6% smaller than the browser default. Chat message
+   text and the composer stay at 16px below. */
+html { font-size: 15px; }
 
 body {
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
