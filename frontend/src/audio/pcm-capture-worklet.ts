@@ -4,11 +4,31 @@ class TwinklePcmCaptureProcessor extends AudioWorkletProcessor {
 
     this.inputRate = sampleRate;
     this.targetRate = 16000;
+    this.ratio = this.inputRate / this.targetRate;
+
+
+    this.cellFill = 0;
+    this.cellSum = 0;
+
     // Batch ~10 ms of 16 kHz PCM per message instead of one message per
     // 128-sample render quantum (~375 msgs/s), cutting main-thread work.
     this.chunkSamples = 160;
-    this.pending = new Int16Array(this.chunkSamples * 2);
+    this.pending = new Int16Array(this.chunkSamples * 4);
     this.pendingLength = 0;
+  }
+
+  pushSample(value) {
+    const clamped = value > 1 ? 1 : value < -1 ? -1 : value;
+
+    if (this.pendingLength >= this.pending.length) {
+      const grown = new Int16Array(this.pending.length * 2);
+      grown.set(this.pending);
+      this.pending = grown;
+    }
+
+    this.pending[this.pendingLength] =
+      clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+    this.pendingLength += 1;
   }
 
   process(inputs, outputs) {
@@ -17,15 +37,19 @@ class TwinklePcmCaptureProcessor extends AudioWorkletProcessor {
 
     // Keep the audio graph alive. LiveTalkModal routes this through a gain
     // node whose value is 0, so microphone audio is never played back.
-    if (output && input) {
-      const length = Math.min(output.length, input.length);
+    if (output) {
+      if (input) {
+        const length = Math.min(output.length, input.length);
 
-      for (let i = 0; i < length; i += 1) {
-        output[i] = input[i] || 0;
-      }
+        for (let i = 0; i < length; i += 1) {
+          output[i] = input[i] || 0;
+        }
 
-      for (let i = length; i < output.length; i += 1) {
-        output[i] = 0;
+        for (let i = length; i < output.length; i += 1) {
+          output[i] = 0;
+        }
+      } else {
+        output.fill(0);
       }
     }
 
@@ -33,51 +57,33 @@ class TwinklePcmCaptureProcessor extends AudioWorkletProcessor {
       return true;
     }
 
-    const ratio = this.inputRate / this.targetRate;
-    const outputLength = Math.max(
-      1,
-      Math.round(input.length / ratio),
-    );
+    const ratio = this.ratio;
 
-    const pcm = new Int16Array(outputLength);
+    for (let n = 0; n < input.length; n += 1) {
+      const sample = input[n] || 0;
 
-    for (let i = 0; i < outputLength; i += 1) {
-      const position = i * ratio;
+      if (ratio <= 1.0001) {
+        // Already 16 kHz (or lower): pass through unchanged.
+        this.pushSample(sample);
+        continue;
+      }
 
-      const left = Math.min(
-        Math.floor(position),
-        input.length - 1,
-      );
+      let remaining = 1;
+      while (remaining > 1e-9) {
+        const room = ratio - this.cellFill;
+        const take = remaining < room ? remaining : room;
 
-      const right = Math.min(
-        left + 1,
-        input.length - 1,
-      );
+        this.cellSum += sample * take;
+        this.cellFill += take;
+        remaining -= take;
 
-      const fraction = position - left;
-
-      const sample =
-        input[left] * (1 - fraction) +
-        input[right] * fraction;
-
-      const clamped = Math.max(
-        -1,
-        Math.min(1, sample),
-      );
-
-      pcm[i] =
-        clamped < 0
-          ? clamped * 0x8000
-          : clamped * 0x7fff;
+        if (this.cellFill >= ratio - 1e-9) {
+          this.pushSample(this.cellSum / ratio);
+          this.cellSum = 0;
+          this.cellFill = 0;
+        }
+      }
     }
-
-    if (this.pendingLength + pcm.length > this.pending.length) {
-      const grown = new Int16Array((this.pendingLength + pcm.length) * 2);
-      grown.set(this.pending.subarray(0, this.pendingLength));
-      this.pending = grown;
-    }
-    this.pending.set(pcm, this.pendingLength);
-    this.pendingLength += pcm.length;
 
     if (this.pendingLength >= this.chunkSamples) {
       const out = this.pending.slice(0, this.pendingLength);
