@@ -27,11 +27,13 @@ import java.util.Map;
 public class LiveTokenController {
 
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
-    private static final String LIVE_MODEL = "gemini-3.8-live";
 
 
     @Value("${gemini.api.key}")
     private String geminiApiKey;
+
+    @Value("${gemini.live.model:gemini-3.8-live}")
+    private String liveModel;
 
     private final ObjectMapper objectMapper;
 
@@ -95,7 +97,7 @@ public class LiveTokenController {
             String body = objectMapper.writeValueAsString(requestJson);
 
             Request request = new Request.Builder()
-                    .url("https://generativelanguage.googleapis.com/v1beta/auth_tokens")
+                    .url("https://generativelanguage.googleapis.com/v1alpha/auth_tokens")
                     .addHeader("x-goog-api-key", geminiApiKey)
                     .addHeader("Content-Type", "application/json")
                     .post(okhttp3.RequestBody.create(body, JSON))
@@ -129,7 +131,7 @@ public class LiveTokenController {
 
                 return ResponseEntity.ok(Map.of(
                         "token", token,
-                        "model", LIVE_MODEL,
+                        "model", liveModel,
                         "expiresAt", expireTime,
                         "newSessionExpiresAt", newSessionExpireTime,
                         "uses", 10
