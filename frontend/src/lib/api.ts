@@ -901,7 +901,8 @@ export const authApi = {
 
   updateProfile: (
     data: {
-      username: string;
+      username?: string;
+      name?: string;
     }
   ) =>
     fetchWithAuth(
