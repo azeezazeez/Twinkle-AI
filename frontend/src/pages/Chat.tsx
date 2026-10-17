@@ -7,10 +7,11 @@ import Sidebar from '../components/Sidebar';
 import { chatApi, authApi, createLiveToken, startLiveTokenKeepWarm, warmLiveToken } from '../lib/api'; 
 import { motion, AnimatePresence } from 'motion/react'; 
 import StormLogo from '../components/StormLogo';
-import ConfirmationModal from '../components/ConfirmationModal'; 
+import ConfirmationModal from '../components/ConfirmationModal';
 import ShareChatModal from '../components/ShareChatModal';
 import UploadFilesModal from '../components/UploadFilesModal';
 import LiveTalkModal from '../components/LiveTalkModal';
+import { onShortcut, takePendingShortcut, type ShortcutAction } from '../lib/shortcuts';
 import { getSavedLiveTalkColor } from '../lib/liveTalkColors';
 import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw'; 
 
@@ -3733,16 +3734,19 @@ if (isBlankDraft) {
   const createNewSessionRef = useRef<() => void>(() => {});
   createNewSessionRef.current = createNewSession;
 
-  useEffect(() => {
-    const handleNewChatShortcut = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key.toLowerCase() === 'o' || event.code === 'KeyO')) {
-        event.preventDefault();
-        createNewSessionRef.current();
-      }
-    };
+  // Shortcuts are detected once for the whole app (GlobalShortcuts in App.tsx)
+  // and broadcast here. `live-talk` also works when pressed from Settings.
+  const openLiveTalkRef = useRef<() => void>(() => {});
+  openLiveTalkRef.current = () => setLiveTalkOpen(true);
 
-    window.addEventListener('keydown', handleNewChatShortcut);
-    return () => window.removeEventListener('keydown', handleNewChatShortcut);
+  useEffect(() => {
+    const run = (action: ShortcutAction) => {
+      if (action === 'new-chat') createNewSessionRef.current();
+      else if (action === 'live-talk') openLiveTalkRef.current();
+    };
+    const pending = takePendingShortcut();
+    if (pending === 'live-talk') run(pending);
+    return onShortcut(run);
   }, []);
 
   const deleteSession = (sid: number) => {
