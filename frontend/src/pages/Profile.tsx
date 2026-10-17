@@ -1,24 +1,26 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import {
-  ArrowLeft,
   CalendarDays,
   Check,
-  Edit3,
   Flame,
-  Mail,
-  MessagesSquare,
+  ImageIcon,
+  LogOut,
+  Minus,
+  Pencil,
+  Plus,
   RefreshCw,
-  Save,
-  SlidersHorizontal,
+  Trash2,
   Trophy,
+  UserCircle2,
   X,
   Zap,
 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import type { User } from '../types';
 import { authApi, chatApi } from '../lib/api';
 import UserAvatar from '../components/UserAvatar';
+import { presetAvatars, removeLocalAvatar, saveLocalAvatar, withLocalAvatar } from '../lib/avatar';
+import { Btn, Row, Section, SettingsShell } from './Settings';
 
 const formatNumber = (value: number) =>
   new Intl.NumberFormat('en-US', {
@@ -192,6 +194,252 @@ function monthLabels(days: ReturnType<typeof buildHeatmap>) {
   return labels;
 }
 
+const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+const OUTPUT_SIZE = 256;
+
+/** "Crop photo" dialog: drag / arrow keys to reposition, slider or wheel to zoom. */
+function CropPhotoModal({
+  src,
+  onCancel,
+  onSave,
+}: {
+  src: string;
+  onCancel: () => void;
+  onSave: (dataUrl: string) => void;
+}) {
+  const box = Math.min(360, typeof window === 'undefined' ? 360 : window.innerWidth - 96);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+
+  const dims = useMemo(() => {
+    if (!natural) return { w: box, h: box };
+    const base = Math.max(box / natural.w, box / natural.h);
+    return { w: natural.w * base * zoom, h: natural.h * base * zoom };
+  }, [natural, zoom, box]);
+
+  const clamp = (x: number, y: number, d = dims) => {
+    const maxX = Math.max(0, (d.w - box) / 2);
+    const maxY = Math.max(0, (d.h - box) / 2);
+    return { x: Math.min(maxX, Math.max(-maxX, x)), y: Math.min(maxY, Math.max(-maxY, y)) };
+  };
+
+  useEffect(() => {
+    setOffset(current => clamp(current.x, current.y));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dims.w, dims.h]);
+
+  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drag.current = { x: event.clientX, y: event.clientY, ox: offset.x, oy: offset.y };
+  };
+  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!drag.current) return;
+    setOffset(clamp(drag.current.ox + event.clientX - drag.current.x, drag.current.oy + event.clientY - drag.current.y));
+  };
+  const onPointerUp = () => {
+    drag.current = null;
+  };
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = 12;
+    const moves: Record<string, [number, number]> = {
+      ArrowLeft: [step, 0],
+      ArrowRight: [-step, 0],
+      ArrowUp: [0, step],
+      ArrowDown: [0, -step],
+    };
+    const move = moves[event.key];
+    if (!move) return;
+    event.preventDefault();
+    setOffset(current => clamp(current.x + move[0], current.y + move[1]));
+  };
+
+  const reset = () => {
+    setZoom(1);
+    setOffset({ x: 0, y: 0 });
+  };
+
+  const save = () => {
+    const img = imgRef.current;
+    if (!img || !natural) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = OUTPUT_SIZE;
+    canvas.height = OUTPUT_SIZE;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const ratio = OUTPUT_SIZE / box;
+    const left = (box - dims.w) / 2 + offset.x;
+    const top = (box - dims.h) / 2 + offset.y;
+    ctx.drawImage(img, left * ratio, top * ratio, dims.w * ratio, dims.h * ratio);
+    onSave(canvas.toDataURL('image/jpeg', 0.9));
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-4"
+      onMouseDown={event => {
+        if (event.target === event.currentTarget) onCancel();
+      }}
+    >
+      <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Crop photo"
+        initial={{ opacity: 0, scale: 0.98, y: 8 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.98, y: 8 }}
+        transition={{ duration: 0.16 }}
+        className="w-full max-w-[500px] rounded-2xl bg-white p-[30px] shadow-2xl dark:bg-[#30302E]"
+      >
+        <h3 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">Crop photo</h3>
+        <p className="mt-2 text-[15px] leading-5 text-zinc-600 dark:text-zinc-400">
+          Drag or use the arrow keys to reposition. Use the slider or scroll to zoom.
+        </p>
+
+        <div className="mt-5 flex justify-center">
+          <div
+            tabIndex={0}
+            role="application"
+            aria-label="Photo crop area"
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+            onKeyDown={onKeyDown}
+            onWheel={event => setZoom(z => Math.min(3, Math.max(1, z - event.deltaY * 0.002)))}
+            className="relative touch-none cursor-grab select-none overflow-hidden rounded-xl bg-zinc-100 outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/60 active:cursor-grabbing dark:bg-black/30"
+            style={{ width: box, height: box }}
+          >
+            <img
+              ref={imgRef}
+              src={src}
+              alt=""
+              draggable={false}
+              onLoad={event => setNatural({ w: event.currentTarget.naturalWidth, h: event.currentTarget.naturalHeight })}
+              className="pointer-events-none absolute max-w-none"
+              style={{
+                width: dims.w,
+                height: dims.h,
+                left: (box - dims.w) / 2 + offset.x,
+                top: (box - dims.h) / 2 + offset.y,
+              }}
+            />
+            {/* Circular guide: what sits outside the circle is dimmed */}
+            <div
+              className="pointer-events-none absolute inset-0 rounded-full"
+              style={{ boxShadow: '0 0 0 9999px rgba(255,255,255,0.45)' }}
+              aria-hidden="true"
+            />
+          </div>
+        </div>
+
+        <div className="mt-6 flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => setZoom(z => Math.max(1, z - 0.2))}
+            aria-label="Zoom out"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-white/10"
+          >
+            <Minus className="h-[18px] w-[18px]" strokeWidth={1.7} />
+          </button>
+          <input
+            type="range"
+            min={1}
+            max={3}
+            step={0.01}
+            value={zoom}
+            onChange={event => setZoom(Number(event.target.value))}
+            aria-label="Zoom"
+            className="h-2 flex-1 cursor-pointer appearance-none rounded-full bg-zinc-200 accent-zinc-900 dark:bg-white/15 dark:accent-white"
+          />
+          <button
+            type="button"
+            onClick={() => setZoom(z => Math.min(3, z + 0.2))}
+            aria-label="Zoom in"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-white/10"
+          >
+            <Plus className="h-[18px] w-[18px]" strokeWidth={1.7} />
+          </button>
+        </div>
+
+        <div className="mt-6 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={reset}
+            className="rounded-lg px-2 py-1.5 text-[15px] text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+          >
+            Reset
+          </button>
+          <div className="flex gap-2">
+            <Btn onClick={onCancel}>Cancel</Btn>
+            <Btn variant="primary" onClick={save} disabled={!natural}>
+              Save
+            </Btn>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+/** "Choose an avatar": a grid of simple preset avatars. */
+function AvatarPickerModal({
+  name,
+  onCancel,
+  onPick,
+}: {
+  name: string;
+  onCancel: () => void;
+  onPick: (dataUrl: string) => void;
+}) {
+  const options = useMemo(() => presetAvatars(name), [name]);
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-4"
+      onMouseDown={event => {
+        if (event.target === event.currentTarget) onCancel();
+      }}
+    >
+      <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Choose an avatar"
+        initial={{ opacity: 0, scale: 0.98, y: 8 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.98, y: 8 }}
+        transition={{ duration: 0.16 }}
+        className="w-full max-w-[420px] rounded-2xl bg-white p-[30px] shadow-2xl dark:bg-[#30302E]"
+      >
+        <h3 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">Choose an avatar</h3>
+        <div className="mt-5 grid grid-cols-4 gap-4">
+          {options.map((url, index) => (
+            <button
+              key={index}
+              type="button"
+              onClick={() => onPick(url)}
+              aria-label={`Avatar ${index + 1}`}
+              className="overflow-hidden rounded-full ring-offset-2 ring-offset-white transition hover:ring-2 hover:ring-zinc-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 dark:ring-offset-[#30302E]"
+            >
+              <img src={url} alt="" className="h-full w-full" />
+            </button>
+          ))}
+        </div>
+        <div className="mt-6 flex justify-end">
+          <Btn onClick={onCancel}>Cancel</Btn>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 export default function Profile({
   user,
   onUserUpdate,
@@ -199,13 +447,20 @@ export default function Profile({
   user: User;
   onUserUpdate: (user: User) => void;
 }) {
-  const navigate = useNavigate();
 
-  const [editing, setEditing] = useState(false);
   const [username, setUsername] = useState(user.username);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
+  const [photoMenu, setPhotoMenu] = useState(false);
+  const [cropSrc, setCropSrc] = useState<string | null>(null);
+  const [pickingAvatar, setPickingAvatar] = useState(false);
+  const [photoError, setPhotoError] = useState('');
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const photoMenuRef = useRef<HTMLDivElement | null>(null);
 
   const [activityRange, setActivityRange] =
     useState<'daily' | 'weekly' | 'cumulative'>('daily');
@@ -386,7 +641,6 @@ export default function Profile({
       String(user.username || '').trim()
     ) {
       setError('');
-      setEditing(false);
       return;
     }
 
@@ -399,8 +653,9 @@ export default function Profile({
           username: nextUsername,
         });
 
-      onUserUpdate(res.user);
-      setEditing(false);
+      onUserUpdate(withLocalAvatar(res.user));
+      setSavedFlash(true);
+      window.setTimeout(() => setSavedFlash(false), 1800);
     } catch (e: any) {
       const status = Number(e?.status || 0);
       const message = String(e?.message || '');
@@ -433,12 +688,6 @@ export default function Profile({
       ? memberSince.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
       : null;
 
-  const cancelEdit = () => {
-    setUsername(user.username);
-    setError('');
-    setEditing(false);
-  };
-
   const summaryCards = [
     { label: 'Lifetime tokens', value: formatNumber(Number(stats.lifetimeTokens || 0)), icon: Zap },
     { label: 'Peak tokens', value: formatNumber(Number(stats.peakTokens || 0)), icon: Trophy },
@@ -463,195 +712,278 @@ export default function Profile({
 
   const columnCount = Math.max(1, Math.floor(heatmap.length / 7) - 1);
 
+  // A photo chosen here is kept in this browser (the backend has no upload
+  // endpoint) and layered over the account picture.
+  useEffect(() => {
+    const layered = withLocalAvatar(user);
+    if (layered.avatarUrl !== user.avatarUrl) onUserUpdate(layered);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user.id, user.avatarUrl]);
+
+  useEffect(() => {
+    if (!photoMenu) return;
+    const onPointer = (event: MouseEvent) => {
+      if (!photoMenuRef.current?.contains(event.target as Node)) setPhotoMenu(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPhotoMenu(false);
+    };
+    document.addEventListener('mousedown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [photoMenu]);
+
+  const onFileChosen = (file: File | undefined) => {
+    if (!file) return;
+    setPhotoError('');
+    if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
+      setPhotoError('Please choose a PNG, JPEG, or WebP image.');
+      return;
+    }
+    if (file.size > MAX_PHOTO_BYTES) {
+      setPhotoError('That image is larger than 10MB.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setCropSrc(String(reader.result));
+    reader.onerror = () => setPhotoError('Could not read that image.');
+    reader.readAsDataURL(file);
+  };
+
+  const applyAvatar = (dataUrl: string) => {
+    saveLocalAvatar(user.id, dataUrl);
+    onUserUpdate({ ...user, avatarUrl: dataUrl });
+    setCropSrc(null);
+    setPickingAvatar(false);
+  };
+
+  const removePhoto = () => {
+    removeLocalAvatar(user.id);
+    onUserUpdate({ ...user, avatarUrl: undefined });
+    setPhotoMenu(false);
+  };
+
+  const logOut = async () => {
+    setLoggingOut(true);
+    setLogoutError('');
+    try {
+      await authApi.logout();
+      // A full navigation clears all in-memory session state.
+      window.location.assign('/login');
+    } catch (e: any) {
+      setLogoutError(String(e?.message || 'Could not log out. Please try again.'));
+      setLoggingOut(false);
+    }
+  };
+
+  const inputClass =
+    'h-10 w-full rounded-lg border border-zinc-300/70 bg-white px-3 text-[15px] text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-zinc-500 dark:border-white/15 dark:bg-transparent dark:text-white dark:focus:border-white/40';
+
+  const refreshAction = (
+    <Btn onClick={() => void refreshStats()} disabled={refreshing} label="Refresh activity">
+      <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+      Refresh
+    </Btn>
+  );
+
   return (
-    <div className="h-[100dvh] w-full overflow-y-auto bg-zinc-50/60 text-zinc-900 dark:bg-zinc-950 dark:text-white">
-      <main className="mx-auto flex min-h-[100dvh] w-full max-w-[960px] flex-col px-5 pb-16 pt-5 sm:px-8 sm:pt-8">
-        {/* TOP BAR */}
-        <div className="flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={() => {
-              if (window.history.length > 1) navigate(-1);
-              else navigate('/');
-            }}
-            className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/50 dark:text-zinc-100 dark:hover:bg-zinc-900"
-          >
-            <ArrowLeft className="h-4 w-4" strokeWidth={1.8} />
-            Back
-          </button>
+    <SettingsShell activeId="account">
+      <input
+        ref={fileInput}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        onChange={event => {
+          onFileChosen(event.target.files?.[0]);
+          event.target.value = '';
+        }}
+      />
 
-          <div className="flex items-center gap-2">
+      {/* PROFILE */}
+      <Section title="Profile" first>
+        <Row title="Profile photo" desc="PNG, JPEG, or WebP, up to 10MB.">
+          <div ref={photoMenuRef} className="relative">
             <button
               type="button"
-              onClick={() => void refreshStats()}
-              disabled={refreshing}
-              className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3.5 py-2 text-xs font-semibold text-zinc-800 transition hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/50 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              onClick={() => setPhotoMenu(open => !open)}
+              aria-haspopup="menu"
+              aria-expanded={photoMenu}
+              aria-label="Change profile photo"
+              className="group relative block rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/60"
             >
-              <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-              Refresh
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate('/settings')}
-              className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3.5 py-2 text-xs font-semibold text-zinc-800 transition hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900"
-            >
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-              Settings
-            </button>
-          </div>
-        </div>
-
-        {/* PROFILE HEADER */}
-        <motion.section
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2, ease: 'easeOut' }}
-          className="mt-6 overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
-        >
-          <div
-            className="h-24 w-full sm:h-28"
-            style={{
-              background:
-                'radial-gradient(circle at 12% 30%, rgba(244,114,182,.55) 0%, transparent 46%), radial-gradient(circle at 55% 0%, rgba(139,92,246,.55) 0%, transparent 50%), radial-gradient(circle at 92% 60%, rgba(56,189,248,.5) 0%, transparent 48%)',
-            }}
-            aria-hidden="true"
-          />
-
-          <div className="px-6 pb-6">
-            <div className="-mt-12 flex flex-col gap-4 sm:-mt-14 sm:flex-row sm:items-end sm:justify-between">
               <UserAvatar
                 name={displayName}
                 avatarUrl={user.avatarUrl}
-                className="h-24 w-24 rounded-full border-4 border-white text-[28px] font-semibold shadow-md dark:border-zinc-950 sm:h-28 sm:w-28"
+                className="h-[50px] w-[50px] text-lg font-semibold !shadow-none"
               />
+              <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                <Pencil className="h-4 w-4" strokeWidth={1.8} />
+              </span>
+            </button>
 
-              {!editing && (
-                <button
-                  type="button"
-                  onClick={() => setEditing(true)}
-                  className="inline-flex w-fit items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3.5 py-2 text-xs font-semibold text-zinc-800 transition hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            <AnimatePresence>
+              {photoMenu && (
+                <motion.div
+                  role="menu"
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.12 }}
+                  className="absolute right-0 top-[calc(100%+8px)] z-20 w-[212px] rounded-xl border border-zinc-200 bg-white p-1.5 shadow-lg dark:border-white/10 dark:bg-[#3A3A38]"
                 >
-                  <Edit3 className="h-3.5 w-3.5" strokeWidth={1.8} />
-                  Edit profile
-                </button>
+                  {[
+                    { label: 'Replace photo', icon: ImageIcon, action: () => { setPhotoMenu(false); fileInput.current?.click(); } },
+                    { label: 'Choose an avatar', icon: UserCircle2, action: () => { setPhotoMenu(false); setPickingAvatar(true); } },
+                  ].map(item => (
+                    <button
+                      key={item.label}
+                      type="button"
+                      role="menuitem"
+                      onClick={item.action}
+                      className="flex h-10 w-full items-center gap-3 rounded-lg px-2.5 text-left text-[15px] text-zinc-900 transition-colors hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-white/10"
+                    >
+                      <item.icon className="h-[18px] w-[18px]" strokeWidth={1.6} />
+                      {item.label}
+                    </button>
+                  ))}
+                  {user.avatarUrl && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={removePhoto}
+                      className="flex h-10 w-full items-center gap-3 rounded-lg px-2.5 text-left text-[15px] text-[#b3261e] transition-colors hover:bg-[#fdf1f0] dark:text-[#f2b8b5] dark:hover:bg-[#2a0f12]"
+                    >
+                      <Trash2 className="h-[18px] w-[18px]" strokeWidth={1.6} />
+                      Remove
+                    </button>
+                  )}
+                </motion.div>
               )}
-            </div>
-
-            <div className="mt-4 min-w-0">
-              <h1 className="truncate text-2xl font-semibold tracking-tight text-zinc-950 dark:text-white sm:text-3xl">
-                {displayName}
-              </h1>
-              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">@{user.username}</p>
-
-              <div className="mt-4 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-zinc-600 dark:text-zinc-300">
-                {user.email && (
-                  <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-1 dark:bg-zinc-900">
-                    <Mail className="h-3 w-3 shrink-0" />
-                    <span className="truncate">{user.email}</span>
-                  </span>
-                )}
-                <span className="inline-flex items-center rounded-full bg-zinc-100 px-3 py-1 dark:bg-zinc-900">
-                  Signed in with {providerLabel}
-                </span>
-                {memberSinceLabel && (
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-1 dark:bg-zinc-900">
-                    <CalendarDays className="h-3 w-3 shrink-0" />
-                    Member since {memberSinceLabel}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {editing && (
-              <motion.div
-                initial={{ opacity: 0, y: -5 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="mt-5 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900"
-              >
-                <label
-                  htmlFor="profile-username"
-                  className="px-1 text-[10px] font-bold uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400"
-                >
-                  Username
-                </label>
-                <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-                  <input
-                    id="profile-username"
-                    value={username}
-                    onChange={event => setUsername(event.target.value)}
-                    onKeyDown={event => {
-                      if (event.key === 'Enter') void save();
-                      if (event.key === 'Escape') cancelEdit();
-                    }}
-                    className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm text-zinc-900 outline-none transition focus:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-white"
-                    autoComplete="username"
-                    autoCapitalize="none"
-                    spellCheck={false}
-                    maxLength={32}
-                    autoFocus
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={cancelEdit}
-                      className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-xs font-semibold text-zinc-800 transition hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900 sm:flex-none"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void save()}
-                      disabled={saving}
-                      className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-zinc-900 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200 sm:flex-none"
-                    >
-                      <Save className="h-3.5 w-3.5" />
-                      {saving ? 'Saving…' : 'Save'}
-                    </button>
-                  </div>
-                </div>
-                {error && (
-                  <p role="alert" className="mt-2 px-1 text-xs font-medium text-[#dc2626] dark:text-[#f87171]">
-                    {error}
-                  </p>
-                )}
-              </motion.div>
-            )}
+            </AnimatePresence>
           </div>
-        </motion.section>
+        </Row>
+        {photoError && (
+          <p role="alert" className="-mt-2 pb-3 text-sm text-[#b3261e] dark:text-[#f2b8b5]">
+            {photoError}
+          </p>
+        )}
 
-        {/* SUMMARY CARDS */}
-        <section className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {summaryCards.map(({ label, value, icon: Icon }, index) => (
-            <motion.div
+        <Row title="Full name">
+          <div className="w-full sm:w-[280px]">
+            <input
+              value={displayName}
+              readOnly
+              aria-label="Full name"
+              title="Your name comes from your sign-in provider"
+              className={`${inputClass} cursor-default`}
+            />
+          </div>
+        </Row>
+
+        <Row title="What should Twinkle call you?">
+          <div className="w-full sm:w-[280px]">
+            <div className="relative">
+              <input
+                id="profile-username"
+                value={username}
+                onChange={event => {
+                  setUsername(event.target.value);
+                  if (error) setError('');
+                }}
+                onBlur={() => {
+                  if (username.trim() !== String(user.username || '').trim()) void save();
+                }}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') event.currentTarget.blur();
+                  if (event.key === 'Escape') {
+                    setUsername(user.username);
+                    setError('');
+                    event.currentTarget.blur();
+                  }
+                }}
+                aria-label="What should Twinkle call you?"
+                aria-invalid={Boolean(error)}
+                className={`${inputClass} pr-9 ${error ? '!border-[#d9534f]' : ''}`}
+                autoComplete="username"
+                autoCapitalize="none"
+                spellCheck={false}
+                maxLength={32}
+              />
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400" aria-live="polite">
+                {saving ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : savedFlash ? (
+                  <Check className="h-4 w-4 text-[#2e7d32] dark:text-[#81c784]" strokeWidth={2.2} />
+                ) : null}
+              </span>
+            </div>
+          </div>
+        </Row>
+        {error && (
+          <p role="alert" className="-mt-2 pb-3 text-sm text-[#b3261e] dark:text-[#f2b8b5] sm:text-right">
+            {error}
+          </p>
+        )}
+      </Section>
+
+      {/* ACCOUNT */}
+      <Section title="Account">
+        {user.email && (
+          <Row title="Email">
+            <span className="break-all text-[15px] text-zinc-700 dark:text-zinc-300">{user.email}</span>
+          </Row>
+        )}
+        <Row title="Signed in with">
+          <span className="text-[15px] text-zinc-700 dark:text-zinc-300">{providerLabel}</span>
+        </Row>
+        {memberSinceLabel && (
+          <Row title="Member since">
+            <span className="text-[15px] text-zinc-700 dark:text-zinc-300">{memberSinceLabel}</span>
+          </Row>
+        )}
+        <Row title="Log out" desc="Sign out of Twinkle on this device.">
+          <Btn onClick={() => void logOut()} disabled={loggingOut}>
+            {loggingOut ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <LogOut className="h-3.5 w-3.5" />}
+            Log out
+          </Btn>
+        </Row>
+        {logoutError && (
+          <p role="alert" className="-mt-2 pb-3 text-sm text-[#b3261e] dark:text-[#f2b8b5] sm:text-right">
+            {logoutError}
+          </p>
+        )}
+      </Section>
+
+      {/* ACTIVITY */}
+      <Section title="Activity" action={refreshAction}>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {summaryCards.map(({ label, value, icon: Icon }) => (
+            <div
               key={label}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2, delay: 0.04 * index, ease: 'easeOut' }}
-              className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:p-5"
+              className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-white/10 dark:bg-transparent"
             >
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
-                  {label}
-                </p>
-                <Icon className="h-4 w-4 text-zinc-400" />
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">{label}</p>
+                <Icon className="h-4 w-4 text-zinc-400" strokeWidth={1.6} />
               </div>
-              <p className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">{value}</p>
-            </motion.div>
+              <p className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">{value}</p>
+            </div>
           ))}
-        </section>
+        </div>
 
-        {/* TOKEN ACTIVITY */}
-        <section className="mt-4 rounded-3xl border border-zinc-200 bg-white px-5 py-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:px-6">
+        <div className="mt-3 rounded-xl border border-zinc-200 bg-white p-5 dark:border-white/10 dark:bg-transparent">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="font-semibold text-zinc-900 dark:text-white">Token activity</h2>
-              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              <h3 className="text-[15px] font-medium text-zinc-900 dark:text-white">Token activity</h3>
+              <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
                 Darker squares mean heavier responses that day.
               </p>
             </div>
 
-            <div role="radiogroup" aria-label="Activity range" className="inline-flex rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900">
+            <div role="radiogroup" aria-label="Activity range" className="inline-flex gap-0.5 rounded-xl bg-zinc-100 p-[3px] dark:bg-white/5">
               {(['daily', 'weekly', 'cumulative'] as const).map(range => {
                 const selected = activityRange === range;
                 return (
@@ -661,10 +993,10 @@ export default function Profile({
                     role="radio"
                     aria-checked={selected}
                     onClick={() => setActivityRange(range)}
-                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/50 ${
+                    className={`h-8 rounded-[9px] border px-3.5 text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 ${
                       selected
-                        ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-white'
-                        : 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200'
+                        ? 'border-zinc-200 bg-white text-zinc-900 shadow-[0_1px_2px_rgba(0,0,0,0.05)] dark:border-white/10 dark:bg-white/15 dark:text-white'
+                        : 'border-transparent text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
                     }`}
                   >
                     {range[0].toUpperCase() + range.slice(1)}
@@ -676,7 +1008,7 @@ export default function Profile({
 
           <div className="mt-6 w-full overflow-x-auto pb-1">
             <div className="min-w-[760px]">
-              <div className="relative h-5 text-[12px] text-zinc-500 dark:text-zinc-400">
+              <div className="relative h-5 text-xs text-zinc-500 dark:text-zinc-400">
                 {labels.map(item => (
                   <span
                     key={`${item.label}-${item.column}`}
@@ -692,18 +1024,13 @@ export default function Profile({
                 {heatmap.map(day => {
                   const active = day.messages > 0 || day.tokens > 0;
                   return (
-                    <motion.span
+                    <span
                       key={day.date}
                       title={`${day.date}: ${formatNumber(day.tokens)} tokens · ${day.messages} messages`}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      transition={{ duration: 0.18 }}
-                      className={`h-[15px] w-[15px] rounded-[4px] ${
-                        active ? '' : 'bg-zinc-100 dark:bg-zinc-900'
-                      }`}
+                      className={`h-[15px] w-[15px] rounded-[4px] ${active ? '' : 'bg-zinc-100 dark:bg-white/10'}`}
                       style={
                         active
-                          ? { backgroundColor: `rgba(124, 58, 237, ${Math.max(0.2, Math.min(1, day.intensity))})` }
+                          ? { backgroundColor: `rgba(198, 97, 63, ${Math.max(0.2, Math.min(1, day.intensity))})` }
                           : undefined
                       }
                     />
@@ -712,16 +1039,16 @@ export default function Profile({
               </div>
 
               <div
-                className="mt-4 flex items-center justify-end gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400"
+                className="mt-4 flex items-center justify-end gap-1.5 text-xs text-zinc-500 dark:text-zinc-400"
                 aria-label="Token response weight legend"
               >
                 <span>Less</span>
-                <span className="h-[12px] w-[12px] rounded-[3px] bg-zinc-100 dark:bg-zinc-900" />
+                <span className="h-[12px] w-[12px] rounded-[3px] bg-zinc-100 dark:bg-white/10" />
                 {[0.25, 0.5, 0.75, 1].map(weight => (
                   <span
                     key={weight}
                     className="h-[12px] w-[12px] rounded-[3px]"
-                    style={{ backgroundColor: `rgba(124, 58, 237, ${weight})` }}
+                    style={{ backgroundColor: `rgba(198, 97, 63, ${weight})` }}
                   />
                 ))}
                 <span>More</span>
@@ -729,42 +1056,40 @@ export default function Profile({
             </div>
           </div>
 
-          <div className="mt-4 flex items-center justify-between gap-4 border-t border-zinc-100 pt-4 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-            <span className="font-semibold text-zinc-700 dark:text-zinc-300">
+          <div className="mt-4 flex items-center justify-between gap-4 border-t border-zinc-200/70 pt-4 text-sm text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+            <span className="text-zinc-800 dark:text-zinc-200">
               {activityRange === 'daily' ? 'Today' : activityRange === 'weekly' ? 'Last 7 days' : 'Last 12 months'}
             </span>
             <span className="text-right">
               {formatNumber(activitySummary.messages)} messages · {formatNumber(activitySummary.tokens)} tokens
             </span>
           </div>
-        </section>
-
-        {/* ACTIVITY INSIGHTS */}
-        <section className="mt-4 rounded-3xl border border-zinc-200 bg-white px-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="flex items-center gap-2 pt-6">
-            <MessagesSquare className="h-4 w-4 text-zinc-400" />
-            <h2 className="font-semibold text-zinc-900 dark:text-white">Activity insights</h2>
-          </div>
-
-          <div className="mt-2">
-            {insightRows.map(([label, value]) => (
-              <div
-                key={label}
-                className="flex items-center justify-between gap-4 border-b border-zinc-100 py-4 last:border-0 dark:border-zinc-800"
-              >
-                <p className="text-sm text-zinc-500 dark:text-zinc-400">{label}</p>
-                <p className="text-sm font-semibold text-zinc-900 dark:text-white">{value}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* FOOTER */}
-        <div className="mt-8 flex items-center justify-center gap-2 text-center text-xs text-zinc-500 dark:text-zinc-400">
-          <Check className="h-3.5 w-3.5 shrink-0" />
-          <span>Live account data · Updates automatically every 30 seconds.</span>
         </div>
-      </main>
-    </div>
+      </Section>
+
+      {/* INSIGHTS */}
+      <Section title="Activity insights">
+        {insightRows.map(([label, value]) => (
+          <div
+            key={label}
+            className="flex items-center justify-between gap-4 border-b border-zinc-200/70 py-4 last:border-0 dark:border-white/10"
+          >
+            <p className="text-[15px] text-zinc-900 dark:text-zinc-50">{label}</p>
+            <p className="text-[15px] text-zinc-600 dark:text-zinc-300">{value}</p>
+          </div>
+        ))}
+        <p className="mt-4 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
+          <Check className="h-3.5 w-3.5 shrink-0" />
+          Live account data · Updates automatically every 30 seconds.
+        </p>
+      </Section>
+
+      <AnimatePresence>
+        {cropSrc && <CropPhotoModal key="crop" src={cropSrc} onCancel={() => setCropSrc(null)} onSave={applyAvatar} />}
+        {pickingAvatar && (
+          <AvatarPickerModal key="avatars" name={displayName} onCancel={() => setPickingAvatar(false)} onPick={applyAvatar} />
+        )}
+      </AnimatePresence>
+    </SettingsShell>
   );
 }
