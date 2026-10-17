@@ -13,6 +13,7 @@ import UploadFilesModal from '../components/UploadFilesModal';
 import LiveTalkModal from '../components/LiveTalkModal';
 import { onShortcut, takePendingShortcut, type ShortcutAction } from '../lib/shortcuts';
 import { getSavedLiveTalkColor } from '../lib/liveTalkColors';
+import { parseServerDate } from '../lib/time';
 import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw'; 
 
 import {
@@ -33,9 +34,9 @@ import oneDark from 'react-syntax-highlighter/dist/esm/styles/prism/one-dark';
 // "9 minutes ago" label that keeps itself fresh without re-rendering the chat.
 const formatRelativeAgo = (value: string | number | Date | undefined | null): string => {
   if (!value) return 'Just now';
-  const then = new Date(value).getTime();
-  if (Number.isNaN(then)) return 'Just now';
-  const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
+  const parsed = parseServerDate(value);
+  if (!parsed) return 'Just now';
+  const seconds = Math.max(0, Math.round((Date.now() - parsed.getTime()) / 1000));
   if (seconds < 45) return 'Just now';
   const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
     ['minute', 60],
@@ -62,11 +63,11 @@ function RelativeTime({ value, className }: { value?: string | number | Date | n
     const id = window.setInterval(() => tick(n => n + 1), 30_000);
     return () => window.clearInterval(id);
   }, []);
-  const date = value ? new Date(value) : null;
+  const date = parseServerDate(value);
   return (
     <span
       className={className ?? "ml-1.5 whitespace-nowrap text-[13px] font-normal text-zinc-500 dark:text-zinc-400"}
-      title={date && !Number.isNaN(date.getTime()) ? date.toLocaleString() : undefined}
+      title={date ? date.toLocaleString() : undefined}
     >
       {formatRelativeAgo(value)}
     </span>
@@ -4385,35 +4386,17 @@ if (isBlankDraft) {
     }
   };
 
-  const shareSession = async (_sid: number, messageId?: number | string, promptContent?: string) => {
-    const prompt = cleanMessageContent(promptContent || '').trim();
-    if (!prompt) {
-      setShareError('There is no prompt text to share.');
-      setShareSessionId(-1);
-      setShareLoading(false);
-      return null;
-    }
-
-    setShareMode('prompt');
-    setShareSessionId(_sid);
-    setShareCutoffMessageId(messageId ?? null);
-    setSharePromptText(prompt);
+  // Sidebar "Share": opens the same Share chat dialog for the chosen session.
+  const shareSession = async (sid: number) => {
+    const target = sessions.find(item => item.id === sid);
+    setShareMode('conversation');
+    setShareCutoffMessageId(null);
+    setSharePromptText(target?.sessionName || '');
     setShareUrl(null);
     setShareError(null);
     setShareLoading(false);
-    // Create a fresh ID for every share action. The prompt is UTF-8 encoded into
-    // the URL fragment, so it is not shown as readable text in the address bar.
-    // Note: this is obfuscation/encoding, not cryptographic encryption.
-    const shareId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
-    const promptBytes = new TextEncoder().encode(prompt);
-    let binary = '';
-    promptBytes.forEach((byte) => { binary += String.fromCharCode(byte); });
-    const encodedPrompt = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-    const url = `${window.location.origin}/?share=${encodeURIComponent(shareId)}#p=${encodedPrompt}`;
-    setShareUrl(url);
-    return url;
+    setShareSessionId(Number.isFinite(sid) ? sid : -1);
+    return null;
   };
 
   // The top-right Share button opens the share popup; the public link is
@@ -4434,11 +4417,12 @@ if (isBlankDraft) {
   };
 
   const createConversationLink = async () => {
-    if (currentSessionId === null || shareLoading) return;
+    const targetSessionId = shareSessionId !== null && shareSessionId > 0 ? shareSessionId : currentSessionId;
+    if (targetSessionId === null || shareLoading) return;
     setShareLoading(true);
     setShareError(null);
     try {
-      const response = await chatApi.shareSession(currentSessionId) as any;
+      const response = await chatApi.shareSession(targetSessionId) as any;
       const shareToken = response?.shareToken;
       if (!response?.success || !shareToken) {
         throw new Error(response?.error || 'Could not create a public link.');
@@ -5645,25 +5629,20 @@ if (isBlankDraft) {
                         disabled={!input.trim() && (!Array.isArray(filePreviews) || filePreviews.length === 0) && !isTyping}
                         aria-label={isTyping ? 'Stop response' : 'Send message'}
                         data-tooltip={isTyping ? 'Stop response' : 'Send message'}
-                        className={`twinkle-tooltip-trigger twinkle-composer-submit relative z-[30] flex h-7 w-7 shrink-0 items-center justify-center border border-transparent text-white shadow-sm transition-all duration-200 sm:h-7 sm:w-7 ${isTyping ? 'rounded-full' : 'rounded-[9px]'}`}
+                        className={`twinkle-tooltip-trigger twinkle-composer-submit relative z-[30] flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] border transition-all duration-200 sm:h-7 sm:w-7 ${isTyping ? 'border-[#E6E6E6] text-[#1F1E1D] shadow-none' : 'border-transparent text-white shadow-none hover:brightness-95 disabled:opacity-40'}`}
                         style={{
-                          // Match the exact Live Talk modal button background.
-                          // Do not use the settings swatch/solid color here.
-                          background: liveTalkColor.swatch,
+                          // Stop: white tile, light border, dark outlined square.
+                          // Send: solid #C6613F tile, white up arrow.
+                          background: isTyping ? '#FFFFFF' : '#C6613F',
                           boxShadow: 'none',
                         }}
                       >
                         {isTyping ? (
-                          <svg viewBox="0 0 24 24" className="h-[20px] w-[20px]" aria-hidden="true">
-                            <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" strokeWidth="2" />
-                            <circle cx="12" cy="12" r="3.8" fill="currentColor" />
+                          <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true">
+                            <rect x="5" y="5" width="14" height="14" rx="2.5" fill="none" stroke="currentColor" strokeWidth="2" />
                           </svg>
                         ) : (
-                          <svg
-                            viewBox="0 0 24 24"
-                            className="h-[18px] w-[18px]"
-                            aria-hidden="true"
-                          >
+                          <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true">
                             <path
                               d="M12 19V5M5.5 11.5 12 5l6.5 6.5"
                               fill="none"
@@ -5819,7 +5798,7 @@ if (isBlankDraft) {
       <ShareChatModal
         isOpen={shareSessionId !== null}
         shareUrl={shareUrl}
-        chatName={shareMode === 'conversation' ? 'Share chat' : 'Share prompt'}
+        chatName="Share chat"
         mode={shareMode}
         onCreateLink={() => void createConversationLink()}
         emptyChat={shareMode === 'conversation' && shareSessionId === -1}
