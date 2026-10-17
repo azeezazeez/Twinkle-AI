@@ -1,17 +1,15 @@
-import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { Session, User } from '../types';
 import {
-  LogOut, Trash2, X, Search, SquarePen,
-  MoreHorizontal, PinOff, Loader2, 
-  MessageCircle, Pencil, Upload, 
-  Settings2, UserCircle2, ChevronRight, ChevronDown, PanelLeft, ArrowUpDown, ListFilter, Check,
+  LogOut, Trash2, X, Search, Plus, MoreVertical, PinOff, Loader2,
+  MessageCircle, Pencil, Upload, Eye, EyeOff,
+  Settings2, UserCircle2, ChevronDown, SlidersHorizontal, ArrowUpDown, Check,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import UserAvatar from './UserAvatar'; 
+import UserAvatar from './UserAvatar';
 import { chatApi } from '../lib/api';
-import StormLogo from './StormLogo'; 
 import SearchBar from './SearchBar';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -40,15 +38,29 @@ interface Props {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PINNED_KEY = 'Twinkle_pinned_sessions';
+const UNREAD_KEY = 'Twinkle_unread_sessions';
 const SIDEBAR_SEEN_KEY = 'Twinkle_sidebar_seen';
 const PINNED_CHANGED_EVENT = 'twinkle:pinned-sessions-changed';
+const UNREAD_CHANGED_EVENT = 'twinkle:unread-sessions-changed';
 
-const loadPinnedIds = (): number[] => {
-  try { return JSON.parse(localStorage.getItem(PINNED_KEY) || '[]'); } catch { return []; }
+const loadIdList = (key: string): number[] => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || '[]');
+    return Array.isArray(parsed) ? parsed.map(Number).filter(Number.isFinite) : [];
+  } catch {
+    return [];
+  }
 };
+const loadPinnedIds = (): number[] => loadIdList(PINNED_KEY);
+const loadUnreadIds = (): number[] => loadIdList(UNREAD_KEY);
+
 const savePinnedIds = (ids: number[]) => {
-  localStorage.setItem(PINNED_KEY, JSON.stringify(ids));
+  try { localStorage.setItem(PINNED_KEY, JSON.stringify(ids)); } catch { /* storage unavailable */ }
   window.dispatchEvent(new Event(PINNED_CHANGED_EVENT));
+};
+const saveUnreadIds = (ids: number[]) => {
+  try { localStorage.setItem(UNREAD_KEY, JSON.stringify(ids)); } catch { /* storage unavailable */ }
+  window.dispatchEvent(new Event(UNREAD_CHANGED_EVENT));
 };
 
 const getGroupLabel = (session: Session): string => {
@@ -64,7 +76,14 @@ const getGroupLabel = (session: Session): string => {
   return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 };
 
-// ─── Shared Twinkle logo ─────────────────────────────────────────────────────
+// Highest z-index in the app. Tooltips and floating menus are portalled to
+// <body> with this value so no scroll container or stacking context can hide them.
+const TOP_LAYER = 2147483647;
+
+// Shared surface for every floating menu (chat options, sort, account).
+const MENU_SURFACE =
+  'rounded-xl border border-zinc-300/70 bg-white p-1.5 shadow-[0_4px_24px_rgba(0,0,0,0.08)] dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-[0_8px_30px_rgba(0,0,0,0.45)]';
+
 // ─── Exact sidebar Pin icon ───────────────────────────────────────────────────
 // This is the actual supplied reference image, cropped and made transparent.
 // It is intentionally used everywhere a Pin icon appears in this sidebar.
@@ -77,253 +96,265 @@ function SidebarPinIcon({ className = '' }: { className?: string }) {
       alt=""
       aria-hidden="true"
       draggable={false}
-      className={`object-contain ${className}`}
+      className={`object-contain dark:invert ${className}`}
     />
   );
 }
 
-// ─── IconTooltip ──────────────────────────────────────────────────────────────
-function IconTooltip({
+
+// ─── Sidebar toggle icon (panel with a left rail) ─────────────────────────────
+function SidebarToggleIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg width="20" height="17" viewBox="0 0 24 20" fill="none" aria-hidden="true" className={className}>
+      <rect x="2" y="2" width="20" height="16" rx="4" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M8.5 2.5V17.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// ─── Tip ──────────────────────────────────────────────────────────────────────
+// Tooltip rendered through a portal on <body> with position:fixed. Because it
+// lives outside the sidebar, the scrolling chat list can never clip it and no
+// sibling (e.g. the "Recents" header) can paint over it.
+type TipSide = 'top' | 'bottom' | 'right';
+
+function Tip({
   label,
   shortcut,
+  side = 'top',
   children,
+  className = '',
 }: {
   label: string;
   shortcut?: string;
+  side?: TipSide;
   children: ReactNode;
+  className?: string;
 }) {
+  const [pos, setPos] = useState<{ x: number; y: number; placement: TipSide } | null>(null);
+
+  const show = (el: HTMLElement) => {
+    const r = el.getBoundingClientRect();
+    if (side === 'right') {
+      setPos({ x: r.right + 8, y: r.top + r.height / 2, placement: 'right' });
+      return;
+    }
+    const x = Math.min(Math.max(r.left + r.width / 2, 90), window.innerWidth - 90);
+    const preferTop = side === 'top';
+    const placeBelow = preferTop ? r.top < 56 : r.bottom <= window.innerHeight - 56;
+    setPos({
+      x,
+      y: placeBelow ? r.bottom + 8 : r.top - 8,
+      placement: placeBelow ? 'bottom' : 'top',
+    });
+  };
+  const hide = () => setPos(null);
+
+  const transform =
+    pos?.placement === 'right' ? 'translateY(-50%)'
+    : pos?.placement === 'bottom' ? 'translateX(-50%)'
+    : 'translate(-50%, -100%)';
+
   return (
-    <div className="relative z-0 group/tip flex items-center justify-center w-full hover:z-[2147483647] focus-within:z-[2147483647]">
+    <span
+      className={`inline-flex ${className}`}
+      onMouseEnter={event => show(event.currentTarget)}
+      onMouseLeave={hide}
+      onMouseDown={hide}
+      onFocus={event => {
+        if ((event.target as HTMLElement).matches?.(':focus-visible')) show(event.currentTarget);
+      }}
+      onBlur={hide}
+    >
       {children}
-      <div className="absolute left-full ml-2.5 flex items-center gap-2 px-3.5 py-2 bg-[#111111] text-white text-[14px] font-bold [font-family:inherit] rounded-full whitespace-nowrap pointer-events-none z-[2147483647] shadow-[0_12px_32px_rgba(0,0,0,0.18)] opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150">
-        <span>{label}</span>
-        {shortcut && (
-          <kbd className="rounded-full bg-zinc-600 px-2.5 py-0.5 text-[13px] font-bold leading-5 text-white shadow-inner [font-family:inherit]">
-            {shortcut}
-          </kbd>
-        )}
-      </div>
-    </div>
+      {pos && typeof document !== 'undefined' && createPortal(
+        <div
+          role="tooltip"
+          className="pointer-events-none fixed flex items-center gap-2 whitespace-nowrap rounded-full bg-[#111111] px-3.5 py-2 text-[14px] font-bold text-white shadow-[0_12px_32px_rgba(0,0,0,0.18)] [font-family:inherit]"
+          style={{ left: pos.x, top: pos.y, transform, zIndex: TOP_LAYER }}
+        >
+          <span>{label}</span>
+          {shortcut && (
+            <kbd className="rounded-full bg-zinc-600 px-2.5 py-0.5 text-[13px] font-bold leading-5 text-white shadow-inner [font-family:inherit]">
+              {shortcut}
+            </kbd>
+          )}
+        </div>,
+        document.body
+      )}
+    </span>
   );
 }
 
-type CollapsedPopupAnchor = {
-  top: number;
-  right: number;
-};
-
-// ─── Collapsed-sidebar Recents popup ──────────────────────────────────────────
-function CollapsedRecentsPopup({
-  sessions,
-  currentSessionId,
-  respondingSessionId,
-  onSelectSession,
-  onClose,
-  anchor,
+// ─── Menu primitives (shared by every dropdown) ───────────────────────────────
+function MenuItem({
+  icon,
+  label,
+  shortcut,
+  danger = false,
+  onClick,
+  trailing,
 }: {
-  sessions: Session[];
-  currentSessionId: number | null;
-  respondingSessionId?: number | null;
-  onSelectSession: (id: number) => void;
-  onClose: () => void;
-  anchor: CollapsedPopupAnchor | null;
+  icon: ReactNode;
+  label: string;
+  shortcut?: string;
+  danger?: boolean;
+  onClick: () => void;
+  trailing?: ReactNode;
 }) {
-  const popupRef = useRef<HTMLDivElement>(null);
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className={`flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[14px] leading-none transition-colors focus-visible:outline-none ${
+        danger
+          ? 'text-[#B53333] hover:bg-[#B53333]/10 focus-visible:bg-[#B53333]/10 dark:text-[#F2877E] dark:hover:bg-[#F2877E]/10'
+          : 'text-zinc-800 hover:bg-zinc-100 focus-visible:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:bg-zinc-800'
+      }`}
+    >
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center">{icon}</span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {trailing}
+      {shortcut && (
+        <span className="ml-2 shrink-0 text-[12px] font-normal text-zinc-400 dark:text-zinc-500">{shortcut}</span>
+      )}
+    </button>
+  );
+}
+
+function MenuDivider() {
+  return <div role="separator" className="mx-2.5 my-1 h-px bg-zinc-200 dark:bg-zinc-700/70" />;
+}
+
+// ─── ChatContextMenu (the "⋮" dropdown on a chat row) ─────────────────────────
+// Portalled to <body> so the scrolling chat list never clips it. Supports the
+// P / U / R / D keyboard shortcuts shown on the right of each item.
+type MenuAnchor = { top: number; bottom: number; right: number };
+
+function ChatContextMenu({
+  anchor,
+  isPinned,
+  isUnread,
+  onPin,
+  onToggleUnread,
+  onRename,
+  onShare,
+  onDelete,
+  onClose,
+}: {
+  anchor: MenuAnchor;
+  isPinned: boolean;
+  isUnread: boolean;
+  onPin: () => void;
+  onToggleUnread: () => void;
+  onRename: () => void;
+  onShare: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; origin: string } | null>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const width = el.offsetWidth;
+    const height = el.offsetHeight;
+    const margin = 8;
+    const left = Math.min(Math.max(anchor.right + 6 - width, margin), window.innerWidth - width - margin);
+    const fitsBelow = anchor.bottom + 4 + height + margin <= window.innerHeight;
+    const top = fitsBelow ? anchor.bottom + 4 : Math.max(margin, anchor.top - 4 - height);
+    setPos({ top, left, origin: fitsBelow ? 'top right' : 'bottom right' });
+  }, [anchor]);
+
+  // Keep the latest handlers without re-subscribing the listeners on every render.
+  const actionsRef = useRef({ onPin, onToggleUnread, onRename, onDelete, onClose });
+  actionsRef.current = { onPin, onToggleUnread, onRename, onDelete, onClose };
 
   useEffect(() => {
-    const handlePointerDown = (event: PointerEvent) => {
-      if (!popupRef.current?.contains(event.target as Node)) {
-        onClose();
-      }
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (ref.current?.contains(target as Node)) return;
+      // The "⋮" button toggles the menu itself.
+      if (target?.closest?.('[data-chat-menu-trigger]')) return;
+      actionsRef.current.onClose();
     };
-
-    const handleKeyDown = (event: KeyboardEvent) => {
+    const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        onClose();
+        actionsRef.current.onClose();
+        return;
       }
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if ((event.target as HTMLElement | null)?.closest?.('input, textarea, [contenteditable="true"]')) return;
+      const key = event.key.toLowerCase();
+      const actions = actionsRef.current;
+      if (key === 'p') { event.preventDefault(); actions.onPin(); }
+      else if (key === 'u') { event.preventDefault(); actions.onToggleUnread(); }
+      else if (key === 'r') { event.preventDefault(); actions.onRename(); }
+      else if (key === 'd') { event.preventDefault(); actions.onDelete(); }
     };
+    const dismiss = () => actionsRef.current.onClose();
 
-    document.addEventListener('pointerdown', handlePointerDown);
-    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('keydown', onKeyDown);
+    window.addEventListener('resize', dismiss);
+    window.addEventListener('scroll', dismiss, true);
     return () => {
-      document.removeEventListener('pointerdown', handlePointerDown);
-      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('resize', dismiss);
+      window.removeEventListener('scroll', dismiss, true);
     };
-  }, [onClose]);
+  }, []);
 
-  const recentSessions = [...sessions]
-    .sort((a, b) => {
-      const aTime = new Date((a as any).updatedAt || (a as any).updated_at || (a as any).createdAt || 0).getTime();
-      const bTime = new Date((b as any).updatedAt || (b as any).updated_at || (b as any).createdAt || 0).getTime();
-      return bTime - aTime;
-    })
-    .slice(0, 8);
-
-  if (!anchor) return null;
-
-  return (
+  return createPortal(
     <motion.div
-      ref={popupRef}
-      initial={{ opacity: 0, scale: 0.97, x: -4 }}
-      animate={{ opacity: 1, scale: 1, x: 0 }}
-      exit={{ opacity: 0, scale: 0.97, x: -4 }}
-      transition={{ duration: 0.14, ease: 'easeOut' }}
-      className="fixed z-[2147483647] w-[370px] max-w-[calc(100vw-118px)] overflow-hidden rounded-[20px] border border-zinc-200 bg-white shadow-[0_12px_35px_rgba(0,0,0,0.12)] dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-[0_12px_35px_rgba(0,0,0,0.35)]"
-      style={{ left: anchor.right + 12, top: anchor.top }}
-      onPointerDown={event => event.stopPropagation()}
+      ref={ref}
+      role="menu"
+      aria-label="Chat options"
+      initial={{ opacity: 0, scale: 0.97 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.97 }}
+      transition={{ duration: 0.12, ease: 'easeOut' }}
+      className={`fixed w-48 ${MENU_SURFACE}`}
+      style={{
+        top: pos?.top ?? -9999,
+        left: pos?.left ?? -9999,
+        transformOrigin: pos?.origin ?? 'top right',
+        visibility: pos ? 'visible' : 'hidden',
+        zIndex: TOP_LAYER,
+      }}
+      onClick={event => event.stopPropagation()}
     >
-      <div className="px-7 pb-2 pt-6">
-        <h3 className="text-[15px] font-medium tracking-tight text-zinc-500 dark:text-zinc-400">
-          Recents
-        </h3>
-      </div>
-
-      <div className="max-h-[360px] overflow-y-auto px-3 pb-3">
-        {recentSessions.length === 0 ? (
-          <div className="px-4 py-6 text-[14px] text-zinc-400 dark:text-zinc-500">
-            No recent chats
-          </div>
-        ) : (
-          recentSessions.map(session => {
-            const id = Number(session.id);
-            const title = String((session as any).sessionName || (session as any).name || 'New Chat');
-            const isActive = id === currentSessionId;
-
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => {
-                  onSelectSession(id);
-                  onClose();
-                }}
-                className={`flex w-full items-center gap-2 rounded-xl px-4 py-3 text-left text-[15px] transition-colors ${
-                  isActive
-                    ? 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
-                    : 'text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800/80'
-                }`}
-              >
-                {respondingSessionId === id && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-zinc-500" aria-label="Chat responding" />}
-                <span className="min-w-0 flex-1 truncate">{title}</span>
-              </button>
-            );
-          })
-        )}
-      </div>
-    </motion.div>
+      <MenuItem
+        icon={isPinned ? <PinOff className="h-4 w-4" strokeWidth={1.7} /> : <SidebarPinIcon className="h-4 w-4" />}
+        label={isPinned ? 'Unpin' : 'Pin'}
+        shortcut="P"
+        onClick={onPin}
+      />
+      <MenuItem
+        icon={isUnread ? <Eye className="h-4 w-4" strokeWidth={1.7} /> : <EyeOff className="h-4 w-4" strokeWidth={1.7} />}
+        label={isUnread ? 'Mark as read' : 'Mark as unread'}
+        shortcut="U"
+        onClick={onToggleUnread}
+      />
+      <MenuItem icon={<Pencil className="h-4 w-4" strokeWidth={1.7} />} label="Rename" shortcut="R" onClick={onRename} />
+      <MenuItem icon={<Upload className="h-4 w-4" strokeWidth={1.7} />} label="Share" onClick={onShare} />
+      <MenuDivider />
+      <MenuItem
+        icon={<Trash2 className="h-4 w-4" strokeWidth={1.7} />}
+        label="Delete"
+        shortcut="D"
+        danger
+        onClick={onDelete}
+      />
+    </motion.div>,
+    document.body
   );
 }
 
-// ─── Collapsed-sidebar Pinned popup ───────────────────────────────────────────
-function CollapsedPinnedPopup({
-  sessions,
-  currentSessionId,
-  pinnedIds,
-  onSelectSession,
-  onClose,
-  anchor,
-}: {
-  sessions: Session[];
-  currentSessionId: number | null;
-  pinnedIds: number[];
-  onSelectSession: (id: number) => void;
-  onClose: () => void;
-  anchor: CollapsedPopupAnchor | null;
-}) {
-  const popupRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handlePointerDown = (event: PointerEvent) => {
-      if (!popupRef.current?.contains(event.target as Node)) {
-        onClose();
-      }
-    };
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onClose();
-      }
-    };
-
-    document.addEventListener('pointerdown', handlePointerDown);
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [onClose]);
-
-  const pinnedSessions = [...sessions]
-    .filter(session => pinnedIds.includes(Number(session.id)))
-    .sort((a, b) => {
-      const aTime = new Date(
-        (a as any).updatedAt || (a as any).updated_at || (a as any).createdAt || 0
-      ).getTime();
-      const bTime = new Date(
-        (b as any).updatedAt || (b as any).updated_at || (b as any).createdAt || 0
-      ).getTime();
-      return bTime - aTime;
-    })
-    .slice(0, 12);
-
-  if (!anchor) return null;
-
-  return (
-    <motion.div
-      ref={popupRef}
-      initial={{ opacity: 0, scale: 0.97, x: -4 }}
-      animate={{ opacity: 1, scale: 1, x: 0 }}
-      exit={{ opacity: 0, scale: 0.97, x: -4 }}
-      transition={{ duration: 0.14, ease: 'easeOut' }}
-      className="fixed z-[2147483647] w-[370px] max-w-[calc(100vw-118px)] overflow-hidden rounded-[20px] border border-zinc-200 bg-white shadow-[0_12px_35px_rgba(0,0,0,0.12)] dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-[0_12px_35px_rgba(0,0,0,0.35)]"
-      style={{ left: anchor.right + 12, top: anchor.top }}
-      onPointerDown={event => event.stopPropagation()}
-    >
-      <div className="px-7 pb-2 pt-6">
-        <h3 className="text-[15px] font-medium tracking-tight text-zinc-500 dark:text-zinc-400">
-          Pinned
-        </h3>
-      </div>
-
-      <div className="max-h-[360px] overflow-y-auto px-3 pb-3">
-        {pinnedSessions.length === 0 ? (
-          <div className="px-4 py-6 text-[14px] text-zinc-400 dark:text-zinc-500">
-            No pinned chats
-          </div>
-        ) : (
-          pinnedSessions.map(session => {
-            const id = Number(session.id);
-            const title = String(
-              (session as any).sessionName || (session as any).name || 'New Chat'
-            );
-            const isActive = id === currentSessionId;
-
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => {
-                  onSelectSession(id);
-                  onClose();
-                }}
-                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-[15px] transition-colors ${
-                  isActive
-                    ? 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
-                    : 'text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800/80'
-                }`}
-              >
-                <SidebarPinIcon className="h-[18px] w-[18px] shrink-0 text-zinc-400" />
-                <span className="min-w-0 flex-1 truncate">{title}</span>
-              </button>
-            );
-          })
-        )}
-      </div>
-    </motion.div>
-  );
-}
 
 // ─── TypewriterText ───────────────────────────────────────────────────────────
 // Types a chat name in letter by letter. The real, full name always lives in the
@@ -359,6 +390,30 @@ function TypewriterText({ text, onDone }: { text: string; onDone?: () => void })
   return <>{chars.slice(0, count).join('')}</>;
 }
 
+
+// ─── SidebarHeader ────────────────────────────────────────────────────────────
+// Panel toggle on the left, wordmark next to it. The toggle sits at exactly the
+// same spot as the floating "open sidebar" button shown when the sidebar is closed.
+function SidebarHeader({ onToggle, label }: { onToggle: () => void; label: string }) {
+  return (
+    <div className="flex shrink-0 items-center gap-2 px-3 pb-1 pt-[18px]">
+      <Tip label={label} shortcut="Ctrl+Shift+S" side="right">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label={label}
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-600 transition-colors hover:bg-zinc-200/60 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
+        >
+          <SidebarToggleIcon />
+        </button>
+      </Tip>
+      <h2 className="font-serif text-[22px] font-medium leading-none tracking-[-0.01em] text-zinc-900 dark:text-zinc-50">
+        Twinkle
+      </h2>
+    </div>
+  );
+}
+
 // ─── SessionList ──────────────────────────────────────────────────────────────
 interface SessionListProps {
   user: User;
@@ -377,7 +432,11 @@ interface SessionListProps {
   onClose: () => void;
   onProfile?: () => void;
   onSettings?: () => void;
+  onOpenSearch: () => void;
 }
+
+const NAV_ROW =
+  'group/nav flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[14px] text-zinc-800 transition-colors hover:bg-zinc-200/60 focus-visible:bg-zinc-200/60 focus-visible:outline-none dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:bg-zinc-800';
 
 function SessionList({
   user,
@@ -396,58 +455,64 @@ function SessionList({
   onClose,
   onProfile,
   onSettings,
+  onOpenSearch,
 }: SessionListProps) {
   const [recentsCollapsed, setRecentsCollapsed] = useState(false);
-  const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
-  const [deletingIds, setDeletingIds] = useState<number[]>([]);
-  const [deletingAll, setDeletingAll] = useState(false);
-  const [menuPlacement, setMenuPlacement] = useState<'up' | 'down'>('down');
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setDeletingIds(previous => previous.filter(id => sessions.some(session => Number(session.id) === id)));
-    if (sessions.length === 0) setDeletingAll(false);
-  }, [sessions]);
-
-  useEffect(() => {
-    if (deletingIds.length === 0 && !deletingAll) return;
-    const timeout = window.setTimeout(() => {
-      setDeletingIds([]);
-      setDeletingAll(false);
-    }, 30000);
-    return () => window.clearTimeout(timeout);
-  }, [deletingIds, deletingAll]);
-
+  const [menu, setMenu] = useState<{ id: number; anchor: MenuAnchor } | null>(null);
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const renameInputRef = useRef<HTMLInputElement>(null);
 
   const [pinnedIds, setPinnedIds] = useState<number[]>(loadPinnedIds);
+  const [unreadIds, setUnreadIds] = useState<number[]>(loadUnreadIds);
   // Keep date sorting as the default, with an explicit menu for sort mode.
   const [sortMode, setSortMode] = useState<'date' | 'alphabetical'>('date');
   const [dateSortOrder, setDateSortOrder] = useState<'newest' | 'oldest'>('newest');
-  const [sortMenuOpen, setSortMenuOpen] = useState(false);
-  const [newChatTooltipPosition, setNewChatTooltipPosition] = useState<{ top: number; left: number } | null>(null);
-  const [headerTooltip, setHeaderTooltip] = useState<{ label: string; top: number; left: number } | null>(null);
-  const showHeaderTooltip = (label: string, el: HTMLElement) => {
-    const rect = el.getBoundingClientRect();
-    setHeaderTooltip({ label, top: Math.max(8, rect.top - 42), left: rect.left + rect.width / 2 });
-  };
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const optionsRef = useRef<HTMLDivElement>(null);
+
+  // The mobile drawer and the desktop sidebar each mount a SessionList, so keep
+  // pinned / unread state in sync between them (and across browser tabs).
+  useEffect(() => {
+    const syncPinned = () => setPinnedIds(loadPinnedIds());
+    const syncUnread = () => setUnreadIds(loadUnreadIds());
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === PINNED_KEY) syncPinned();
+      if (event.key === UNREAD_KEY) syncUnread();
+    };
+    window.addEventListener(PINNED_CHANGED_EVENT, syncPinned);
+    window.addEventListener(UNREAD_CHANGED_EVENT, syncUnread);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener(PINNED_CHANGED_EVENT, syncPinned);
+      window.removeEventListener(UNREAD_CHANGED_EVENT, syncUnread);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
 
   useEffect(() => {
-    if (menuOpenId === null) return;
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpenId(null);
-      }
+    if (!optionsOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (optionsRef.current && !optionsRef.current.contains(event.target as Node)) setOptionsOpen(false);
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [menuOpenId]);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOptionsOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [optionsOpen]);
 
   useEffect(() => {
     if (renamingId !== null) {
-      setTimeout(() => renameInputRef.current?.focus(), 50);
+      const timer = window.setTimeout(() => {
+        renameInputRef.current?.focus();
+        renameInputRef.current?.select();
+      }, 50);
+      return () => window.clearTimeout(timer);
     }
   }, [renamingId]);
 
@@ -495,19 +560,26 @@ function SessionList({
     });
   }
 
-  const togglePin = useCallback((id: number) => {
-    setPinnedIds(prev => {
-      const next = prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id];
-      savePinnedIds(next);
-      return next;
-    });
-    setMenuOpenId(null);
-  }, []);
+  const menuSession = menu ? displaySessions.find(s => s.id === menu.id) ?? null : null;
+
+  const togglePin = (id: number) => {
+    const next = pinnedIds.includes(id) ? pinnedIds.filter(p => p !== id) : [...pinnedIds, id];
+    setPinnedIds(next);
+    savePinnedIds(next);
+    setMenu(null);
+  };
+
+  const setUnread = (id: number, unread: boolean) => {
+    if (unread === unreadIds.includes(id)) return;
+    const next = unread ? [...unreadIds, id] : unreadIds.filter(u => u !== id);
+    setUnreadIds(next);
+    saveUnreadIds(next);
+  };
 
   const startRename = (session: Session) => {
     setRenamingId(session.id);
     setRenameValue(session.sessionName);
-    setMenuOpenId(null);
+    setMenu(null);
   };
 
   const commitRename = () => {
@@ -524,246 +596,186 @@ function SessionList({
   };
 
   const handleDelete = (id: number) => {
-    // Close the context menu and mobile drawer immediately after Delete is clicked.
-    // The parent callback can then handle the delete confirmation / actual deletion.
-    // Do NOT start a spinner here: this only opens the confirmation popup.
-    // Cancelling it used to leave the row spinning forever. The parent removes
-    // the chat optimistically as soon as the user confirms.
-    setMenuOpenId(null);
+    // Close the menu (and the mobile drawer) right away. The parent shows the
+    // confirmation dialog and removes the chat once the user confirms, so no
+    // spinner is started here.
+    setMenu(null);
     onClose();
     onDeleteSession(id);
-    setPinnedIds(prev => {
-      const next = prev.filter(p => p !== id);
-      savePinnedIds(next);
-      return next;
-    });
+    const nextPinned = pinnedIds.filter(p => p !== id);
+    setPinnedIds(nextPinned);
+    savePinnedIds(nextPinned);
+    if (unreadIds.includes(id)) {
+      const nextUnread = unreadIds.filter(u => u !== id);
+      setUnreadIds(nextUnread);
+      saveUnreadIds(nextUnread);
+    }
   };
 
   const handleShare = (id: number) => {
-    setMenuOpenId(null);
+    setMenu(null);
     onClose();
     onShareSession(id);
   };
 
-  // FIX: Select the session FIRST (synchronously), then close the drawer.
-  // The previous order (close -> setTimeout -> select) raced against the
-  // mobile drawer's remount-on-close (Sidebar used to swap a `key` on
-  // mobileOpen), which could unmount SessionList before the deferred
-  // onSelectSession ever fired -- so taps on mobile sometimes silently
-  // failed to switch sessions. Selecting first removes the race entirely.
+  // Select the session FIRST (synchronously), then close the drawer. Closing
+  // first raced against the mobile drawer unmounting this list.
   const handleSelectSession = (id: number) => {
     if (renamingId !== null) return;
-
+    setUnread(id, false);
     onSelectSession(id);
     onClose();
   };
 
   return (
     <>
-      {/* Top controls */}
-      <div className="px-3 py-2 pb-1 shrink-0">
+      {/* Navigation */}
+      <nav className="shrink-0 px-2 pt-2" aria-label="Primary">
         <button
           type="button"
           onClick={() => { onNewSession(); onClose(); }}
           aria-label="New chat"
-          className="group/newchat w-full h-8 px-2 bg-transparent text-zinc-900 dark:text-zinc-100 rounded-lg flex items-center gap-2.5 text-left hover:bg-zinc-200/60 dark:hover:bg-zinc-800 transition-colors active:bg-zinc-200/60 dark:active:bg-zinc-800"
+          className={NAV_ROW}
         >
-          <span className="twinkle-newchat-box shrink-0 flex h-5 w-5 items-center justify-center rounded-md" aria-hidden="true">
-            <SquarePen className="twinkle-newchat-icon w-[18px] h-[18px] text-zinc-900 dark:text-zinc-100" strokeWidth={1.7} />
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100" aria-hidden="true">
+            <Plus className="h-3.5 w-3.5" strokeWidth={2.2} />
           </span>
-          <span className="text-[14px] font-normal tracking-normal">New chat</span>
+          <span className="flex-1">New chat</span>
         </button>
 
-      </div>
+        <button
+          type="button"
+          onClick={onOpenSearch}
+          aria-label="Search chats"
+          className={NAV_ROW}
+        >
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center" aria-hidden="true">
+            <Search className="h-[18px] w-[18px]" strokeWidth={1.7} />
+          </span>
+          <span className="flex-1">Search</span>
+          <span className="text-[12px] text-zinc-400 opacity-0 transition-opacity group-hover/nav:opacity-100 dark:text-zinc-500">Ctrl+K</span>
+        </button>
+      </nav>
 
-      {/* Session list */}
-      <div className="group/recents relative z-40 flex items-center justify-between gap-2 px-3 pb-1 shrink-0">
+      {/* Recents header */}
+      <div className="group/recents flex shrink-0 items-center justify-between gap-2 px-4 pb-1 pt-4">
         <button
           type="button"
           onClick={() => setRecentsCollapsed(collapsed => !collapsed)}
           aria-label={recentsCollapsed ? 'Expand Recents' : 'Collapse Recents'}
           aria-expanded={!recentsCollapsed}
-          title={recentsCollapsed ? 'Expand Recents' : 'Collapse Recents'}
-          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
+          className="-ml-1 flex items-center gap-1 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-zinc-200/60 dark:hover:bg-zinc-800"
         >
-          <span className="text-[12px] font-medium text-zinc-500 dark:text-zinc-400 tracking-normal">Recents</span>
-          <ChevronDown className={`h-3 w-3 text-zinc-400 transition-transform ${recentsCollapsed ? '-rotate-90' : 'rotate-0'}`} />
+          <span className="text-[13px] font-normal text-zinc-500 dark:text-zinc-400">Recents</span>
+          <ChevronDown
+            className={`h-3 w-3 text-zinc-400 opacity-0 transition-all group-hover/recents:opacity-100 ${recentsCollapsed ? '-rotate-90 opacity-100' : ''}`}
+          />
         </button>
+
         {sessions.length > 0 && (
-          <div className="flex shrink-0 items-center gap-0.5">
-            <div className="relative">
+          <div ref={optionsRef} className="relative">
+            <Tip label="Sort & manage" side="top">
               <button
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setHeaderTooltip(null);
-                  setSortMenuOpen(open => !open);
-                }}
-                onMouseEnter={(e) => { if (!sortMenuOpen) showHeaderTooltip('Sort chats', e.currentTarget); }}
-                onMouseLeave={() => setHeaderTooltip(null)}
-                aria-label="Sort chats"
+                onClick={() => setOptionsOpen(open => !open)}
+                aria-label="Sort and manage chats"
                 aria-haspopup="menu"
-                aria-expanded={sortMenuOpen}
-                className={`inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 ${sortMenuOpen ? 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200' : 'text-zinc-400'}`}
+                aria-expanded={optionsOpen}
+                className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-zinc-200/60 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 ${
+                  optionsOpen ? 'bg-zinc-200/60 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100' : 'text-zinc-500 dark:text-zinc-400'
+                }`}
               >
-                <ListFilter className="h-3.5 w-3.5" strokeWidth={1.8} />
+                <SlidersHorizontal className="h-4 w-4" strokeWidth={1.7} />
               </button>
-              {sortMenuOpen && (
-                <>
-                  <button
-                    type="button"
-                    aria-label="Close sort menu"
-                    className="fixed inset-0 z-40 cursor-default"
-                    onClick={() => setSortMenuOpen(false)}
-                  />
-                  <div role="menu" aria-label="Sort chats by" className="absolute right-0 top-7 z-50 w-48 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
-                    <div className="px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Sort by</div>
-                    <button
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={sortMode === 'alphabetical'}
-                      onClick={(e) => { e.stopPropagation(); setSortMode('alphabetical'); setSortMenuOpen(false); }}
-                      className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                    >
-                      <span>Alphabetical order (A–Z)</span>
-                      {sortMode === 'alphabetical' && <Check className="h-3.5 w-3.5" />}
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={sortMode === 'date'}
-                      onClick={(e) => { e.stopPropagation(); setSortMode('date'); setSortMenuOpen(false); }}
-                      className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                    >
-                      <span>Order by Date</span>
-                      {sortMode === 'date' && <Check className="h-3.5 w-3.5" />}
-                    </button>
-                    {sortMode === 'date' && (
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); setDateSortOrder(current => current === 'newest' ? 'oldest' : 'newest'); setSortMenuOpen(false); }}
-                        className="mt-1 flex w-full items-center justify-between rounded-lg border-t border-zinc-100 px-2.5 pt-2 pb-1.5 text-left text-[11px] text-zinc-500 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800"
-                      >
-                        <span>{dateSortOrder === 'newest' ? 'Newest first' : 'Oldest first'}</span>
-                        <ArrowUpDown className="h-3 w-3" />
-                      </button>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-            <div className="flex items-center justify-center">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onNewSession();
-                }}
-                onMouseEnter={(e) => {
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  setNewChatTooltipPosition({ top: Math.max(8, rect.top - 42), left: rect.left - 68 });
-                }}
-                onMouseLeave={() => setNewChatTooltipPosition(null)}
-                title="New chat"
-                aria-label="New chat"
-                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-              >
-                <Pencil className="h-3.5 w-3.5" strokeWidth={1.8} />
-              </button>
-              {newChatTooltipPosition && typeof document !== 'undefined' && createPortal(
-                <div
-                  className="pointer-events-none fixed rounded-full bg-[#111111] px-3.5 py-2 text-[14px] font-bold [font-family:inherit] text-white whitespace-nowrap shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
-                  style={{ top: newChatTooltipPosition.top, left: newChatTooltipPosition.left, zIndex: 2147483647 }}
+            </Tip>
+
+            <AnimatePresence>
+              {optionsOpen && (
+                <motion.div
+                  role="menu"
+                  aria-label="Sort and manage chats"
+                  initial={{ opacity: 0, scale: 0.97 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.97 }}
+                  transition={{ duration: 0.12, ease: 'easeOut' }}
+                  className={`absolute right-0 top-full z-50 mt-1 w-56 origin-top-right ${MENU_SURFACE}`}
                 >
-                  New chat
-                </div>,
-                document.body
+                  <div className="px-2.5 pb-1 pt-1.5 text-[12px] text-zinc-500 dark:text-zinc-400">Sort by</div>
+                  <MenuItem
+                    icon={sortMode === 'date' ? <Check className="h-4 w-4" strokeWidth={2} /> : null}
+                    label="Date"
+                    onClick={() => { setSortMode('date'); setOptionsOpen(false); }}
+                  />
+                  <MenuItem
+                    icon={sortMode === 'alphabetical' ? <Check className="h-4 w-4" strokeWidth={2} /> : null}
+                    label="Alphabetical (A–Z)"
+                    onClick={() => { setSortMode('alphabetical'); setOptionsOpen(false); }}
+                  />
+                  {sortMode === 'date' && (
+                    <MenuItem
+                      icon={<ArrowUpDown className="h-4 w-4" strokeWidth={1.7} />}
+                      label={dateSortOrder === 'newest' ? 'Newest first' : 'Oldest first'}
+                      onClick={() => { setDateSortOrder(current => current === 'newest' ? 'oldest' : 'newest'); setOptionsOpen(false); }}
+                    />
+                  )}
+                  <MenuDivider />
+                  <MenuItem
+                    icon={<Trash2 className="h-4 w-4" strokeWidth={1.7} />}
+                    label="Clear all chats"
+                    danger
+                    onClick={() => { setOptionsOpen(false); onClose(); onClearAll(); }}
+                  />
+                </motion.div>
               )}
-            </div>
-            {headerTooltip && typeof document !== 'undefined' && createPortal(
-              <div
-                className="pointer-events-none fixed -translate-x-1/2 rounded-full bg-[#111111] px-3.5 py-2 text-[14px] font-bold [font-family:inherit] text-white whitespace-nowrap shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
-                style={{ top: headerTooltip.top, left: headerTooltip.left, zIndex: 2147483647 }}
-              >
-                {headerTooltip.label}
-              </div>,
-              document.body
-            )}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setHeaderTooltip(null);
-                onClose();
-                onClearAll();
-              }}
-              onMouseEnter={(e) => showHeaderTooltip('Clear all', e.currentTarget)}
-              onMouseLeave={() => setHeaderTooltip(null)}
-              aria-label="Clear all chats"
-              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-            >
-              {deletingAll ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.8} />
-              ) : (
-                <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
-              )}
-            </button>
+            </AnimatePresence>
           </div>
         )}
       </div>
-      {!recentsCollapsed && <div
-        className="relative z-30 flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 pb-4"
-        style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain' }}
-      >
-        {sortedSessions.length === 0 ? (
-          <div className="mx-2 py-8 text-center bg-zinc-50 dark:bg-zinc-900 rounded-2xl border border-dashed border-zinc-200 dark:border-zinc-700">
-            <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider leading-relaxed">
-              {'No chats yet'}
-              <br />
-              <span className="opacity-60 font-medium">
-                {'Start a new conversation'}
-              </span>
-            </p>
-          </div>
-        ) : (
-          grouped.map(group => (
-            <div key={group.label} className="mb-2">
-              <div className="flex items-center justify-between px-2 pt-3 pb-1">
-                <span className="text-[12px] font-medium text-zinc-500 dark:text-zinc-400 tracking-normal">
+
+      {/* Chat list */}
+      {!recentsCollapsed && (
+        <div
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4"
+          style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain' }}
+        >
+          {sortedSessions.length === 0 ? (
+            <div className="mx-1 mt-2 rounded-xl border border-dashed border-zinc-300 px-3 py-6 text-center dark:border-zinc-700">
+              <p className="text-[13px] text-zinc-500 dark:text-zinc-400">No chats yet</p>
+              <p className="mt-0.5 text-[12px] text-zinc-400 dark:text-zinc-500">Start a new conversation</p>
+            </div>
+          ) : (
+            grouped.map(group => (
+              <div key={group.label} className="mb-1">
+                <div className="px-2.5 pb-1 pt-3 text-[12px] font-normal text-zinc-500 dark:text-zinc-400">
                   {group.label}
-                </span>
-              </div>
+                </div>
 
-              <div className="space-y-px">
-                {group.items.map(session => {
-                  const isActive = currentSessionId === session.id;
-                  const isPinned = pinnedIds.includes(session.id);
-                  const isMenuOpen = menuOpenId === session.id;
-                  const isRenaming = renamingId === session.id;
-                  const isResponding = respondingSessionId === session.id;
+                <div className="space-y-px">
+                  {group.items.map(session => {
+                    const isActive = currentSessionId === session.id;
+                    const isPinned = pinnedIds.includes(session.id);
+                    const isUnread = unreadIds.includes(session.id);
+                    const isMenuOpen = menu?.id === session.id;
+                    const isRenaming = renamingId === session.id;
+                    const isResponding = respondingSessionId === session.id;
 
-                  return (
-                    <div
-                      key={session.id}
-                      className="relative"
-                      ref={isMenuOpen ? menuRef : undefined}
-                    >
+                    return (
                       <motion.div
+                        key={session.id}
                         initial={{ opacity: 0, x: -6 }}
                         animate={{ opacity: 1, x: 0 }}
-                        className={`group/item flex h-8 items-center gap-2 px-2 rounded-lg cursor-pointer transition-colors ${
-                          isActive
-                            ? 'bg-zinc-200/70 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
-                            : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/60 dark:hover:bg-zinc-800/70 hover:text-zinc-900 dark:hover:text-zinc-100'
+                        className={`group/item flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2.5 transition-colors ${
+                          isActive || isMenuOpen
+                            ? 'bg-zinc-200/70 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
+                            : 'text-zinc-700 hover:bg-zinc-200/60 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100'
                         }`}
                         onClick={() => handleSelectSession(session.id)}
                       >
-                        {deletingIds.includes(session.id) ? (
-                          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-zinc-500" aria-label="Deleting chat" />
-                        ) : (
-                          isPinned ? (
-                            <SidebarPinIcon className="h-3.5 w-3.5 shrink-0 text-zinc-500 dark:text-zinc-400" />
-                          ) : null
+                        {isPinned && (
+                          <SidebarPinIcon className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                        )}
+                        {isUnread && !isRenaming && (
+                          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-800 dark:bg-zinc-100" aria-label="Unread" />
                         )}
 
                         {isRenaming ? (
@@ -778,50 +790,55 @@ function SessionList({
                             }}
                             onBlur={commitRename}
                             onClick={e => e.stopPropagation()}
-                            className="flex-1 min-w-0 bg-white dark:bg-zinc-900 border border-zinc-400 rounded-lg px-2 py-0.5 text-xs font-medium text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-indigo-400/30"
+                            className="min-w-0 flex-1 rounded-md border border-zinc-400 bg-white px-2 py-0.5 text-[13px] text-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400/30 dark:bg-zinc-900 dark:text-zinc-200"
                           />
                         ) : (
-                          <span data-twinkle-user-content className="flex-1 min-w-0 truncate text-[14px] font-normal leading-snug">
+                          <span
+                            data-twinkle-user-content
+                            className={`min-w-0 flex-1 truncate text-[14px] leading-snug ${isUnread ? 'font-medium' : 'font-normal'}`}
+                          >
                             {typingSessionId === session.id
                               ? <TypewriterText text={session.sessionName} onDone={onTypingDone} />
                               : session.sessionName}
                           </span>
                         )}
 
+                        {!isRenaming && isResponding && (
+                          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-zinc-500" aria-label="Chat responding" />
+                        )}
+
                         {!isRenaming && (
-                          <div className="shrink-0 flex items-center gap-1">
-                            <div
-                              className={`flex items-center gap-0.5 transition-opacity ${
-                                isMenuOpen ? 'opacity-100' : 'opacity-0 group-hover/item:opacity-100'
-                              }`}
-                            >
+                          <div
+                            className={`shrink-0 items-center gap-0.5 group-focus-within/item:flex group-hover/item:flex [@media(hover:none)]:flex ${
+                              isMenuOpen ? 'flex' : 'hidden'
+                            }`}
+                          >
                             <button
                               type="button"
+                              data-chat-menu-trigger
                               onClick={e => {
                                 e.stopPropagation();
                                 if (isMenuOpen) {
-                                  setMenuOpenId(null);
+                                  setMenu(null);
                                   return;
                                 }
                                 const rect = e.currentTarget.getBoundingClientRect();
-                                const estimatedMenuHeight = 250;
-                                setMenuPlacement(
-                                  rect.bottom + estimatedMenuHeight > window.innerHeight
-                                    ? 'up'
-                                    : 'down'
-                                );
-                                setMenuOpenId(session.id);
+                                setMenu({ id: session.id, anchor: { top: rect.top, bottom: rect.bottom, right: rect.right } });
                               }}
                               aria-label="Chat options"
-                              className={`p-1.5 rounded-lg transition-colors ${
+                              aria-haspopup="menu"
+                              aria-expanded={isMenuOpen}
+                              className={`flex h-6 w-6 items-center justify-center rounded-md transition-colors ${
                                 isMenuOpen
-                                  ? 'bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200'
-                                  : 'text-zinc-400 hover:bg-zinc-200/70 dark:hover:bg-zinc-700/70 hover:text-zinc-700 dark:hover:text-zinc-200'
+                                  ? 'bg-zinc-300/60 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100'
+                                  : 'text-zinc-500 hover:bg-zinc-300/50 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700/70 dark:hover:text-zinc-100'
                               }`}
                             >
-                              <MoreHorizontal className="w-[16px] h-[16px]" strokeWidth={1.8} />
+                              <MoreVertical className="h-4 w-4" strokeWidth={1.8} />
                             </button>
-                            <div className="relative group/pin-tooltip flex items-center justify-center">
+
+                            {/* Portalled tooltip: always paints above the Recents header and the list */}
+                            <Tip label={isPinned ? 'Unpin chat' : 'Pin chat'} side="top">
                               <button
                                 type="button"
                                 onClick={e => {
@@ -829,101 +846,50 @@ function SessionList({
                                   togglePin(session.id);
                                 }}
                                 aria-label={isPinned ? 'Unpin chat' : 'Pin chat'}
-                                className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200/70 dark:hover:bg-zinc-700/70 transition-colors"
+                                className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-300/50 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700/70 dark:hover:text-zinc-100"
                               >
                                 {isPinned ? (
-                                  <PinOff className="w-[17px] h-[17px]" strokeWidth={1.8} />
+                                  <PinOff className="h-4 w-4" strokeWidth={1.8} />
                                 ) : (
-                                  <SidebarPinIcon className="w-[18px] h-[18px]" />
+                                  <SidebarPinIcon className="h-4 w-4" />
                                 )}
                               </button>
-                              <div className="absolute right-0 bottom-full mb-2 flex items-center px-3.5 py-2 bg-[#111111] text-white text-[14px] font-bold rounded-full whitespace-nowrap pointer-events-none z-[2147483647] shadow-[0_12px_32px_rgba(0,0,0,0.18)] opacity-0 group-hover/pin-tooltip:opacity-100 transition-opacity duration-150">
-                                <span>{isPinned ? 'Unpin chat' : 'Pin chat'}</span>
-                              </div>
-                            </div>
-                            </div>
-                            {isResponding && (
-                              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-emerald-500" aria-label="Chat responding" />
-                            )}
+                            </Tip>
                           </div>
                         )}
                       </motion.div>
-
-                      {/* Context menu */}
-                      <AnimatePresence>
-                        {isMenuOpen && (
-                          <motion.div
-                            initial={{ opacity: 0, scale: 0.92, y: -4 }}
-                            animate={{ opacity: 1, scale: 1, y: 0 }}
-                            exit={{ opacity: 0, scale: 0.92, y: -4 }}
-                            transition={{ duration: 0.12 }}
-                            className={`absolute right-0 z-[200] w-[232px] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-[18px] shadow-[0_14px_40px_rgba(0,0,0,0.12)] dark:shadow-[0_14px_40px_rgba(0,0,0,0.4)] p-1.5 overflow-hidden ${menuPlacement === 'up' ? 'bottom-full mb-1' : 'top-full mt-1'}`}
-                            onClick={e => e.stopPropagation()}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => startRename(session)}
-                              className="w-full flex items-center gap-3.5 px-3.5 py-3 rounded-xl text-[14px] font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                            >
-                              <Pencil className="w-[20px] h-[20px] text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
-                              <span>Rename</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => togglePin(session.id)}
-                              className="w-full flex items-center gap-3.5 px-3.5 py-3 rounded-xl text-[14px] font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                            >
-                              {isPinned ? (
-                                <PinOff className="w-[20px] h-[20px] text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
-                              ) : (
-                                <SidebarPinIcon className="w-[20px] h-[20px] text-zinc-800 dark:text-zinc-200" />
-                              )}
-                              <span>{isPinned ? 'Unpin' : 'Pin'}</span>
-                            </button>
-
-                            <div className="mx-3 my-1 border-t border-zinc-200 dark:border-zinc-700" />
-
-                            <button
-                              type="button"
-                              onClick={() => handleShare(session.id)}
-                              className="w-full flex items-center gap-3.5 px-3.5 py-3 rounded-xl text-[14px] font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                            >
-                              <Upload className="w-[20px] h-[20px] text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
-                              <span>Share</span>
-                            </button>
-
-                            <div className="mx-3 my-1 border-t border-zinc-200 dark:border-zinc-700" />
-
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDelete(session.id);
-                              }}
-                              className="w-full flex items-center gap-3.5 px-3.5 py-3 rounded-xl text-[14px] font-medium text-red-500 dark:text-red-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                            >
-                              {deletingIds.includes(session.id) ? (
-                                <Loader2 className="h-[20px] w-[20px] animate-spin" strokeWidth={1.8} />
-                              ) : (
-                                <Trash2 className="w-[20px] h-[20px]" strokeWidth={1.8} />
-                              )}
-                              <span>{deletingIds.includes(session.id) ? 'Deleting…' : 'Delete'}</span>
-                            </button>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))
-        )}
-      </div>}
+            ))
+          )}
+        </div>
+      )}
 
-      {/* Keep the account/profile section anchored at the bottom when Recents is collapsed. */}
-      {recentsCollapsed && <div className="flex-1 min-h-0" aria-hidden="true" />}
+      {/* Keep the account section anchored at the bottom when Recents is collapsed. */}
+      {recentsCollapsed && <div className="min-h-0 flex-1" aria-hidden="true" />}
+
+      {/* Chat options dropdown (single instance, portalled) */}
+      <AnimatePresence>
+        {menu && menuSession && (
+          <ChatContextMenu
+            key={menu.id}
+            anchor={menu.anchor}
+            isPinned={pinnedIds.includes(menuSession.id)}
+            isUnread={unreadIds.includes(menuSession.id)}
+            onPin={() => togglePin(menuSession.id)}
+            onToggleUnread={() => {
+              setUnread(menuSession.id, !unreadIds.includes(menuSession.id));
+              setMenu(null);
+            }}
+            onRename={() => startRename(menuSession)}
+            onShare={() => handleShare(menuSession.id)}
+            onDelete={() => handleDelete(menuSession.id)}
+            onClose={() => setMenu(null)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Footer */}
       <div className="mt-auto shrink-0 border-t border-zinc-200/80 p-2 dark:border-zinc-800">
@@ -940,20 +906,18 @@ function SessionList({
 
 
 // ─── AccountMenu ─────────────────────────────────────────────────────────────
-// ChatGPT-style account popover. Upgrade, Personalization and Billing are
-// intentionally omitted per the requested settings/account design.
+// Footer account row. The popup spans the full sidebar width, shows the email
+// on top and lists Profile, Settings and Log out.
 function AccountMenu({
   user,
   onProfile,
   onSettings,
   onLogout,
-  compact = false,
 }: {
   user: User;
   onProfile?: () => void;
   onSettings?: () => void;
   onLogout: () => void;
-  compact?: boolean;
 }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -962,24 +926,17 @@ function AccountMenu({
   useEffect(() => {
     if (!open) return;
 
-    const handlePointerDown = (event: MouseEvent) => {
-      if (
-        menuRef.current &&
-        !menuRef.current.contains(event.target as Node)
-      ) {
-        setOpen(false);
-      }
+    const handlePointerDown = (event: PointerEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setOpen(false);
     };
-
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false);
     };
 
-    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('pointerdown', handlePointerDown);
     document.addEventListener('keydown', handleEscape);
-
     return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('keydown', handleEscape);
     };
   }, [open]);
@@ -1002,139 +959,72 @@ function AccountMenu({
   };
 
   return (
-    <div
-      ref={menuRef}
-      className={`relative ${compact ? 'flex justify-center' : 'w-full'}`}
-    >
+    <div ref={menuRef} className="relative w-full">
       <button
         type="button"
         onClick={() => setOpen(value => !value)}
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label="Open account menu"
-        className={
-          compact
-            ? "flex h-8 w-8 items-center justify-center rounded-full outline-none transition hover:scale-105 focus-visible:ring-2 focus-visible:ring-zinc-300 dark:focus-visible:ring-zinc-700"
-            : "flex h-9 w-full items-center gap-2 rounded-lg px-1.5 text-left transition-colors hover:bg-zinc-200/60 dark:hover:bg-zinc-800/70"
-        }
+        className={`flex h-10 w-full items-center gap-2.5 rounded-lg px-2 text-left transition-colors hover:bg-zinc-200/60 dark:hover:bg-zinc-800/70 ${
+          open ? 'bg-zinc-200/60 dark:bg-zinc-800/70' : ''
+        }`}
       >
         <UserAvatar
           name={user.username}
           avatarUrl={user.avatarUrl}
-          className={
-            compact
-              ? "h-6 w-6 text-[9px] shadow-none"
-              : "h-6 w-6 shrink-0 text-[10px] font-semibold shadow-none"
-          }
+          className="h-7 w-7 shrink-0 text-[11px] font-semibold shadow-none"
         />
-
-        {!compact && (
-          <>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[13px] font-medium text-zinc-800 dark:text-zinc-200">
-                {user.username}
-              </span>
-            </span>
-            <ChevronRight
-              className={`h-3 w-3 shrink-0 text-zinc-400 transition-transform ${
-                open ? '-rotate-90' : ''
-              }`}
-            />
-          </>
-        )}
+        <span className="min-w-0 flex-1 truncate text-[14px] font-normal text-zinc-800 dark:text-zinc-100">
+          {user.username}
+        </span>
+        <ChevronDown
+          className={`h-4 w-4 shrink-0 text-zinc-400 transition-transform ${open ? 'rotate-180' : ''}`}
+          strokeWidth={1.8}
+        />
       </button>
 
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{
-              opacity: 0,
-              scale: 0.96,
-              y: 8,
-            }}
-            animate={{
-              opacity: 1,
-              scale: 1,
-              y: 0,
-            }}
-            exit={{
-              opacity: 0,
-              scale: 0.96,
-              y: 8,
-            }}
-            transition={{
-              duration: 0.14,
-              ease: 'easeOut',
-            }}
+            initial={{ opacity: 0, scale: 0.97, y: 4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.97, y: 4 }}
+            transition={{ duration: 0.12, ease: 'easeOut' }}
             role="menu"
-            className={
-              compact
-                ? "twinkle-account-menu absolute bottom-0 left-full z-[10000] ml-3 w-[264px] origin-bottom-left overflow-hidden rounded-2xl border border-zinc-200/80 bg-white p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.16)] dark:border-zinc-700/80 dark:bg-zinc-900"
-                : "twinkle-account-menu absolute bottom-[calc(100%+8px)] left-0 z-[10000] w-full min-w-[248px] origin-bottom-left overflow-hidden rounded-2xl border border-zinc-200/80 bg-white p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.16)] dark:border-zinc-700/80 dark:bg-zinc-900"
-            }
+            aria-label="Account"
+            className={`absolute bottom-[calc(100%+8px)] left-0 right-0 z-[60] origin-bottom ${MENU_SURFACE}`}
           >
-            {/* Account header */}
-            <div className="flex items-center gap-3 px-2.5 pb-2.5 pt-2">
-              <UserAvatar
-                name={user.username}
-                avatarUrl={user.avatarUrl}
-                className="h-9 w-9 shrink-0 text-[13px] font-semibold shadow-none ring-1 ring-black/5 dark:ring-white/10"
-              />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[14px] font-medium leading-5 text-zinc-900 dark:text-zinc-50">
-                  {user.name || user.username}
-                </p>
-                {user.email && (
-                  <p className="truncate text-[12px] leading-4 text-zinc-500 dark:text-zinc-400">
-                    {user.email}
-                  </p>
-                )}
-              </div>
+            <div className="truncate px-2.5 pb-1 pt-1.5 text-[13px] font-medium text-zinc-500 dark:text-zinc-400">
+              {user.email || user.name || user.username}
             </div>
 
-            <div className="mx-1 border-t border-zinc-200/80 dark:border-zinc-700/70" />
+            <MenuItem
+              icon={<UserCircle2 className="h-4 w-4" strokeWidth={1.7} />}
+              label="Profile"
+              onClick={goProfile}
+            />
+            <MenuItem
+              icon={<Settings2 className="h-4 w-4" strokeWidth={1.7} />}
+              label="Settings"
+              shortcut="Ctrl+Shift+,"
+              onClick={goSettings}
+            />
 
-            <div className="mt-1.5 flex flex-col gap-0.5">
-              <button
-                type="button"
-                role="menuitem"
-                onClick={goProfile}
-                className="group/item flex h-9 w-full items-center gap-2.5 rounded-[10px] px-2.5 text-left text-[14px] font-normal text-zinc-800 transition-colors hover:bg-zinc-100 focus-visible:bg-zinc-100 focus-visible:outline-none dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:bg-zinc-800"
-              >
-                <UserCircle2 className="h-4 w-4 shrink-0 text-zinc-500 transition-colors group-hover/item:text-zinc-800 dark:text-zinc-400 dark:group-hover/item:text-zinc-100" strokeWidth={1.8} />
-                <span className="flex-1">Profile</span>
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-400 transition-transform group-hover/item:translate-x-0.5" />
-              </button>
+            <MenuDivider />
 
-              <button
-                type="button"
-                role="menuitem"
-                onClick={goSettings}
-                className="group/item flex h-9 w-full items-center gap-2.5 rounded-[10px] px-2.5 text-left text-[14px] font-normal text-zinc-800 transition-colors hover:bg-zinc-100 focus-visible:bg-zinc-100 focus-visible:outline-none dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:bg-zinc-800"
-              >
-                <Settings2 className="h-4 w-4 shrink-0 text-zinc-500 transition-colors group-hover/item:text-zinc-800 dark:text-zinc-400 dark:group-hover/item:text-zinc-100" strokeWidth={1.8} />
-                <span className="flex-1">Settings</span>
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-400 transition-transform group-hover/item:translate-x-0.5" />
-              </button>
-            </div>
-
-            <div className="mx-1 my-1.5 border-t border-zinc-200/80 dark:border-zinc-700/70" />
-
-            <button
-              type="button"
-              role="menuitem"
+            <MenuItem
+              icon={<LogOut className="h-4 w-4" strokeWidth={1.7} />}
+              label="Log out"
               onClick={logout}
-              className="group/item flex h-9 w-full items-center gap-2.5 rounded-[10px] px-2.5 text-left text-[14px] font-normal text-zinc-800 transition-colors hover:bg-zinc-100 focus-visible:bg-zinc-100 focus-visible:outline-none dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:bg-zinc-800"
-            >
-              <LogOut className="h-4 w-4 shrink-0 text-zinc-500 transition-colors group-hover/item:text-zinc-800 dark:text-zinc-400 dark:group-hover/item:text-zinc-100" strokeWidth={1.8} />
-              <span className="flex-1">Log out</span>
-            </button>
+            />
           </motion.div>
         )}
       </AnimatePresence>
     </div>
   );
 }
+
 
 
 // ─── ChatSearchModal ───────────────────────────────────────────────────────────
@@ -1306,6 +1196,7 @@ function ChatSearchModal({
   );
 }
 
+
 // ─── Main Sidebar export ──────────────────────────────────────────────────────
 export default function Sidebar({
   user,
@@ -1329,8 +1220,8 @@ export default function Sidebar({
   mobileOpen = false,
   onMobileClose = () => {},
 }: Props) {
-  // Start collapsed on every fresh load so the chat interface is shown
-  // immediately. The user can expand it with the sidebar icon.
+  // Start closed on every fresh load so the chat interface is shown
+  // immediately. The user can open it with the panel icon in the top-left.
   const [desktopCollapsed, setDesktopCollapsed] = useState(true);
   const [desktopWidth, setDesktopWidth] = useState<number>(() => {
     try {
@@ -1342,52 +1233,24 @@ export default function Sidebar({
     }
   });
   const [searchModalOpen, setSearchModalOpen] = useState(false);
-  const [recentsPopupOpen, setRecentsPopupOpen] = useState(false);
-  const [pinnedPopupOpen, setPinnedPopupOpen] = useState(false);
-  const [recentsAnchor, setRecentsAnchor] = useState<CollapsedPopupAnchor | null>(null);
-  const [pinnedAnchor, setPinnedAnchor] = useState<CollapsedPopupAnchor | null>(null);
-  const [pinnedIds, setPinnedIds] = useState<number[]>(loadPinnedIds);
   const resizingRef = useRef(false);
-
-  useEffect(() => {
-    const syncPinned = () => setPinnedIds(loadPinnedIds());
-
-    window.addEventListener(PINNED_CHANGED_EVENT, syncPinned);
-    window.addEventListener('storage', syncPinned);
-
-    return () => {
-      window.removeEventListener(PINNED_CHANGED_EVENT, syncPinned);
-      window.removeEventListener('storage', syncPinned);
-    };
-  }, []);
 
   useEffect(() => {
     onDesktopWidthChange?.(desktopWidth);
   }, [desktopWidth, onDesktopWidthChange]);
 
-
+  // Auto-close the desktop sidebar when the window becomes narrow.
   useEffect(() => {
-    const previousWidth = { current: window.innerWidth };
-
     const handleResize = () => {
-      const currentWidth = window.innerWidth;
-
-      if (currentWidth <= 1200 && !desktopCollapsed) {
+      if (window.innerWidth <= 1200 && !desktopCollapsed) {
         setDesktopCollapsed(true);
-        setRecentsPopupOpen(false);
-        setPinnedPopupOpen(false);
-        setRecentsAnchor(null);
-        setPinnedAnchor(null);
         onDesktopStateChange?.(false);
       }
-
-      previousWidth.current = currentWidth;
     };
 
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, [desktopCollapsed, onDesktopStateChange]);
-
 
   const handleResizeStart = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -1400,7 +1263,7 @@ export default function Sidebar({
       if (!resizingRef.current) return;
       const nextWidth = Math.min(520, Math.max(260, startWidth + (moveEvent.clientX - startX)));
       setDesktopWidth(nextWidth);
-      localStorage.setItem('Twinkle_sidebar_width', String(Math.round(nextWidth)));
+      try { localStorage.setItem('Twinkle_sidebar_width', String(Math.round(nextWidth))); } catch { /* storage unavailable */ }
     };
 
     const handlePointerUp = () => {
@@ -1412,23 +1275,16 @@ export default function Sidebar({
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerUp);
   }, [desktopWidth]);
+
   useEffect(() => { onDesktopStateChange?.(false); }, [onDesktopStateChange]);
 
   const expandDesktop = useCallback(() => {
-    setRecentsPopupOpen(false);
-    setPinnedPopupOpen(false);
-    setRecentsAnchor(null);
-    setPinnedAnchor(null);
     setDesktopCollapsed(false);
     onDesktopStateChange?.(true);
-    localStorage.setItem(SIDEBAR_SEEN_KEY, '1');
+    try { localStorage.setItem(SIDEBAR_SEEN_KEY, '1'); } catch { /* storage unavailable */ }
   }, [onDesktopStateChange]);
 
   const collapseDesktop = useCallback(() => {
-    setRecentsPopupOpen(false);
-    setPinnedPopupOpen(false);
-    setRecentsAnchor(null);
-    setPinnedAnchor(null);
     setDesktopCollapsed(true);
     onDesktopStateChange?.(false);
     onClose();
@@ -1455,27 +1311,33 @@ export default function Sidebar({
     window.location.assign('/settings');
   }, [onSettings]);
 
+  // Opening search keeps the sidebar as it is on desktop; only the mobile
+  // drawer closes so the dialog is not covered.
   const openSearch = useCallback(() => {
     setSearchModalOpen(true);
-    setRecentsPopupOpen(false);
-    setPinnedPopupOpen(false);
-    setDesktopCollapsed(true);
-    onDesktopStateChange?.(false);
     onMobileClose?.();
-    onClose();
-  }, [onClose, onDesktopStateChange, onMobileClose]);
+  }, [onMobileClose]);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
       const modifier = event.ctrlKey || event.metaKey;
+      if (!modifier) return;
 
-      if (modifier && event.shiftKey && event.key.toLowerCase() === 's') {
+      if (event.shiftKey && event.key.toLowerCase() === 's') {
         event.preventDefault();
         toggleDesktop();
         return;
       }
 
-      if (modifier && !event.shiftKey && event.key.toLowerCase() === 'k') {
+      // Ctrl/Cmd + Shift + , opens Settings (shown in the account menu).
+      // event.code is used because Shift turns "," into "<" in event.key.
+      if (event.shiftKey && event.code === 'Comma') {
+        event.preventDefault();
+        handleSettings();
+        return;
+      }
+
+      if (!event.shiftKey && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         openSearch();
       }
@@ -1483,7 +1345,7 @@ export default function Sidebar({
 
     window.addEventListener('keydown', handleShortcut);
     return () => window.removeEventListener('keydown', handleShortcut);
-  }, [toggleDesktop, openSearch]);
+  }, [toggleDesktop, openSearch, handleSettings]);
 
   const listProps = {
     user,
@@ -1499,8 +1361,9 @@ export default function Sidebar({
     onShareSession,
     onClearAll,
     onLogout,
-      onProfile: handleProfile,
+    onProfile: handleProfile,
     onSettings: handleSettings,
+    onOpenSearch: openSearch,
   };
 
   return (
@@ -1538,275 +1401,80 @@ export default function Sidebar({
         />
 
         <aside
-          className={`twinkle-sidebar absolute inset-y-0 left-0 z-[9999] w-[min(18rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] bg-white dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 flex flex-col h-[100dvh] overflow-hidden shadow-none transition-transform duration-300 ease-out ${
+          className={`twinkle-sidebar absolute inset-y-0 left-0 z-[9999] flex h-[100dvh] w-[min(18rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] flex-col overflow-hidden border-r border-zinc-200 bg-white shadow-none transition-transform duration-300 ease-out dark:border-zinc-800 dark:bg-zinc-950 ${
             mobileOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
           onClick={e => e.stopPropagation()}
         >
-          <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <div className="w-7 h-7 bg-transparent rounded-lg flex items-center justify-center p-1 shrink-0">
-                <StormLogo className="w-full h-full text-zinc-900 dark:text-white" />
-              </div>
-              <h2 className="font-serif text-[22px] font-medium leading-none tracking-[-0.01em] text-zinc-900 dark:text-zinc-50">Twinkle</h2>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <motion.button
-                type="button"
-                onClick={openSearch}
-                aria-label="Search chats"
-                title="Search chats"
-                className="group/search flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-none"
-              >
-                <Search className="twinkle-search-icon h-[17px] w-[17px]" strokeWidth={1.8} />
-              </motion.button>
-
-              <div className="relative group/close">
-                <motion.button
-                  type="button"
-                  onClick={onMobileClose}
-                  aria-label="Close sidebar"
-                  title="Close sidebar"
-                  className="flex h-9 w-9 items-center justify-center rounded-none
-                    bg-transparent border-0 shadow-none
-                    text-zinc-500 dark:text-zinc-400
-                    hover:text-zinc-700 dark:hover:text-zinc-200
-                    transition-colors duration-200"
-                >
-                  <svg
-                    width="23"
-                    height="20"
-                    viewBox="0 0 24 20"
-                    fill="none"
-                    aria-hidden="true"
-                  >
-                    <rect
-                      x="2"
-                      y="2"
-                      width="20"
-                      height="16"
-                      rx="4"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                    />
-                    <path
-                      d="M8.5 2.5V17.5"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </motion.button>
-                <div className="pointer-events-none absolute right-0 top-full mt-2 z-[300] whitespace-nowrap rounded-lg bg-zinc-900 px-2.5 py-1.5 text-xs font-bold text-white opacity-0 shadow-lg transition-opacity duration-150 group-hover/close:opacity-100">
-                  Close Sidebar
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-            <SessionList
-              {...listProps}
-              onClose={onMobileClose}
-            />
-          </div>
+          <SidebarHeader onToggle={onMobileClose} label="Close sidebar" />
+          <SessionList
+            {...listProps}
+            onClose={onMobileClose}
+          />
         </aside>
       </div>
 
       {/* ═══════════════════════════════════════════════════
-          DESKTOP COLLAPSED ICON RAIL  (lg+ only)
+          DESKTOP — CLOSED  (lg+ only)
+          The sidebar is removed completely. Only a small panel icon stays in
+          the top-left corner to bring it back.
       ═══════════════════════════════════════════════════ */}
       {desktopCollapsed && (
-        <aside className="twinkle-sidebar group/collapsed hidden lg:flex fixed inset-y-0 left-0 z-[2147483645] w-[52px] bg-white dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 flex-col items-center pt-4 pb-4 shadow-none">
-          {/* Brand stays visible. Only the sidebar toggle replaces it while hovering. */}
-          <IconTooltip label="Toggle sidebar" shortcut="Ctrl+Shift+S">
-            <div className="relative flex h-10 w-10 items-center justify-center">
-              <button
-                type="button"
-                onClick={toggleDesktop}
-                aria-label="Open sidebar"
-                className="group/sidebar-toggle relative flex h-8 w-8 items-center justify-center rounded-lg text-zinc-900 dark:text-white"
-              >
-              <StormLogo className="h-[24px] w-[24px] text-zinc-900 dark:text-white transition-opacity duration-500 group-hover/collapsed:opacity-0" />
-              <svg
-                width="23"
-                height="21"
-                viewBox="0 0 24 20"
-                fill="none"
-                aria-hidden="true"
-                className="pointer-events-none absolute opacity-0 text-zinc-900 transition-opacity duration-500 group-hover/collapsed:opacity-100 dark:text-white"
-              >
-                <rect x="2" y="2" width="20" height="16" rx="4" stroke="currentColor" strokeWidth="2" />
-                <path d="M8.5 2.5V17.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                </svg>
-              </button>
-            </div>
-          </IconTooltip>
-
-          {/* Reference-style icon rail: identical button and icon sizing. */}
-          <div className="mt-4 flex w-full flex-col items-center gap-0.5">
-            <IconTooltip label="New Chat" shortcut="Ctrl+Shift+O">
-              <button
-                onClick={onNewSession}
-                aria-label="New Chat"
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-900 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-              >
-                <SquarePen className="h-[17px] w-[17px]" strokeWidth={1.8} />
-              </button>
-            </IconTooltip>
-
-            <IconTooltip label="Search" shortcut="Ctrl+K">
-              <button
-                onClick={openSearch}
-                aria-label="Search"
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-900 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-              >
-                <Search className="h-[17px] w-[17px]" strokeWidth={1.9} />
-              </button>
-            </IconTooltip>
-
-            <div className="relative group/pinned flex w-full items-center justify-center">
-              <button
-                onClick={event => {
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  setPinnedAnchor({ top: rect.top, right: rect.right });
-                  setPinnedPopupOpen(current => !current);
-                  setRecentsPopupOpen(false);
-                                setRecentsAnchor(null);
-                              }}
-                aria-label="Pinned"
-                aria-expanded={pinnedPopupOpen}
-                className={`flex h-8 w-8 items-center justify-center rounded-lg text-zinc-900 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 transition-none ${pinnedPopupOpen ? 'bg-zinc-100 dark:bg-zinc-800' : ''}`}
-              >
-                <SidebarPinIcon className="h-[17px] w-[17px]" />
-              </button>
-              <div className="absolute left-full ml-2.5 flex items-center px-3.5 py-2 bg-[#111111] text-white text-[14px] font-bold rounded-full whitespace-nowrap pointer-events-none z-[300] shadow-[0_12px_32px_rgba(0,0,0,0.18)] opacity-0 group-hover/pinned:opacity-100 transition-opacity duration-150">
-                <span>Pinned</span>
-              </div>
-            </div>
-
-            <IconTooltip label="Recents">
-              <button
-                onClick={event => {
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  setRecentsAnchor({ top: rect.top, right: rect.right });
-                  setRecentsPopupOpen(current => !current);
-                  setPinnedPopupOpen(false);
-                                setPinnedAnchor(null);
-                              }}
-                aria-label="Recents"
-                aria-expanded={recentsPopupOpen}
-                className={`flex h-8 w-8 items-center justify-center rounded-lg text-zinc-900 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 transition-none ${recentsPopupOpen ? 'bg-zinc-100 dark:bg-zinc-800' : ''}`}
-              >
-                <MessageCircle className="h-[17px] w-[17px]" strokeWidth={1.8} />
-              </button>
-            </IconTooltip>
-
-
-          </div>
-
-          <div className="flex-1" />
-
-          <AnimatePresence>
-            {pinnedPopupOpen && (
-              <CollapsedPinnedPopup
-                sessions={sessions}
-                currentSessionId={currentSessionId}
-                pinnedIds={pinnedIds}
-                onSelectSession={onSelectSession}
-                onClose={() => { setPinnedPopupOpen(false); setPinnedAnchor(null); }}
-                anchor={pinnedAnchor}
-              />
-            )}
-            {recentsPopupOpen && (
-              <CollapsedRecentsPopup
-                sessions={sessions}
-                currentSessionId={currentSessionId}
-                respondingSessionId={respondingSessionId}
-                onSelectSession={onSelectSession}
-                onClose={() => { setRecentsPopupOpen(false); setRecentsAnchor(null); }}
-                anchor={recentsAnchor}
-              />
-            )}
-          </AnimatePresence>
-
-          <AccountMenu
-            user={user}
-            onProfile={onProfile}
-            onSettings={onSettings}
-            onLogout={onLogout}
-            compact
-          />
-        </aside>
+        <motion.div
+          className="fixed left-3 top-[18px] z-[9990] hidden lg:block"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.15, duration: 0.15 }}
+        >
+          <Tip label="Open sidebar" shortcut="Ctrl+Shift+S" side="right">
+            <button
+              type="button"
+              onClick={expandDesktop}
+              aria-label="Open sidebar"
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-600 transition-colors hover:bg-zinc-200/60 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
+            >
+              <SidebarToggleIcon />
+            </button>
+          </Tip>
+        </motion.div>
       )}
 
       {/* ═══════════════════════════════════════════════════
-          DESKTOP EXPANDED FULL SIDEBAR  (lg+ only)
+          DESKTOP — OPEN  (lg+ only)
       ═══════════════════════════════════════════════════ */}
-      <AnimatePresence mode="wait">
+      <AnimatePresence initial={false}>
         {!desktopCollapsed && (
-          <>
-            <aside
-              className="twinkle-sidebar hidden lg:flex fixed inset-y-0 left-0 z-[2147483647] bg-white dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 flex-col h-full shadow-none"
-              style={{ width: `${desktopWidth}px` }}
-              onClick={e => e.stopPropagation()}
+          <motion.aside
+            key="desktop-sidebar"
+            initial={{ x: -desktopWidth }}
+            animate={{ x: 0 }}
+            exit={{ x: -desktopWidth }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            className="twinkle-sidebar fixed inset-y-0 left-0 z-[9990] hidden h-full flex-col border-r border-zinc-200 bg-white shadow-none dark:border-zinc-800 dark:bg-zinc-950 lg:flex"
+            style={{ width: `${desktopWidth}px` }}
+            onClick={e => e.stopPropagation()}
+          >
+            <SidebarHeader onToggle={collapseDesktop} label="Close sidebar" />
+
+            {/* Desktop: keep the sidebar open after selecting a chat, starting a
+                new chat, renaming, etc. It only closes via the toggle button. */}
+            <SessionList
+              {...listProps}
+              onClose={() => {}}
+            />
+
+            {/* Drag handle: adjust desktop sidebar width */}
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize sidebar"
+              title="Drag to resize sidebar"
+              onPointerDown={handleResizeStart}
+              className="group/resize absolute right-[-3px] top-0 h-full w-[6px] cursor-col-resize touch-none"
             >
-              <div className="flex items-center justify-between px-4 pt-4 pb-2 shrink-0">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <div className="w-7 h-7 bg-transparent rounded-lg flex items-center justify-center p-1 shrink-0">
-                    <StormLogo className="w-full h-full text-zinc-900 dark:text-white" />
-                  </div>
-                  <h2 className="font-serif text-[22px] font-medium leading-none tracking-[-0.01em] text-zinc-900 dark:text-zinc-50">Twinkle</h2>
-                </div>
-
-                <div className="flex items-center gap-0.5 shrink-0">
-                  <IconTooltip label="Search" shortcut="Ctrl+K">
-                    <motion.button
-                      type="button"
-                      onClick={openSearch}
-                      aria-label="Search chats"
-                      className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
-                    >
-                      <Search className="twinkle-search-icon h-[17px] w-[17px]" strokeWidth={1.8} />
-                    </motion.button>
-                  </IconTooltip>
-
-                  <IconTooltip label="Toggle sidebar" shortcut="Ctrl+Shift+S">
-                    <motion.button
-                      type="button"
-                      onClick={collapseDesktop}
-                      aria-label="Close sidebar"
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-none bg-transparent border-0 shadow-none text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors duration-200"
-                    >
-                      <svg width="23" height="20" viewBox="0 0 24 20" fill="none" aria-hidden="true">
-                        <rect x="2" y="2" width="20" height="16" rx="4" stroke="currentColor" strokeWidth="1.8" />
-                        <path d="M8.5 2.5V17.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                      </svg>
-                    </motion.button>
-                  </IconTooltip>
-                </div>
-              </div>
-
-              {/* Desktop: keep the sidebar open after selecting a chat, starting a
-                  new chat, renaming, etc. It only collapses via the toggle button. */}
-              <SessionList
-                {...listProps}
-                onClose={() => {}}
-              />
-
-              {/* Drag handle: adjust desktop sidebar width */}
-              <div
-                role="separator"
-                aria-orientation="vertical"
-                aria-label="Resize sidebar"
-                title="Drag to resize sidebar"
-                onPointerDown={handleResizeStart}
-                className="absolute right-[-3px] top-0 h-full w-[6px] cursor-col-resize touch-none group/resize"
-              >
-                <div className="mx-auto h-full w-px bg-transparent transition-colors group-hover/resize:bg-zinc-300 dark:group-hover/resize:bg-zinc-700" />
-              </div>
-            </aside>
-          </>
+              <div className="mx-auto h-full w-px bg-transparent transition-colors group-hover/resize:bg-zinc-300 dark:group-hover/resize:bg-zinc-700" />
+            </div>
+          </motion.aside>
         )}
       </AnimatePresence>
     </>
