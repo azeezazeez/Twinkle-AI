@@ -5,12 +5,15 @@ import { Session, User } from '../types';
 import {
   LogOut, Trash2, X, Search, Plus, MoreVertical, PinOff, Loader2,
   MessageCircle, Pencil, Upload, Eye, EyeOff,
-  Settings2, UserCircle2, ChevronDown, SlidersHorizontal, ArrowUpDown, Check,
+  Settings2, UserCircle2, ChevronDown, ChevronRight, SlidersHorizontal, ArrowUpDown, Check,
+  Globe, HelpCircle, ArrowUpCircle, LayoutGrid, Info, Keyboard, ShieldCheck,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import UserAvatar from './UserAvatar';
 import { chatApi } from '../lib/api';
 import SearchBar from './SearchBar';
+import { useLanguage, type AppLanguage } from '../lib/i18n';
+import { APP_LANGUAGES } from '../pages/Settings';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Props {
@@ -895,7 +898,6 @@ function SessionList({
       <div className="mt-auto shrink-0 border-t border-zinc-200/80 p-2 dark:border-zinc-800">
         <AccountMenu
           user={user}
-          onProfile={onProfile}
           onSettings={onSettings}
           onLogout={onLogout}
         />
@@ -906,31 +908,72 @@ function SessionList({
 
 
 // ─── AccountMenu ─────────────────────────────────────────────────────────────
-// Footer account row. The popup spans the full sidebar width, shows the email
-// on top and lists Profile, Settings and Log out.
+// Footer account row. Clicking it opens a popup that spans the sidebar width:
+// email on top, then Settings, Language, Get help, Upgrade plan, Get apps and
+// extensions, Learn more (expands) and Log out.
+//
+// Optional external links (set in .env, otherwise the in-app page is opened):
+//   VITE_HELP_URL, VITE_UPGRADE_URL, VITE_APPS_URL
+const EXTERNAL_LINKS = {
+  help: String((import.meta as any).env?.VITE_HELP_URL || ''),
+  upgrade: String((import.meta as any).env?.VITE_UPGRADE_URL || ''),
+  apps: String((import.meta as any).env?.VITE_APPS_URL || ''),
+};
+
+// Chrome/Edge fire this once the app is installable; keep it for "Get apps".
+let deferredInstallPrompt: any = null;
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeinstallprompt', event => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+  });
+  window.addEventListener('appinstalled', () => {
+    deferredInstallPrompt = null;
+  });
+}
+
 function AccountMenu({
   user,
-  onProfile,
   onSettings,
   onLogout,
 }: {
   user: User;
-  onProfile?: () => void;
   onSettings?: () => void;
   onLogout: () => void;
 }) {
   const navigate = useNavigate();
+  const { language, setLanguage } = useLanguage();
   const [open, setOpen] = useState(false);
+  const [sub, setSub] = useState<'language' | 'learn' | null>(null);
+  const [notice, setNotice] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
+  const noticeTimer = useRef<number | null>(null);
+
+  const currentLanguage = APP_LANGUAGES.find(item => item.code === language) ?? APP_LANGUAGES[0];
+
+  const closeMenu = useCallback(() => {
+    setOpen(false);
+    setSub(null);
+  }, []);
+
+  const showNotice = useCallback((message: string) => {
+    setNotice(message);
+    if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(''), 3600);
+  }, []);
+
+  useEffect(() => () => {
+    if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
 
     const handlePointerDown = (event: PointerEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setOpen(false);
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) closeMenu();
     };
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') closeMenu();
     };
 
     document.addEventListener('pointerdown', handlePointerDown);
@@ -939,22 +982,61 @@ function AccountMenu({
       document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('keydown', handleEscape);
     };
-  }, [open]);
-
-  const goProfile = () => {
-    setOpen(false);
-    if (onProfile) onProfile();
-    else navigate('/profile');
-  };
+  }, [open, closeMenu]);
 
   const goSettings = () => {
-    setOpen(false);
+    closeMenu();
     if (onSettings) onSettings();
     else navigate('/settings');
   };
 
+  const goTo = (path: string) => {
+    closeMenu();
+    navigate(path);
+  };
+
+  const openExternal = (url: string) => {
+    closeMenu();
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const chooseLanguage = (code: string) => {
+    setLanguage(code as AppLanguage);
+    closeMenu();
+  };
+
+  const getHelp = () => {
+    if (EXTERNAL_LINKS.help) openExternal(EXTERNAL_LINKS.help);
+    else goTo('/settings?tab=about');
+  };
+
+  const upgradePlan = () => {
+    if (EXTERNAL_LINKS.upgrade) openExternal(EXTERNAL_LINKS.upgrade);
+    else goTo('/settings?tab=usage');
+  };
+
+  const getApps = async () => {
+    if (deferredInstallPrompt) {
+      closeMenu();
+      try {
+        await deferredInstallPrompt.prompt();
+        await deferredInstallPrompt.userChoice;
+      } catch {
+        /* the user dismissed the install dialog */
+      }
+      deferredInstallPrompt = null;
+      return;
+    }
+    if (EXTERNAL_LINKS.apps) {
+      openExternal(EXTERNAL_LINKS.apps);
+      return;
+    }
+    closeMenu();
+    showNotice('To install Twinkle AI, open your browser menu and choose “Install app” or “Add to Home screen”.');
+  };
+
   const logout = () => {
-    setOpen(false);
+    closeMenu();
     onLogout();
   };
 
@@ -962,7 +1044,7 @@ function AccountMenu({
     <div ref={menuRef} className="relative w-full">
       <button
         type="button"
-        onClick={() => setOpen(value => !value)}
+        onClick={() => (open ? closeMenu() : setOpen(true))}
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label="Open account menu"
@@ -993,23 +1075,107 @@ function AccountMenu({
             transition={{ duration: 0.12, ease: 'easeOut' }}
             role="menu"
             aria-label="Account"
-            className={`absolute bottom-[calc(100%+8px)] left-0 right-0 z-[60] origin-bottom ${MENU_SURFACE}`}
+            className={`absolute bottom-[calc(100%+8px)] left-0 right-0 z-[60] max-h-[calc(100dvh-96px)] origin-bottom overflow-y-auto overscroll-contain ${MENU_SURFACE}`}
           >
             <div className="truncate px-2.5 pb-1 pt-1.5 text-[13px] font-medium text-zinc-500 dark:text-zinc-400">
               {user.email || user.name || user.username}
             </div>
 
             <MenuItem
-              icon={<UserCircle2 className="h-4 w-4" strokeWidth={1.7} />}
-              label="Profile"
-              onClick={goProfile}
-            />
-            <MenuItem
               icon={<Settings2 className="h-4 w-4" strokeWidth={1.7} />}
               label="Settings"
               shortcut="Ctrl+Shift+,"
               onClick={goSettings}
             />
+
+            <MenuItem
+              icon={<Globe className="h-4 w-4" strokeWidth={1.7} />}
+              label="Language"
+              onClick={() => setSub(value => (value === 'language' ? null : 'language'))}
+              trailing={
+                <span className="flex items-center gap-1 text-[12px] text-zinc-400 dark:text-zinc-500">
+                  <span data-no-translate className="max-w-[72px] truncate">{currentLanguage.native}</span>
+                  <ChevronRight
+                    className={`h-3.5 w-3.5 transition-transform ${sub === 'language' ? 'rotate-90' : ''}`}
+                    strokeWidth={1.8}
+                  />
+                </span>
+              }
+            />
+            {sub === 'language' && (
+              <div
+                role="menu"
+                aria-label="Choose language"
+                className="mb-1 ml-3 max-h-56 overflow-y-auto overscroll-contain border-l border-zinc-200 pl-1 dark:border-zinc-700/70"
+              >
+                {APP_LANGUAGES.map(item => (
+                  <button
+                    key={item.code}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={item.code === language}
+                    onClick={() => chooseLanguage(item.code)}
+                    className="flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[14px] leading-none text-zinc-800 transition-colors hover:bg-zinc-100 focus-visible:bg-zinc-100 focus-visible:outline-none dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:bg-zinc-800"
+                  >
+                    <span data-no-translate className="min-w-0 flex-1 truncate">{item.native}</span>
+                    {item.code === language && <Check className="h-4 w-4 shrink-0" strokeWidth={2} />}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <MenuItem
+              icon={<HelpCircle className="h-4 w-4" strokeWidth={1.7} />}
+              label="Get help"
+              onClick={getHelp}
+            />
+
+            <MenuDivider />
+
+            <MenuItem
+              icon={<ArrowUpCircle className="h-4 w-4" strokeWidth={1.7} />}
+              label="Upgrade plan"
+              onClick={upgradePlan}
+            />
+            <MenuItem
+              icon={<LayoutGrid className="h-4 w-4" strokeWidth={1.7} />}
+              label="Get apps and extensions"
+              onClick={() => void getApps()}
+            />
+            <MenuItem
+              icon={<Info className="h-4 w-4" strokeWidth={1.7} />}
+              label="Learn more"
+              onClick={() => setSub(value => (value === 'learn' ? null : 'learn'))}
+              trailing={
+                <ChevronRight
+                  className={`h-3.5 w-3.5 text-zinc-400 transition-transform dark:text-zinc-500 ${sub === 'learn' ? 'rotate-90' : ''}`}
+                  strokeWidth={1.8}
+                />
+              }
+            />
+            {sub === 'learn' && (
+              <div
+                role="menu"
+                aria-label="Learn more"
+                className="mb-1 ml-3 border-l border-zinc-200 pl-1 dark:border-zinc-700/70"
+              >
+                <MenuItem
+                  icon={<Info className="h-4 w-4" strokeWidth={1.7} />}
+                  label="About Twinkle AI"
+                  onClick={() => goTo('/settings?tab=about')}
+                />
+                <MenuItem
+                  icon={<Keyboard className="h-4 w-4" strokeWidth={1.7} />}
+                  label="Keyboard shortcuts"
+                  onClick={() => goTo('/settings?tab=shortcuts')}
+                />
+                <MenuItem
+                  icon={<ShieldCheck className="h-4 w-4" strokeWidth={1.7} />}
+                  label="Data controls"
+                  onClick={() => goTo('/settings?tab=data')}
+                />
+              </div>
+            )}
 
             <MenuDivider />
 
@@ -1021,6 +1187,19 @@ function AccountMenu({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {notice &&
+        createPortal(
+          <div
+            role="status"
+            aria-live="polite"
+            style={{ zIndex: TOP_LAYER }}
+            className="pointer-events-none fixed bottom-6 left-1/2 w-[min(92vw,420px)] -translate-x-1/2 rounded-xl border border-zinc-200 bg-white px-4 py-3 text-center text-[14px] text-zinc-800 shadow-xl dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+          >
+            {notice}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
