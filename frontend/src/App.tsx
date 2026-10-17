@@ -13,9 +13,11 @@ import {
   useState,
   useEffect,
   useCallback,
+  useRef,
 } from 'react';
 
 import { authApi } from './lib/api';
+import { matchShortcut, dispatchShortcut, setPendingShortcut } from './lib/shortcuts';
 
 import {
   LanguageProvider,
@@ -68,6 +70,58 @@ function ChatRoute({
   );
 }
 
+
+
+/*
+ * ==========================================================
+ * GLOBAL KEYBOARD SHORTCUTS
+ * ==========================================================
+ * One listener for the whole app. Settings/shortcuts navigate directly;
+ * chat shortcuts are broadcast to the Sidebar/Chat (or, when pressed on a
+ * page without a chat, remembered and run right after returning to "/").
+ */
+
+function GlobalShortcuts() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const pathRef = useRef(location.pathname);
+  pathRef.current = location.pathname;
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const action = matchShortcut(event);
+      if (!action) return;
+
+      // Always stop the browser's own meaning (Ctrl+K, Ctrl+Shift+O, ...).
+      event.preventDefault();
+
+      if (action === 'settings') {
+        navigate('/settings');
+        return;
+      }
+      if (action === 'shortcuts') {
+        navigate('/settings?tab=shortcuts');
+        return;
+      }
+
+      const path = pathRef.current;
+      const onChat = path === '/' || path.startsWith('/c/');
+      if (onChat) {
+        dispatchShortcut(action);
+        return;
+      }
+
+      // Not on a chat page: go there first, then run the action.
+      if (action !== 'new-chat') setPendingShortcut(action);
+      navigate('/');
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [navigate]);
+
+  return null;
+}
 
 /*
  * ==========================================================
@@ -209,6 +263,7 @@ function AuthenticatedApp({
         </div>
       }
     >
+    {user && <GlobalShortcuts />}
     <Routes>
 
       {/* =====================================================
