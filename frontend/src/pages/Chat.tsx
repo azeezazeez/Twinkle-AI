@@ -17,6 +17,7 @@ import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw';
 import {
   Copy, Check, Edit2, Pencil, Upload, Volume2, VolumeX, Share2, CheckCircle2, LoaderCircle,
   X, RotateCcw, RotateCw, Download, ChevronDown, Eye, Zap, Brain, Plus, FileText, Mic, AudioLines,
+  ThumbsUp, ThumbsDown, Paperclip, Camera,
 } from 'lucide-react';
 
 import ReactMarkdown from 'react-markdown';
@@ -27,6 +28,49 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import oneDark from 'react-syntax-highlighter/dist/esm/styles/prism/one-dark';
 
 
+
+// "9 minutes ago" label that keeps itself fresh without re-rendering the chat.
+const formatRelativeAgo = (value: string | number | Date | undefined | null): string => {
+  if (!value) return 'Just now';
+  const then = new Date(value).getTime();
+  if (Number.isNaN(then)) return 'Just now';
+  const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (seconds < 45) return 'Just now';
+  const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
+    ['minute', 60],
+    ['hour', 3600],
+    ['day', 86400],
+    ['week', 604800],
+    ['month', 2592000],
+    ['year', 31536000],
+  ];
+  let unit: Intl.RelativeTimeFormatUnit = 'minute';
+  let size = 60;
+  for (const [name, secs] of units) {
+    if (seconds >= secs) {
+      unit = name;
+      size = secs;
+    }
+  }
+  return new Intl.RelativeTimeFormat('en', { numeric: 'always' }).format(-Math.max(1, Math.floor(seconds / size)), unit);
+};
+
+function RelativeTime({ value }: { value?: string | number | Date | null }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => tick(n => n + 1), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const date = value ? new Date(value) : null;
+  return (
+    <span
+      className="ml-1.5 whitespace-nowrap text-[13px] font-normal text-zinc-500 dark:text-zinc-400"
+      title={date && !Number.isNaN(date.getTime()) ? date.toLocaleString() : undefined}
+    >
+      {formatRelativeAgo(value)}
+    </span>
+  );
+}
 
 const decodeGeminiLiveMessage = async (data: unknown): Promise<any> => {
   if (typeof data === 'string') return JSON.parse(data);
@@ -2098,6 +2142,27 @@ ${textToRead}` }] }], turnComplete: true },
   const [previewText, setPreviewText] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  // "+" menu: Upload or add files / Take a screenshot.
+  const [plusMenu, setPlusMenu] = useState<{ left: number; bottom: number } | null>(null);
+  const plusMenuRef = useRef<HTMLDivElement | null>(null);
+  const [messageFeedback, setMessageFeedback] = useState<Record<string, 'up' | 'down'>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('twinkle_message_feedback_v1') || '{}') || {};
+    } catch {
+      return {};
+    }
+  });
+  const setFeedback = (id: string | number, value: 'up' | 'down') => {
+    setMessageFeedback(prev => {
+      const next = { ...prev };
+      if (next[String(id)] === value) delete next[String(id)];
+      else next[String(id)] = value;
+      try {
+        localStorage.setItem('twinkle_message_feedback_v1', JSON.stringify(next));
+      } catch { /* storage may be blocked */ }
+      return next;
+    });
+  };
 
 
   // Theme
@@ -2205,6 +2270,35 @@ const chooseModel = useCallback((modelId: string) => {
       window.removeEventListener('orientationchange', updateEmptyComposerPosition);
     };
   }, [messages.length, isTyping]);
+
+  // The composer is a fixed overlay, so its height is measured and the message
+  // viewport is shortened by exactly that much. Messages therefore stop (are
+  // hidden) at the top edge of the composer instead of scrolling behind it, and
+  // the message column and composer share the same centre line.
+  const composerWrapRef = useRef<HTMLDivElement | null>(null);
+  const [composerHeight, setComposerHeight] = useState(0);
+  useEffect(() => {
+    const el = composerWrapRef.current;
+    if (!el) return;
+    const measure = () => {
+      const next = Math.round(el.getBoundingClientRect().height);
+      const container = messagesContainerRef.current;
+      const wasNearBottom = container
+        ? container.scrollHeight - container.scrollTop - container.clientHeight < 80
+        : false;
+      setComposerHeight(prev => (prev === next ? prev : next));
+      if (container && wasNearBottom) {
+        requestAnimationFrame(() => {
+          container.scrollTop = container.scrollHeight;
+        });
+      }
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const firstMessageScrollPendingRef = useRef(false);
   const autoFollowScrollRef = useRef(true);
@@ -2752,6 +2846,90 @@ const chooseModel = useCallback((modelId: string) => {
   }, [previewFile, previewUrl]);
 
   // File handlers (kept but no UI to trigger them)
+  const canTakeScreenshot =
+    typeof navigator !== 'undefined' && !!(navigator.mediaDevices && (navigator.mediaDevices as any).getDisplayMedia);
+
+  const openPlusMenu = (event: React.MouseEvent<HTMLElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setPlusMenu(current =>
+      current
+        ? null
+        : {
+            left: Math.max(8, Math.min(rect.left, window.innerWidth - 248)),
+            bottom: window.innerHeight - rect.top + 8,
+          }
+    );
+  };
+
+  useEffect(() => {
+    if (!plusMenu) return;
+    const onPointer = (event: MouseEvent) => {
+      if (!plusMenuRef.current?.contains(event.target as Node)) setPlusMenu(null);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPlusMenu(null);
+    };
+    const onResize = () => setPlusMenu(null);
+    document.addEventListener('mousedown', onPointer);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', onResize);
+    return () => {
+      document.removeEventListener('mousedown', onPointer);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [plusMenu]);
+
+  // Captures one frame of the screen / window / tab the user picks and attaches
+  // it like any other image.
+  const takeScreenshot = async () => {
+    setPlusMenu(null);
+    if (!canTakeScreenshot) return;
+    let stream: MediaStream | null = null;
+    try {
+      // Give the menu a moment to disappear so it is not captured.
+      await new Promise(resolve => window.setTimeout(resolve, 120));
+      stream = await (navigator.mediaDevices as any).getDisplayMedia({
+        video: true,
+        audio: false,
+        preferCurrentTab: true,
+      });
+      if (!stream) return;
+      const video = document.createElement('video');
+      video.muted = true;
+      video.playsInline = true;
+      video.srcObject = stream;
+      await video.play();
+      await new Promise(resolve => window.setTimeout(resolve, 250));
+
+      const width = video.videoWidth;
+      const height = video.videoHeight;
+      if (!width || !height) throw new Error('No frame captured');
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext('2d')?.drawImage(video, 0, 0, width, height);
+      const blob: Blob | null = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      if (!blob) throw new Error('Could not encode screenshot');
+
+      const stamp = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const name = `Screenshot ${stamp.getFullYear()}-${pad(stamp.getMonth() + 1)}-${pad(stamp.getDate())} ${pad(stamp.getHours())}.${pad(stamp.getMinutes())}.${pad(stamp.getSeconds())}.png`;
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([blob], name, { type: 'image/png', lastModified: Date.now() }));
+      await handleFileSelection(transfer.files);
+      requestAnimationFrame(() => inputRef.current?.focus());
+    } catch (error: any) {
+      // Cancelling the browser's share picker is not an error worth showing.
+      if (error?.name !== 'NotAllowedError' && error?.name !== 'AbortError') {
+        console.error('Screenshot failed:', error);
+        alert('The screenshot could not be captured. Please try again.');
+      }
+    } finally {
+      stream?.getTracks().forEach(track => track.stop());
+    }
+  };
+
   const handleFileSelection = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
 
@@ -4034,7 +4212,8 @@ if (isBlankDraft) {
         </header>
         {/* Messages */}
         <div
-          className={`twinkle-message-scroll-area relative min-h-0 min-w-0 flex-1 w-full max-w-full overflow-x-hidden overflow-y-auto overscroll-contain pb-40 pt-0 md:pb-44 ${messages.length === 0 && !isTyping ? "flex flex-col justify-center" : ""}`}
+          className={`twinkle-message-scroll-area relative min-h-0 min-w-0 flex-1 w-full max-w-full overflow-x-hidden overflow-y-auto overscroll-contain pt-0 ${messages.length === 0 && !isTyping ? "flex flex-col justify-center pb-40 md:pb-44" : "pb-0"}`}
+          style={messages.length === 0 && !isTyping ? undefined : { marginBottom: composerHeight }}
           ref={messagesContainerRef}
           onScroll={handleScroll}
         >
@@ -4366,7 +4545,7 @@ if (isBlankDraft) {
                               </span>
                             )}
 
-                            <span className="text-[12px] font-normal text-zinc-500 dark:text-zinc-400 whitespace-nowrap mr-1">
+                            {msg.role === 'user' && <span className="text-[12px] font-normal text-zinc-500 dark:text-zinc-400 whitespace-nowrap mr-1">
                               {msg.timestamp
                                 ? new Date(msg.timestamp).toLocaleTimeString('en-IN', {
                                     timeZone: 'Asia/Kolkata',
@@ -4374,7 +4553,7 @@ if (isBlankDraft) {
                                     minute: '2-digit'
                                   })
                                 : 'Now'}
-                            </span>
+                            </span>}
 
                             <div className="flex items-center gap-0.5">
                                 {msg.role === 'user' ? (
@@ -4388,12 +4567,6 @@ if (isBlankDraft) {
                                     }} data-tooltip={copiedId === msg.id ? 'Copied' : 'Copy message'} aria-label="Copy message"
                                       className="twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-300 transition-all touch-manipulation">
                                       {copiedId === msg.id ? <Check className="w-4 h-4 md:w-3.5 md:h-3.5" /> : <Copy className="w-4 h-4 md:w-3.5 md:h-3.5" />}
-                                    </button>
-                                    <button type="button" onClick={() => {
-                                      if (currentSessionId !== null) void shareSession(currentSessionId, msg.id, msg.content);
-                                    }} data-tooltip="Share prompt" aria-label="Share prompt"
-                                      className="twinkle-tooltip-trigger hidden sm:inline-flex p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-300 transition-all touch-manipulation">
-                                      <Upload className="w-4 h-4 md:w-3.5 md:h-3.5" />
                                     </button>
                                     {!isEditing && !isTyping && (
                                       <button type="button" onClick={() => void handleRetryMessage(msg)} data-tooltip="Retry" aria-label="Retry message"
@@ -4410,38 +4583,43 @@ if (isBlankDraft) {
                                   </>
                                 ) : (
                                   <>
-                                    <button type="button" onClick={() => handleReadAloud(msg)}
-                                      data-tooltip={speakingMessageId === msg.id ? 'Stop reading' : 'Read aloud'}
-                                      aria-label={speakingMessageId === msg.id ? 'Stop reading aloud' : 'Read response aloud'}
-                                      aria-pressed={speakingMessageId === msg.id}
-                                      className={`twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all touch-manipulation ${speakingMessageId === msg.id ? 'text-zinc-900 dark:text-zinc-50' : 'text-zinc-500 dark:text-zinc-300'}`}>
-                                      {speakingMessageId === msg.id ? <VolumeX className="w-4 h-4 md:w-3.5 md:h-3.5" /> : <Volume2 className="w-4 h-4 md:w-3.5 md:h-3.5" />}
-                                    </button>
                                     <button type="button" onClick={async () => {
                                       try {
                                         await navigator.clipboard.writeText(cleanMessageContent(msg.content));
                                         setCopiedId(msg.id);
                                         window.setTimeout(() => setCopiedId(null), 2000);
                                       } catch { window.prompt('Copy this response:', cleanMessageContent(msg.content)); }
-                                    }} data-tooltip={copiedId === msg.id ? 'Copied' : 'Copy response'} aria-label="Copy response"
-                                      className="twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-300 transition-all touch-manipulation">
-                                      {copiedId === msg.id ? <Check className="w-4 h-4 md:w-3.5 md:h-3.5" /> : <Copy className="w-4 h-4 md:w-3.5 md:h-3.5" />}
+                                    }} data-tooltip={copiedId === msg.id ? 'Copied' : 'Copy'} aria-label="Copy response"
+                                      className="twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all touch-manipulation text-zinc-500 dark:text-zinc-300">
+                                      {copiedId === msg.id ? <Check className="w-4 h-4 md:w-[18px] md:h-[18px]" /> : <Copy className="w-4 h-4 md:w-[18px] md:h-[18px]" />}
                                     </button>
-                                    <button type="button" onClick={() => {
-                                      if (currentSessionId !== null) void shareSession(currentSessionId, msg.id, msg.content);
-                                    }} data-tooltip="Share prompt" aria-label="Share prompt"
-                                      className="twinkle-tooltip-trigger hidden sm:inline-flex p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-300 transition-all touch-manipulation">
-                                      <Upload className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                                    <button type="button" onClick={() => handleReadAloud(msg)}
+                                      data-tooltip={speakingMessageId === msg.id ? 'Stop reading' : 'Read aloud'}
+                                      aria-label={speakingMessageId === msg.id ? 'Stop reading aloud' : 'Read response aloud'}
+                                      aria-pressed={speakingMessageId === msg.id}
+                                      className={`twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all touch-manipulation ${speakingMessageId === msg.id ? 'text-zinc-900 dark:text-zinc-50' : 'text-zinc-500 dark:text-zinc-300'}`}>
+                                      {speakingMessageId === msg.id ? <VolumeX className="w-4 h-4 md:w-[18px] md:h-[18px]" /> : <Volume2 className="w-4 h-4 md:w-[18px] md:h-[18px]" />}
+                                    </button>
+                                    <button type="button" onClick={() => setFeedback(msg.id, 'up')}
+                                      data-tooltip="Good response" aria-label="Good response" aria-pressed={messageFeedback[String(msg.id)] === 'up'}
+                                      className={`twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all touch-manipulation ${messageFeedback[String(msg.id)] === 'up' ? 'text-zinc-900 dark:text-zinc-50' : 'text-zinc-500 dark:text-zinc-300'}`}>
+                                      <ThumbsUp className="w-4 h-4 md:w-[18px] md:h-[18px]" fill={messageFeedback[String(msg.id)] === 'up' ? 'currentColor' : 'none'} />
+                                    </button>
+                                    <button type="button" onClick={() => setFeedback(msg.id, 'down')}
+                                      data-tooltip="Bad response" aria-label="Bad response" aria-pressed={messageFeedback[String(msg.id)] === 'down'}
+                                      className={`twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all touch-manipulation ${messageFeedback[String(msg.id)] === 'down' ? 'text-zinc-900 dark:text-zinc-50' : 'text-zinc-500 dark:text-zinc-300'}`}>
+                                      <ThumbsDown className="w-4 h-4 md:w-[18px] md:h-[18px]" fill={messageFeedback[String(msg.id)] === 'down' ? 'currentColor' : 'none'} />
                                     </button>
                                     {!isTyping && (
                                       <button type="button" onClick={() => {
                                         const previousUserMessage = [...messages.slice(0, index)].reverse().find(m => m.role === 'user');
                                         if (previousUserMessage) void handleRetryMessage(previousUserMessage);
                                       }} data-tooltip="Retry" aria-label="Retry response"
-                                        className="twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-300 transition-all touch-manipulation">
-                                        <RotateCw className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                                        className="twinkle-tooltip-trigger p-2 md:p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all touch-manipulation text-zinc-500 dark:text-zinc-300">
+                                        <RotateCw className="w-4 h-4 md:w-[18px] md:h-[18px]" />
                                       </button>
                                     )}
+                                    <RelativeTime value={msg.timestamp} />
                                   </>
                                 )}
                               </div>
@@ -4505,6 +4683,7 @@ if (isBlankDraft) {
 
         {/* Input bar */}
         <div
+          ref={composerWrapRef}
           className={`twinkle-composer-position fixed bottom-0 left-0 right-0 z-[9000] w-full max-w-none overflow-visible bg-transparent px-2 pt-1 pb-[calc(0.35rem+env(safe-area-inset-bottom))] sm:px-4 sm:pt-1.5 sm:pb-[calc(0.5rem+env(safe-area-inset-bottom))] lg:px-6 lg:pt-2 lg:pb-[calc(0.65rem+env(safe-area-inset-bottom))] ${messages.length === 0 && !isTyping ? 'twinkle-composer-empty-state' : ''}`}
           style={messages.length === 0 && !isTyping && emptyComposerTop !== null ? { top: `${emptyComposerTop}px`, bottom: 'auto' } : undefined}
         >
@@ -4549,7 +4728,7 @@ if (isBlankDraft) {
             )}
 
 
-            <div className={`relative left-[1px] z-[60] flex w-full min-w-0 flex-col overflow-visible rounded-[20px] border border-zinc-200/90 bg-white shadow-[0_0.25rem_1.25rem_rgba(0,0,0,0.035),0_0_0_0.5px_rgba(0,0,0,0.04)] transition-all dark:border-zinc-700/90 dark:bg-zinc-900 dark:shadow-black/20 ${justFinished ? 'animate-blink' : ''}`}>
+            <div className={`relative z-[60] flex w-full min-w-0 flex-col overflow-visible rounded-[20px] border border-zinc-200/90 bg-white shadow-[0_0.25rem_1.25rem_rgba(0,0,0,0.035),0_0_0_0.5px_rgba(0,0,0,0.04)] transition-all dark:border-zinc-700/90 dark:bg-zinc-900 dark:shadow-black/20 ${justFinished ? 'animate-blink' : ''}`}>
               {/* File preview strip (kept for consistency but never shown without UI trigger) */}
               <AnimatePresence>
                 {filePreviews.length > 0 && (
@@ -4619,7 +4798,7 @@ if (isBlankDraft) {
                     {/* Bottom row: + · dotted listening line · ✕ · ✓ */}
                     <motion.button
                       type="button"
-                      onClick={() => setUploadModalOpen(true)}
+                      onClick={openPlusMenu}
                       disabled={isProcessingFiles}
                       aria-label="Attach files"
                       data-tooltip="Attach files"
@@ -4707,10 +4886,12 @@ if (isBlankDraft) {
                   {/* + attachment button */}
                   <motion.button
                     type="button"
-                    onClick={() => setUploadModalOpen(true)}
+                    onClick={openPlusMenu}
                     disabled={isTyping || isProcessingFiles}
-                    aria-label="Attach files"
-                    data-tooltip="Attach files"
+                    aria-label="Add files and more"
+                    aria-haspopup="menu"
+                    aria-expanded={plusMenu !== null}
+                    data-tooltip="Add files and more"
                     whileHover={{ scale: 1.04 }}
                     whileTap={{ scale: 0.94 }}
                     className="twinkle-tooltip-trigger twinkle-composer-plus group relative self-center flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-700 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-900 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-zinc-800 dark:hover:text-white"
@@ -5044,6 +5225,41 @@ if (isBlankDraft) {
         error={shareError}
         onClose={closeShareModal}
       />
+
+      {plusMenu && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={plusMenuRef}
+          role="menu"
+          aria-label="Add files and more"
+          style={{ position: 'fixed', left: plusMenu.left, bottom: plusMenu.bottom, zIndex: 2147483000 }}
+          className="w-[240px] rounded-xl border border-zinc-200 bg-white p-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.12)] dark:border-white/10 dark:bg-[#30302E]"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setPlusMenu(null);
+              fileInputRef.current?.click();
+            }}
+            className="flex h-10 w-full items-center gap-3 rounded-lg px-2.5 text-left text-[15px] text-zinc-900 transition-colors hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-white/10"
+          >
+            <Paperclip className="h-[18px] w-[18px] shrink-0" strokeWidth={1.6} />
+            Upload or add files
+          </button>
+          {canTakeScreenshot && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => void takeScreenshot()}
+              className="flex h-10 w-full items-center gap-3 rounded-lg px-2.5 text-left text-[15px] text-zinc-900 transition-colors hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-white/10"
+            >
+              <Camera className="h-[18px] w-[18px] shrink-0" strokeWidth={1.6} />
+              Take a screenshot
+            </button>
+          )}
+        </div>,
+        document.body
+      )}
 
       <UploadFilesModal
         isOpen={uploadModalOpen}
