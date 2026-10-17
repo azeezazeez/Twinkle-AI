@@ -498,14 +498,33 @@ function maskIncompleteImages(text: string): string {
   return text.replace(/!\[[^\]]*(?:\]\([^)]*)?$/, '\n\n*Generating image…*');
 }
 
-function imageDownloadName(src: string): string {
-  const mime = /^data:image\/([a-z0-9.+-]+)/i.exec(src)?.[1]?.toLowerCase();
-  const ext = mime ? (mime === 'jpeg' ? 'jpg' : mime.replace(/\+.*$/, '')) : 'png';
-  return `twinkle-image-${Date.now()}.${ext}`;
+/** "Generate a Person Image." -> "person-image"; falls back to the full text, then "twinkle-image". */
+function slugFromPrompt(text: string): string {
+  const clean = (value: string) =>
+    value
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60)
+      .replace(/-+$/g, '');
+  const trimmed = (text || '').trim();
+  const stripped = trimmed.replace(
+    /^(?:(?:please|can you|could you|would you)\s+)*(?:generate|create|make|draw|paint|sketch|illustrate|design|render|produce|imagine|visuali[sz]e)\s+(?:me\s+)?(?:(?:a|an|the|some)\s+)?(?:(?:image|picture|photo|illustration)\s+(?:of|for)\s+(?:(?:a|an|the|some)\s+)?)?/i,
+    ''
+  );
+  return clean(stripped) || clean(trimmed) || 'twinkle-image';
 }
 
-async function downloadGeneratedImage(src: string) {
-  const name = imageDownloadName(src);
+function imageDownloadName(src: string, label = ''): string {
+  const mime = /^data:image\/([a-z0-9.+-]+)/i.exec(src)?.[1]?.toLowerCase();
+  const ext = mime ? (mime === 'jpeg' ? 'jpg' : mime.replace(/\+.*$/, '')) : 'png';
+  return `${slugFromPrompt(label)}.${ext}`;
+}
+
+async function downloadGeneratedImage(src: string, label = '') {
+  const name = imageDownloadName(src, label);
   try {
     let href = src;
     let revoke: string | null = null;
@@ -529,7 +548,7 @@ async function downloadGeneratedImage(src: string) {
 const SEEN_GENERATED_IMAGES = new Set<string>();
 
 /** Generated/response image with click-to-preview (full screen) and download. */
-function GeneratedImage({ src, alt }: { src?: string; alt?: string }) {
+function GeneratedImage({ src, alt, prompt }: { src?: string; alt?: string; prompt?: string }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   // Fade in only the first time this image is shown. When the message
   // re-mounts (scrolling, id swap after saving) it must appear instantly,
@@ -556,6 +575,7 @@ function GeneratedImage({ src, alt }: { src?: string; alt?: string }) {
 
   if (!src) return null;
   const label = alt || 'Response image';
+  const downloadLabel = prompt?.trim() || (alt && !/^(image|response image|generated image)$/i.test(alt.trim()) ? alt : '');
 
   return (
     <>
@@ -573,22 +593,6 @@ function GeneratedImage({ src, alt }: { src?: string; alt?: string }) {
             transition: animateIn ? 'opacity .45s ease' : 'none',
           }}
         />
-        <div className="flex items-center gap-2 border-t border-zinc-200 px-2.5 py-2 dark:border-zinc-700">
-          <button
-            type="button"
-            onClick={() => setPreviewOpen(true)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-          >
-            <Eye className="h-4 w-4" strokeWidth={1.8} /> Preview
-          </button>
-          <button
-            type="button"
-            onClick={() => void downloadGeneratedImage(src)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-          >
-            <Download className="h-4 w-4" strokeWidth={1.8} /> Download
-          </button>
-        </div>
       </figure>
 
       {previewOpen && typeof document !== 'undefined' && createPortal(
@@ -600,30 +604,33 @@ function GeneratedImage({ src, alt }: { src?: string; alt?: string }) {
           className="fixed inset-0 flex items-center justify-center bg-black/85 px-4 backdrop-blur-sm"
           onClick={() => setPreviewOpen(false)}
         >
-          <div style={{ top: 'max(1rem, env(safe-area-inset-top))' }} className="absolute right-4 flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
-            <button
-              type="button"
-              onClick={() => void downloadGeneratedImage(src)}
-              aria-label="Download image"
-              className="inline-flex h-10 items-center gap-2 rounded-full bg-white/15 px-4 text-[14px] font-medium text-white backdrop-blur transition-colors hover:bg-white/25"
-            >
-              <Download className="h-4 w-4" strokeWidth={1.8} /> Download
-            </button>
-            <button
-              type="button"
-              onClick={() => setPreviewOpen(false)}
-              aria-label="Close preview"
-              className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur transition-colors hover:bg-white/25"
-            >
-              <X className="h-5 w-5" strokeWidth={1.8} />
-            </button>
+          <div className="relative inline-block max-w-[94vw]" onClick={(event) => event.stopPropagation()}>
+            <img
+              src={src}
+              alt={label}
+              className="block max-h-[calc(100dvh-7rem)] max-w-[94vw] rounded-xl object-contain shadow-2xl"
+            />
+            <div className="absolute right-3 top-3 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void downloadGeneratedImage(src, downloadLabel)}
+                aria-label="Download image"
+                title="Download"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-black/55 text-white shadow-md backdrop-blur transition-colors hover:bg-black/75"
+              >
+                <Download className="h-[18px] w-[18px]" strokeWidth={1.8} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewOpen(false)}
+                aria-label="Close preview"
+                title="Close"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-black/55 text-white shadow-md backdrop-blur transition-colors hover:bg-black/75"
+              >
+                <X className="h-[18px] w-[18px]" strokeWidth={1.8} />
+              </button>
+            </div>
           </div>
-          <img
-            src={src}
-            alt={label}
-            onClick={(event) => event.stopPropagation()}
-            className="max-h-[calc(100dvh-7rem)] max-w-[94vw] rounded-xl object-contain shadow-2xl"
-          />
         </div>,
         document.body
       )}
@@ -2743,6 +2750,10 @@ const chooseModel = useCallback((modelId: string) => {
     return () => window.removeEventListener('twinkle-live-session-updated', handleLiveSessionUpdate);
   }, [user.id]);
 
+  const handledChatUuidRef = useRef<string | null>(null);
+  const currentSessionIdRef = useRef<number | null>(currentSessionId);
+  currentSessionIdRef.current = currentSessionId;
+
   const loadMessages = useCallback(async (sid: number): Promise<Message[] | null> => {
     // The streaming request owns the local message state while it is active.
     // Do not hydrate the same session from history during that window; doing
@@ -2753,6 +2764,8 @@ const chooseModel = useCallback((modelId: string) => {
 
     try {
       const response = await chatApi.getMessages(sid) as any;
+      // The user may have opened another chat while this request was in flight.
+      if (currentSessionIdRef.current !== null && currentSessionIdRef.current !== sid) return null;
       const rawMessages = Array.isArray(response?.messages) ? response.messages : [];
 
       const normalizedMessages: Message[] = rawMessages.map((msg: any, index: number) => ({
@@ -2804,9 +2817,15 @@ const chooseModel = useCallback((modelId: string) => {
 
     const localTarget = sessions.find(session => session.publicId === chatUuid);
     if (localTarget) {
-      if (localTarget.id !== currentSessionId) {
-        setCurrentSessionId(localTarget.id);
-        persistSessionId(localTarget.id);
+      // Apply the URL -> chat mapping only when the URL itself changed. Running
+      // it whenever currentSessionId changed made a sidebar click snap straight
+      // back to the chat still shown in the address bar.
+      if (handledChatUuidRef.current !== chatUuid) {
+        handledChatUuidRef.current = chatUuid;
+        if (localTarget.id !== currentSessionId) {
+          setCurrentSessionId(localTarget.id);
+          persistSessionId(localTarget.id);
+        }
       }
       return;
     }
@@ -2901,6 +2920,13 @@ const chooseModel = useCallback((modelId: string) => {
         // already in state from the sendMessage flow, so skip the fetch.
         skipMessageLoadRef.current = null;
         return;
+      }
+      // Drop the previous chat's messages right away so the clicked chat never
+      // appears to "stay" on the old one while history loads (unless this very
+      // chat is the one currently streaming, which owns the message state).
+      if (!(isSendingRef.current && activeResponseSessionRef.current === currentSessionId)) {
+        setMessages([]);
+        setMessageAttachments({});
       }
       loadMessages(currentSessionId);
     } else {
@@ -4718,7 +4744,9 @@ if (isBlankDraft) {
                                       return <td className="twinkle-response-td" {...props}>{children}</td>;
                                     },
                                     img({ src, alt }: any) {
-                                      return <GeneratedImage src={src} alt={alt} />;
+                                      // Name downloads after the prompt that produced this image.
+                                      const promptMsg = [...messages.slice(0, index)].reverse().find(item => item.role === 'user');
+                                      return <GeneratedImage src={src} alt={alt} prompt={cleanMessageContent(promptMsg?.content || '')} />;
                                     },
                                     strong({ children, ...props }: any) {
                                       return (
