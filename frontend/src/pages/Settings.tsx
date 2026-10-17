@@ -614,9 +614,9 @@ export function Section({
   return (
     <section className={first ? '' : 'mt-10'}>
       {title && (
-        <div className="flex min-h-[28px] items-center justify-between gap-3">
+        <div className="flex min-h-[36px] items-center justify-between gap-3">
           <h2 className="text-[17px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">{title}</h2>
-          {action}
+          {action && <div className="mr-11 flex shrink-0 items-center md:mr-12">{action}</div>}
         </div>
       )}
       <div className={title ? 'mt-3' : ''}>{children}</div>
@@ -856,7 +856,7 @@ export function SettingsShell({ activeId, children }: { activeId: NavId; childre
               </button>
             ))}
           </div>
-          <div className="px-5 pb-10 pt-5 md:px-8 md:pt-6">{children}</div>
+          <div className="px-5 pb-10 pt-5 md:px-8 md:pt-4">{children}</div>
         </main>
       </div>
     </div>
@@ -1776,8 +1776,8 @@ export default function Settings({
         onClose={() => setConfirm(null)}
         onConfirm={() => void deleteAllChats()}
         title="Delete all chats?"
-        message="This permanently deletes every conversation and message in your account. This action cannot be undone."
-        confirmText="Delete all"
+        message="This permanently deletes every conversation and message in your account. This can’t be undone."
+        confirmText="Delete"
       />
       <ConfirmationModal
         isOpen={confirm === 'browser'}
