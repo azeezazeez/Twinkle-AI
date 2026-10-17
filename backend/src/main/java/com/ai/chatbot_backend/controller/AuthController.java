@@ -5,6 +5,7 @@ import com.ai.chatbot_backend.dto.RegisterRequest;
 import com.ai.chatbot_backend.dto.VerifyOtpRequest;
 import com.ai.chatbot_backend.dto.User;
 import com.ai.chatbot_backend.dto.UserResponse;
+import com.ai.chatbot_backend.service.AccountService;
 import com.ai.chatbot_backend.service.OTPService;
 import com.ai.chatbot_backend.service.UserService;
 import com.ai.chatbot_backend.service.ChatHistoryService;
@@ -42,6 +43,7 @@ public class AuthController {
     private final OTPService otpService;
     private final ChatHistoryService chatHistoryService;
     private final RateLimitService rateLimitService;
+    private final AccountService accountService;
 
     // Failed-attempt lockouts (per account, in addition to the per-IP limits).
     private static final int MAX_FAILED_ATTEMPTS = 5;
@@ -946,6 +948,94 @@ public class AuthController {
                                     "Unable to logout"
                             )
                     );
+        }
+    }
+
+
+    // ============================================================
+    // LOG OUT OF ALL DEVICES
+    // ============================================================
+
+    @PostMapping("/logout-all")
+    public ResponseEntity<Map<String, Object>> logoutAll(
+            HttpServletRequest request
+    ) {
+
+        try {
+
+            HttpSession session = request.getSession(false);
+            Object userId = session == null ? null : session.getAttribute("userId");
+
+            if (!(userId instanceof Number)) {
+                return unauthorized("Not authenticated");
+            }
+
+            accountService.revokeAllSessions(((Number) userId).longValue());
+
+            try {
+                session.invalidate();
+            } catch (IllegalStateException ignored) {
+                // already invalidated
+            }
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "Logged out of all devices");
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+
+            log.error("Logout all failed: {}", e.getMessage(), e);
+
+            return ResponseEntity
+                    .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(errorResponse("Unable to log out of all devices"));
+        }
+    }
+
+
+    // ============================================================
+    // DELETE ACCOUNT
+    // ============================================================
+
+    @DeleteMapping("/account")
+    public ResponseEntity<Map<String, Object>> deleteAccount(
+            HttpServletRequest request
+    ) {
+
+        try {
+
+            HttpSession session = request.getSession(false);
+            Object userId = session == null ? null : session.getAttribute("userId");
+
+            if (!(userId instanceof Number)) {
+                return unauthorized("Not authenticated");
+            }
+
+            User user = userService.getUserById(((Number) userId).longValue());
+
+            accountService.deleteAccount(user);
+
+            try {
+                session.invalidate();
+            } catch (IllegalStateException ignored) {
+                // already invalidated
+            }
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "Account deleted");
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+
+            log.error("Delete account failed: {}", e.getMessage(), e);
+
+            return ResponseEntity
+                    .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(errorResponse("Unable to delete account"));
         }
     }
 
