@@ -4540,7 +4540,7 @@ if (isBlankDraft) {
                             } ${isEditing ? 'hidden' : ''}`}
                           >
                             {msg.role === 'assistant' && (
-                              <span className="mr-auto flex items-center text-[#D97757]" aria-hidden="true">
+                              <span className="mr-1 flex items-center text-[#D97757]" aria-hidden="true">
                                 <StormLogo className="h-5 w-5" />
                               </span>
                             )}
