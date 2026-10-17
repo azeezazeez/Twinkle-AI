@@ -5,7 +5,7 @@ import { createPortal, flushSync } from 'react-dom';
 import { User, Session, Message } from '../types';
 import Sidebar from '../components/Sidebar'; 
 import { chatApi, authApi, createLiveToken, startLiveTokenKeepWarm, warmLiveToken } from '../lib/api'; 
-import { motion, AnimatePresence, useReducedMotion } from 'motion/react';  
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react'; 
 import StormLogo from '../components/StormLogo';
 import ConfirmationModal from '../components/ConfirmationModal';
 import ShareChatModal from '../components/ShareChatModal';
@@ -893,6 +893,112 @@ const isGenericOrRawTitle = (name: unknown): boolean => {
   if (n.length > 55) return true;                        // pasted sentence
   if (/[?]$/.test(n) && n.split(/\s+/).length > 6) return true;
   return false;
+};
+
+/**
+ * Mic listening meter. Opens its own analyser on the microphone and drives the
+ * bars straight from the DOM (no React re-render per frame). Silence shows a
+ * row of still dots; any sound makes the bars spike with the voice.
+ */
+const VoiceLevelBars = ({ bars = 16 }: { bars?: number }) => {
+  const barRefs = useRef<Array<HTMLSpanElement | null>>([]);
+
+  useEffect(() => {
+    let stopped = false;
+    let raf = 0;
+    let stream: MediaStream | null = null;
+    let context: AudioContext | null = null;
+    const levels = new Float32Array(bars);
+
+    const resetBars = () => {
+      for (let i = 0; i < bars; i += 1) {
+        const el = barRefs.current[i];
+        if (el) { el.style.height = '3px'; el.style.opacity = '0.45'; }
+      }
+    };
+
+    (async () => {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) return;
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        });
+        if (stopped) { stream.getTracks().forEach(track => track.stop()); return; }
+
+        const Ctor = window.AudioContext || (window as any).webkitAudioContext;
+        if (!Ctor) return;
+        context = new Ctor();
+        await context.resume().catch(() => undefined);
+        if (stopped) return;
+
+        const source = context.createMediaStreamSource(stream);
+        const gain = context.createGain();
+        gain.gain.value = 3; // lift quiet voices so they register on the meter
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.35;
+        const mute = context.createGain();
+        mute.gain.value = 0; // keeps the graph running without playing the mic back
+        source.connect(gain);
+        gain.connect(analyser);
+        analyser.connect(mute);
+        mute.connect(context.destination);
+
+        const freq = new Uint8Array(analyser.frequencyBinCount);
+        const wave = new Float32Array(analyser.fftSize);
+        const firstBin = 2;                            // ~190 Hz
+        const lastBin = Math.min(freq.length - 1, 44); // ~4 kHz (voice band)
+        const span = (lastBin - firstBin + 1) / bars;
+
+        const tick = () => {
+          if (stopped) return;
+          analyser.getByteFrequencyData(freq);
+          analyser.getFloatTimeDomainData(wave);
+          let sum = 0;
+          for (let i = 0; i < wave.length; i += 1) sum += wave[i] * wave[i];
+          const loud = Math.sqrt(sum / wave.length) > 0.012;
+
+          for (let i = 0; i < bars; i += 1) {
+            const lo = firstBin + Math.floor(i * span);
+            const hi = Math.max(lo, firstBin + Math.floor((i + 1) * span) - 1);
+            let acc = 0;
+            for (let b = lo; b <= hi; b += 1) acc += freq[b];
+            const target = loud ? Math.min(1, (acc / (hi - lo + 1) / 255) * 1.7) : 0;
+            levels[i] += (target - levels[i]) * (target > levels[i] ? 0.6 : 0.2);
+            const el = barRefs.current[i];
+            if (el) {
+              el.style.height = `${3 + levels[i] * 21}px`;
+              el.style.opacity = String(0.45 + levels[i] * 0.55);
+            }
+          }
+          raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+      } catch {
+        resetBars();
+      }
+    })();
+
+    return () => {
+      stopped = true;
+      cancelAnimationFrame(raf);
+      stream?.getTracks().forEach(track => track.stop());
+      try { void context?.close(); } catch { /* already closed */ }
+    };
+  }, [bars]);
+
+  return (
+    <div className="flex h-6 items-center gap-[5px]" aria-hidden="true">
+      {Array.from({ length: bars }).map((_, index) => (
+        <span
+          key={index}
+          ref={el => { barRefs.current[index] = el; }}
+          className="block shrink-0 rounded-full bg-zinc-500 dark:bg-zinc-400"
+          style={{ width: 3, height: 3, opacity: 0.45, transition: 'height 60ms linear' }}
+        />
+      ))}
+    </div>
+  );
 };
 
 /**
@@ -1828,8 +1934,10 @@ ${textToRead}` }] }], turnComplete: true },
             realtimeInputConfig: {
               automaticActivityDetection: {
                 disabled: false,
-                prefixPaddingMs: 100,
-                silenceDurationMs: 500,
+                prefixPaddingMs: 20,
+                silenceDurationMs: 200,
+                startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH',
+                endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
               },
             },
           },
@@ -1934,7 +2042,7 @@ ${textToRead}` }] }], turnComplete: true },
           processor.port.onmessage = (event: MessageEvent<ArrayBuffer>) => sendPcm(event.data);
         } catch (workletError) {
           console.warn('Twinkle AudioWorklet unavailable; using compatibility microphone capture.', workletError);
-          const scriptProcessor = context.createScriptProcessor(4096, 1, 1);
+          const scriptProcessor = context.createScriptProcessor(1024, 1, 1);
           scriptProcessor.onaudioprocess = event => {
             const inputData = event.inputBuffer.getChannelData(0);
             const ratio = context.sampleRate / 16000;
@@ -1954,7 +2062,7 @@ ${textToRead}` }] }], turnComplete: true },
           processor = scriptProcessor;
         }
       } else {
-        const scriptProcessor = context.createScriptProcessor(4096, 1, 1);
+        const scriptProcessor = context.createScriptProcessor(1024, 1, 1);
         scriptProcessor.onaudioprocess = event => {
           const inputData = event.inputBuffer.getChannelData(0);
           const ratio = context.sampleRate / 16000;
@@ -1974,7 +2082,19 @@ ${textToRead}` }] }], turnComplete: true },
         processor = scriptProcessor;
       }
 
-      source.connect(processor);
+      // Quiet-speech boost: a gain lift plus a compressor, so soft voices reach
+      // the transcriber clearly while loud ones cannot clip.
+      const micBoost = context.createGain();
+      micBoost.gain.value = 2.6;
+      const micCompressor = context.createDynamicsCompressor();
+      micCompressor.threshold.value = -50;
+      micCompressor.knee.value = 24;
+      micCompressor.ratio.value = 6;
+      micCompressor.attack.value = 0.003;
+      micCompressor.release.value = 0.2;
+      source.connect(micBoost);
+      micBoost.connect(micCompressor);
+      micCompressor.connect(processor);
       processor.connect(silentGain);
       silentGain.connect(context.destination);
 
@@ -5110,19 +5230,7 @@ if (isBlankDraft) {
                       style={{ gridArea: 'spacer' }}
                       aria-hidden="true"
                     >
-                      <div className="flex h-6 items-center gap-[5px]">
-                        {Array.from({ length: 16 }).map((_, index) => (
-                          <motion.span
-                            key={index}
-                            className="block shrink-0 rounded-full bg-zinc-500 dark:bg-zinc-400"
-                            style={{ width: 3, height: 3 }}
-                            animate={voiceSpeechDetected
-                              ? { scaleY: [1, 3.2 + ((index * 7) % 5) * 0.9, 1], opacity: [0.55, 1, 0.55] }
-                              : { scaleY: 1, opacity: [0.35, 0.8, 0.35] }}
-                            transition={{ duration: voiceSpeechDetected ? 0.55 : 1.4, repeat: Infinity, delay: index * 0.05, ease: 'easeInOut' }}
-                          />
-                        ))}
-                      </div>
+                      <VoiceLevelBars />
                     </div>
 
                     {/* Cancel — discards dictation and restores the composer. */}
@@ -5372,9 +5480,9 @@ if (isBlankDraft) {
                         onClick={() => setLiveTalkOpen(true)}
                         aria-label="Open Live Talk"
                         data-tooltip="Live Talk"
-                        className="twinkle-tooltip-trigger twinkle-composer-submit relative z-[30] flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white transition sm:h-7 sm:w-7"
+                        className="twinkle-tooltip-trigger twinkle-composer-submit relative z-[30] flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-zinc-900 transition hover:opacity-70 dark:text-zinc-100 sm:h-7 sm:w-7"
                         style={{
-                          background: liveTalkColor.swatch,
+                          background: 'transparent',
                           boxShadow: 'none',
                         }}
                       >
