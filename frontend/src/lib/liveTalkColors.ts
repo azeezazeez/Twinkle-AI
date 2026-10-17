@@ -1,4 +1,4 @@
-import type { OrbPalette } from '../components/FoggyOrb';
+import type { OrbPalette } from '../components/VoiceRing';
 
 export type LiveTalkColor = {
   id: string;
@@ -275,7 +275,7 @@ export const LIVE_TALK_COLORS: LiveTalkColor[] = [
 // Pulls the hex stops out of a color's gradient so the foggy orb can reuse them.
 const hexStops = (value: string): string[] => value.match(/#[0-9a-fA-F]{6}/g) ?? [];
 
-/** Turns a Live Talk color into the palette used by <FoggyOrb />. */
+/** Turns a Live Talk color into the palette used by <VoiceRing />. */
 export const toOrbPalette = (color: LiveTalkColor): OrbPalette => {
   const stops = hexStops(color.background);
   return {
