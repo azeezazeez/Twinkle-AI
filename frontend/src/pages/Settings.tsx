@@ -50,9 +50,6 @@ import {
   startLiveTokenKeepWarm,
   stopGeminiVoicePreview,
 } from '../lib/api';
-import { getVoiceOrbPalette } from '../lib/voiceThemes';
-import { getSavedLiveTalkColor } from '../lib/liveTalkColors';
-import FoggyOrb from '../components/FoggyOrb';
 import {
   loadPrefs,
   savePrefs,
@@ -60,6 +57,9 @@ import {
   type FontSizePref,
 } from '../lib/preferences';
 import ConfirmationModal from '../components/ConfirmationModal';
+import VoiceGrid from '../components/VoiceGrid';
+import { VOICES } from '../lib/voices';
+import { shortcutGroups } from '../lib/shortcuts';
 
 type SettingsSection =
   | 'general'
@@ -72,11 +72,6 @@ type SettingsSection =
   | 'about';
 
 type ThemeChoice = 'light' | 'dark' | 'system';
-
-type VoiceOption = {
-  name: string;
-  description: string;
-};
 
 const APP_VERSION = '1.0';
 
@@ -109,39 +104,6 @@ export const APP_LANGUAGES = [
   { code: 'th', label: 'Thai', native: 'ไทย', prompt: 'Thai' },
   { code: 'fil', label: 'Filipino', native: 'Filipino', prompt: 'Filipino' },
 ] as const;
-
-const VOICES: VoiceOption[] = [
-  { name: 'Zephyr', description: 'Bright' },
-  { name: 'Puck', description: 'Upbeat' },
-  { name: 'Charon', description: 'Informative · clear' },
-  { name: 'Kore', description: 'Firm' },
-  { name: 'Fenrir', description: 'Excitable' },
-  { name: 'Leda', description: 'Youthful' },
-  { name: 'Orus', description: 'Firm' },
-  { name: 'Aoede', description: 'Breezy' },
-  { name: 'Callirrhoe', description: 'Easy-going' },
-  { name: 'Autonoe', description: 'Bright' },
-  { name: 'Enceladus', description: 'Breathy' },
-  { name: 'Iapetus', description: 'Clear' },
-  { name: 'Umbriel', description: 'Easy-going' },
-  { name: 'Algieba', description: 'Smooth' },
-  { name: 'Despina', description: 'Smooth' },
-  { name: 'Erinome', description: 'Clear' },
-  { name: 'Algenib', description: 'Gravelly' },
-  { name: 'Rasalgethi', description: 'Informative' },
-  { name: 'Laomedeia', description: 'Upbeat' },
-  { name: 'Achernar', description: 'Soft' },
-  { name: 'Alnilam', description: 'Firm' },
-  { name: 'Schedar', description: 'Even' },
-  { name: 'Gacrux', description: 'Mature' },
-  { name: 'Pulcherrima', description: 'Forward' },
-  { name: 'Achird', description: 'Friendly' },
-  { name: 'Zubenelgenubi', description: 'Casual' },
-  { name: 'Vindemiatrix', description: 'Gentle' },
-  { name: 'Sadachbia', description: 'Lively' },
-  { name: 'Sadaltager', description: 'Knowledgeable' },
-  { name: 'Sulafat', description: 'Warm' },
-];
 
 const APP_STORAGE_KEYS = [
   'scout_current_session_id',
@@ -361,7 +323,7 @@ const isMac = () =>
   typeof navigator !== 'undefined' && /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent);
 
 const buttonBase =
-  'inline-flex h-9 items-center justify-center gap-2 rounded-lg px-3.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 disabled:cursor-not-allowed disabled:opacity-50';
+  'inline-flex h-8 items-center justify-center gap-2 rounded-lg px-3 text-[13px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 export function Btn({
   children,
@@ -533,7 +495,7 @@ function LanguageSelect({ value, onChange }: { value: string; onChange: (code: s
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label="Interface language"
-        className="group inline-flex h-9 items-center gap-2 rounded-lg px-2.5 text-[15px] text-zinc-900 transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 dark:text-zinc-100 dark:hover:bg-white/5"
+        className="group inline-flex h-9 items-center gap-2 rounded-lg px-2.5 text-[14px] text-zinc-900 transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 dark:text-zinc-100 dark:hover:bg-white/5"
       >
         <span data-no-translate>{selected.native}</span>
         <ChevronDown
@@ -653,7 +615,7 @@ export function Section({
     <section className={first ? '' : 'mt-10'}>
       {title && (
         <div className="flex min-h-[28px] items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">{title}</h2>
+          <h2 className="text-[17px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">{title}</h2>
           {action}
         </div>
       )}
@@ -675,12 +637,12 @@ export function Row({
 }) {
   return (
     <div
-      className={`border-b border-zinc-200/70 py-[18px] last:border-0 dark:border-white/10 ${
+      className={`border-b border-zinc-200/70 py-4 last:border-0 dark:border-white/10 ${
         stack ? 'flex flex-col gap-4' : 'flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-8'
       }`}
     >
       <div className="min-w-0">
-        <p className="text-[15px] text-zinc-900 dark:text-zinc-50">{title}</p>
+        <p className="text-[14px] text-zinc-900 dark:text-zinc-50">{title}</p>
         {desc && <p className="mt-0.5 text-sm leading-5 text-zinc-500 dark:text-zinc-400">{desc}</p>}
       </div>
       {children !== undefined && <div className="shrink-0">{children}</div>}
@@ -750,7 +712,7 @@ export function Segmented<T extends string>({
             aria-label={option.title || option.label}
             title={option.title || option.label}
             onClick={() => onChange(option.value)}
-            className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-[9px] border text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 ${
+            className={`inline-flex h-7 items-center justify-center gap-1.5 rounded-[9px] border text-[13px] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 ${
               option.label ? 'px-3.5' : 'w-9'
             } ${
               selected
@@ -784,7 +746,7 @@ function StatCard({
       {loading ? (
         <div className="mt-2 h-7 w-16 animate-pulse rounded-lg bg-zinc-100 dark:bg-white/10" />
       ) : (
-        <p className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">{value}</p>
+        <p className="mt-1 text-xl font-semibold tracking-tight text-zinc-900 dark:text-white">{value}</p>
       )}
       {detail && <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{detail}</p>}
     </div>
@@ -823,9 +785,9 @@ export function SettingsShell({ activeId, children }: { activeId: NavId; childre
 
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-white md:bg-black/45 md:p-5 dark:bg-[#262624] md:dark:bg-black/60">
-      <div className="relative flex h-full w-full overflow-hidden bg-white dark:bg-[#30302E] md:h-[calc(100dvh-40px)] md:max-h-[940px] md:max-w-[1280px] md:rounded-2xl md:border md:border-zinc-200/60 md:shadow-2xl dark:md:border-white/10">
-        <aside className="hidden w-[250px] shrink-0 flex-col overflow-y-auto border-r border-zinc-200/70 bg-zinc-50/60 px-3.5 py-4 dark:border-white/10 dark:bg-black/10 md:flex">
-          <label className="flex h-10 items-center gap-2.5 rounded-lg border border-zinc-300/70 bg-white px-3 focus-within:border-zinc-400 dark:border-white/15 dark:bg-transparent dark:focus-within:border-white/30">
+      <div className="relative flex h-full w-full overflow-hidden bg-white dark:bg-[#30302E] md:h-[calc(100dvh-40px)] md:max-h-[780px] md:max-w-[1040px] md:rounded-2xl md:border md:border-zinc-200/60 md:shadow-2xl dark:md:border-white/10">
+        <aside className="hidden w-[232px] shrink-0 flex-col overflow-y-auto border-r border-zinc-200/70 bg-zinc-50/60 px-3.5 py-4 dark:border-white/10 dark:bg-black/10 md:flex">
+          <label className="flex h-9 items-center gap-2.5 rounded-lg border border-zinc-300/70 bg-white px-3 focus-within:border-zinc-400 dark:border-white/15 dark:bg-transparent dark:focus-within:border-white/30">
             <SearchIcon className="h-[17px] w-[17px] shrink-0 text-zinc-500" strokeWidth={1.7} />
             <input
               value={query}
@@ -834,7 +796,7 @@ export function SettingsShell({ activeId, children }: { activeId: NavId; childre
               aria-label="Search settings"
               autoComplete="off"
               spellCheck={false}
-              className="min-w-0 flex-1 bg-transparent text-[15px] text-zinc-900 outline-none placeholder:text-zinc-500 dark:text-zinc-100"
+              className="min-w-0 flex-1 bg-transparent text-[14px] text-zinc-900 outline-none placeholder:text-zinc-500 dark:text-zinc-100"
             />
           </label>
 
@@ -849,7 +811,7 @@ export function SettingsShell({ activeId, children }: { activeId: NavId; childre
                       type="button"
                       onClick={() => go(id)}
                       aria-current={activeId === id ? 'page' : undefined}
-                      className={`flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 ${
+                      className={`flex h-9 w-full items-center gap-3 rounded-lg px-3 text-left text-[14px] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 ${
                         activeId === id
                           ? 'bg-zinc-200/60 font-medium text-zinc-900 dark:bg-white/10 dark:text-white'
                           : 'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-white/5'
@@ -894,226 +856,10 @@ export function SettingsShell({ activeId, children }: { activeId: NavId; childre
               </button>
             ))}
           </div>
-          <div className="px-5 pb-12 pt-6 md:px-8 md:pt-[26px]">{children}</div>
+          <div className="px-5 pb-10 pt-5 md:px-8 md:pt-6">{children}</div>
         </main>
       </div>
     </div>
-  );
-}
-
-// Sliding window of dots so the active voice is always visible, no matter
-// where it sits in the list of 30.
-function VoiceDots({
-  selectedIndex,
-  onPick,
-}: {
-  selectedIndex: number;
-  onPick: (voice: string) => void;
-}) {
-  const size = 9;
-  const start = Math.max(0, Math.min(selectedIndex - Math.floor(size / 2), VOICES.length - size));
-  const indexes = Array.from({ length: size }, (_, i) => start + i);
-
-  return (
-    <div className="flex items-center justify-center gap-2" role="tablist" aria-label="Voices">
-      {indexes.map(index => {
-        const voice = VOICES[index];
-        const selected = index === selectedIndex;
-        return (
-          <button
-            key={voice.name}
-            type="button"
-            role="tab"
-            aria-selected={selected}
-            onClick={() => onPick(voice.name)}
-            className={`h-2.5 rounded-full transition-all ${
-              selected ? 'w-5 bg-zinc-900 dark:bg-white' : 'w-2.5 bg-zinc-300 hover:bg-zinc-400 dark:bg-white/20 dark:hover:bg-white/40'
-            }`}
-            aria-label={`Select ${voice.name}`}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-function VoicePickerModal({
-  open,
-  selectedVoice,
-  previewingVoice,
-  voiceError,
-  onSelect,
-  onStep,
-  onClose,
-}: {
-  open: boolean;
-  selectedVoice: string;
-  previewingVoice: string | null;
-  voiceError: string;
-  onSelect: (voice: string) => void;
-  onStep: (offset: number) => void;
-  onClose: () => void;
-}) {
-  const selectedIndex = Math.max(0, VOICES.findIndex(voice => voice.name === selectedVoice));
-  const selected = VOICES[selectedIndex] ?? VOICES[2];
-  const rowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const playing = previewingVoice === selected.name;
-
-  useEffect(() => {
-    if (!open) return;
-    rowRefs.current[selected.name]?.scrollIntoView({ block: 'nearest' });
-  }, [open, selected.name]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-      else if (event.key === 'ArrowLeft') onStep(-1);
-      else if (event.key === 'ArrowRight') onStep(1);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose, onStep]);
-
-  return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[100001] flex items-center justify-center bg-black/45 p-4"
-          onMouseDown={event => {
-            if (event.target === event.currentTarget) onClose();
-          }}
-        >
-          <motion.div
-            initial={{ opacity: 0, y: 16, scale: 0.985 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 16, scale: 0.985 }}
-            className="w-full max-w-[720px] overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-white/10 dark:bg-[#30302E]"
-          >
-            <div className="flex items-center justify-between border-b border-zinc-100 px-6 py-5 dark:border-zinc-800">
-              <div>
-                <h2 className="text-lg font-semibold tracking-tight text-zinc-950 dark:text-white">Voice</h2>
-                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Choose the Gemini voice used by Live Talk.</p>
-              </div>
-              <button
-                type="button"
-                onClick={onClose}
-                className="flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-900 dark:hover:text-white"
-                aria-label="Close voice selector"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="px-7 pb-7 pt-8">
-              <div className="flex items-center justify-center gap-5 sm:gap-10">
-                <button
-                  type="button"
-                  onClick={() => onStep(-1)}
-                  className="flex h-11 w-11 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
-                  aria-label="Previous voice"
-                >
-                  <ChevronRight className="h-6 w-6 rotate-180" />
-                </button>
-
-                <div className="flex w-44 min-w-0 flex-col items-center text-center sm:w-56">
-                  <FoggyOrb
-                    palette={getVoiceOrbPalette(selected.name)}
-                    state={playing ? 'speaking' : 'idle'}
-                    className="h-32 w-32 sm:h-36 sm:w-36"
-                    label={`${selected.name} voice`}
-                  />
-                  <motion.h3
-                    key={selected.name}
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.16 }}
-                    className="mt-8 text-3xl font-semibold tracking-tight text-zinc-950 dark:text-white"
-                  >
-                    {selected.name}
-                  </motion.h3>
-                  <p className="mt-1 text-base text-zinc-500 dark:text-zinc-400">{selected.description}</p>
-                  <p className="mt-2 h-4 text-[11px] font-semibold text-zinc-400" aria-live="polite">
-                    {playing ? 'Playing sample…' : ''}
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => onStep(1)}
-                  className="flex h-11 w-11 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
-                  aria-label="Next voice"
-                >
-                  <ChevronRight className="h-6 w-6" />
-                </button>
-              </div>
-
-              <div className="mt-5">
-                <VoiceDots selectedIndex={selectedIndex} onPick={onSelect} />
-              </div>
-
-              {voiceError && (
-                <div
-                  role="alert"
-                  className="mt-5 rounded-2xl border border-[#fecaca] bg-[#fef2f2] px-4 py-3 text-xs leading-5 text-[#b91c1c] dark:border-[#7f1d1d] dark:bg-[#2a0f12] dark:text-[#fca5a5]"
-                >
-                  {voiceError}
-                </div>
-              )}
-
-              <div className="mt-7 max-h-[280px] overflow-y-auto rounded-2xl border border-zinc-200 dark:border-zinc-800">
-                {VOICES.map(voice => {
-                  const isSelected = voice.name === selected.name;
-                  const isPlaying = voice.name === previewingVoice;
-                  return (
-                    <button
-                      key={voice.name}
-                      ref={node => {
-                        rowRefs.current[voice.name] = node;
-                      }}
-                      type="button"
-                      onClick={() => onSelect(voice.name)}
-                      aria-pressed={isSelected}
-                      className={`flex w-full items-center gap-3 border-b border-zinc-100 px-4 py-3 text-left transition last:border-0 dark:border-zinc-800 ${
-                        isSelected ? 'bg-zinc-100 dark:bg-zinc-900' : 'hover:bg-zinc-50 dark:hover:bg-zinc-900/60'
-                      }`}
-                    >
-                      <span
-                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white"
-                        style={{ background: getVoiceOrbPalette(voice.name).background }}
-                      >
-                        {isSelected ? <Check className="h-4 w-4 text-zinc-900" /> : null}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-semibold text-zinc-900 dark:text-white">{voice.name}</span>
-                        <span className="block text-xs text-zinc-500 dark:text-zinc-400">{voice.description}</span>
-                      </span>
-                      {isPlaying ? (
-                        <span className="flex h-4 items-end gap-0.5" aria-label="Playing">
-                          {[0, 1, 2].map(bar => (
-                            <motion.span
-                              key={bar}
-                              className="w-0.5 rounded-full bg-zinc-900 dark:bg-white"
-                              animate={{ height: [4, 14, 6, 12, 4] }}
-                              transition={{ duration: 0.9, repeat: Infinity, delay: bar * 0.12 }}
-                            />
-                          ))}
-                        </span>
-                      ) : (
-                        <Volume2 className="h-4 w-4 text-zinc-300 dark:text-zinc-600" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
   );
 }
 
@@ -1215,10 +961,7 @@ export default function Settings({
     showToast(`Language set to ${next.label}`);
   };
 
-  const liveTalkColor = getSavedLiveTalkColor();
-
   // ── Voice ────────────────────────────────────────────────────────────────
-  const [voicePickerOpen, setVoicePickerOpen] = useState(false);
   const [previewingVoice, setPreviewingVoice] = useState<string | null>(null);
   const [voiceError, setVoiceError] = useState('');
   const [selectedVoice, setSelectedVoice] = useState(() => {
@@ -1293,18 +1036,9 @@ export default function Settings({
     }, delay);
   };
 
-  const stepVoice = useCallback(
-    (offset: number) => {
-      const index = VOICES.findIndex(voice => voice.name === selectedVoice);
-      saveVoice(VOICES[(index + offset + VOICES.length) % VOICES.length].name, 380);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selectedVoice, previewVoice]
-  );
-
   // While a voice screen is open: keep the Live token warm and download the
   // current voice's sample in the background so "Play sample" is instant.
-  const voiceUiActive = active === 'voice' || voicePickerOpen;
+  const voiceUiActive = active === 'voice';
   useEffect(() => {
     if (!voiceUiActive) return;
     const stopKeepWarm = startLiveTokenKeepWarm();
@@ -1679,7 +1413,7 @@ export default function Settings({
                 <button
                   type="button"
                   onClick={() => setActive('voice')}
-                  className="inline-flex h-9 items-center gap-2 rounded-lg px-2.5 text-[15px] text-zinc-900 transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 dark:text-zinc-100 dark:hover:bg-white/5"
+                  className="inline-flex h-9 items-center gap-2 rounded-lg px-2.5 text-[14px] text-zinc-900 transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 dark:text-zinc-100 dark:hover:bg-white/5"
                 >
                   {activeVoice.name}
                   <ChevronRight className="h-4 w-4 text-zinc-500" strokeWidth={1.8} />
@@ -1692,132 +1426,58 @@ export default function Settings({
         {/* VOICE */}
         {active === 'voice' && (
           <Section title="Voice" first>
-            <div className="flex flex-col items-center pt-4">
-              <div className="flex items-center justify-center gap-4 sm:gap-10">
-                <button
-                  type="button"
-                  onClick={() => stepVoice(-1)}
-                  className="flex h-11 w-11 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-white/10 dark:hover:text-zinc-100"
-                  aria-label="Previous voice"
-                >
-                  <ChevronRight className="h-6 w-6 rotate-180" />
-                </button>
+            <p className="-mt-1 mb-4 text-sm leading-5 text-zinc-500 dark:text-zinc-400">
+              Pick the voice Twinkle uses in Live Talk. Choosing a voice saves it and plays a short greeting.
+            </p>
 
-                <div className="flex w-48 flex-col items-center text-center sm:w-60">
-                  <FoggyOrb
-                    palette={getVoiceOrbPalette(activeVoice.name)}
-                    state={previewingVoice === activeVoice.name ? 'speaking' : 'idle'}
-                    className="h-36 w-36 sm:h-40 sm:w-40"
-                    label={`${activeVoice.name} voice`}
-                  />
-                  <motion.h3
-                    key={activeVoice.name}
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.16 }}
-                    className="mt-9 text-3xl font-semibold tracking-tight text-zinc-950 dark:text-white"
-                  >
-                    {activeVoice.name}
-                  </motion.h3>
-                  <p className="mt-1 text-base text-zinc-500 dark:text-zinc-400">{activeVoice.description}</p>
-
-                  <div className="mt-5">
-                    <VoiceDots
-                      selectedIndex={Math.max(0, VOICES.findIndex(voice => voice.name === activeVoice.name))}
-                      onPick={voice => saveVoice(voice)}
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => stepVoice(1)}
-                  className="flex h-11 w-11 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-white/10 dark:hover:text-zinc-100"
-                  aria-label="Next voice"
-                >
-                  <ChevronRight className="h-6 w-6" />
-                </button>
-              </div>
-
-              <div className="mt-6 flex gap-2">
-                <Btn
-                  variant="primary"
-                  onClick={() => {
-                    clearPreviewTimer();
-                    void previewVoice(activeVoice.name);
-                  }}
-                >
-                  <Volume2 className="h-3.5 w-3.5" />
-                  {previewingVoice === activeVoice.name ? 'Playing…' : 'Play sample'}
-                </Btn>
-                <Btn onClick={() => setVoicePickerOpen(true)}>
-                  Browse all voices
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </Btn>
-              </div>
-
-              {voiceError && (
-                <div
-                  role="alert"
-                  className="mt-4 w-full rounded-xl border border-[#ecc5c3] bg-[#fdf6f5] px-4 py-3 text-center text-sm leading-5 text-[#b3261e] dark:border-[#7f1d1d] dark:bg-[#2a0f12] dark:text-[#f2b8b5]"
-                >
-                  {voiceError}
-                </div>
-              )}
-            </div>
+            <VoiceGrid
+              selected={selectedVoice}
+              previewing={previewingVoice}
+              error={voiceError}
+              onPick={voice => saveVoice(voice)}
+              onPlay={voice => {
+                clearPreviewTimer();
+                void previewVoice(voice);
+              }}
+            />
 
             <div className="mt-8">
               <Row title="Model" desc="Live Talk uses Gemini's native audio model.">
-                <span className="text-[15px] text-zinc-800 dark:text-zinc-200">Gemini 3.8 Live</span>
+                <span className="text-[14px] text-zinc-800 dark:text-zinc-200">Gemini 3.8 Live</span>
               </Row>
               <Row
                 title="Language"
-                desc="Live Talk follows your selected language when one is chosen; Auto-detect follows your speech."
+                desc="Live Talk follows your selected language; Auto-detect follows your speech."
               >
                 <Btn onClick={() => setActive('general')}>
                   {selectedLanguage.label}
                   <ChevronRight className="h-3.5 w-3.5" />
                 </Btn>
               </Row>
-              <Row title="Model color" desc="The color of the Live Talk orb.">
-                <Btn onClick={() => navigate('/live-talk-color', { state: { from: '/settings?tab=voice' } })}>
-                  <span
-                    className="h-3 w-3 rounded-full ring-1 ring-black/10 dark:ring-white/20"
-                    style={{ background: liveTalkColor.swatch }}
-                  />
-                  {liveTalkColor.name}
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </Btn>
-              </Row>
             </div>
-
-            <p className="mt-4 text-sm leading-5 text-zinc-500 dark:text-zinc-400">
-              30 Gemini native voices are available. Picking a voice saves it and plays a short personalized greeting.
-            </p>
           </Section>
         )}
 
-        {/* SHORTCUTS */}
         {active === 'shortcuts' && (
           <Section title="Shortcuts" first>
-            {[
-              { title: 'Search chats', desc: 'Open the chat search from anywhere.', keys: [modKey, 'K'] },
-              { title: 'New chat', desc: 'Start a fresh conversation.', keys: [modKey, 'Shift', 'O'] },
-              { title: 'Toggle sidebar', desc: 'Collapse or expand the chat list.', keys: [modKey, 'Shift', 'S'] },
-              { title: 'Send message', desc: 'Send what you typed in the composer.', keys: ['Enter'] },
-              { title: 'New line', desc: 'Add a line break without sending.', keys: ['Shift', 'Enter'] },
-              { title: 'Close dialog', desc: 'Dismiss pop-ups such as upload and confirmations.', keys: ['Esc'] },
-            ].map(item => (
-              <Row key={item.title} title={item.title} desc={item.desc}>
-                <div className="flex items-center gap-1.5">
-                  {item.keys.map((key, index) => (
-                    <span key={key} className="flex items-center gap-1.5">
-                      {index > 0 && <span className="text-xs text-zinc-300 dark:text-zinc-600">+</span>}
-                      <Kbd>{key}</Kbd>
-                    </span>
+            {shortcutGroups(modKey).map((group, groupIndex) => (
+              <div key={group.heading} className={groupIndex === 0 ? '' : 'mt-7'}>
+                <p className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400">{group.heading}</p>
+                <div className="mt-1">
+                  {group.items.map(item => (
+                    <Row key={item.title} title={item.title} desc={item.desc}>
+                      <div className="flex items-center gap-1.5">
+                        {item.keys.map((key, index) => (
+                          <span key={`${key}-${index}`} className="flex items-center gap-1.5">
+                            {index > 0 && <span className="text-xs text-zinc-300 dark:text-zinc-600">+</span>}
+                            <Kbd>{key}</Kbd>
+                          </span>
+                        ))}
+                      </div>
+                    </Row>
                   ))}
                 </div>
-              </Row>
+              </div>
             ))}
           </Section>
         )}
@@ -1868,7 +1528,7 @@ export default function Settings({
               <Panel>
                 <div className="flex items-start justify-between">
                   <div>
-                    <h3 className="text-[15px] font-medium text-zinc-900 dark:text-white">Messages per day</h3>
+                    <h3 className="text-[14px] font-medium text-zinc-900 dark:text-white">Messages per day</h3>
                     <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
                       Calculated from your live message history.
                     </p>
@@ -1926,7 +1586,7 @@ export default function Settings({
               </div>
 
               <Panel>
-                <h3 className="text-[15px] font-medium text-zinc-900 dark:text-white">Top conversations</h3>
+                <h3 className="text-[14px] font-medium text-zinc-900 dark:text-white">Top conversations</h3>
                 <div className="mt-3 space-y-0.5">
                   {topConversations.length === 0 || topConversations[0].count === 0 ? (
                     <p className="text-sm text-zinc-500">No conversations yet.</p>
@@ -1954,7 +1614,7 @@ export default function Settings({
               </Panel>
 
               <Panel>
-                <h3 className="text-[15px] font-medium text-zinc-900 dark:text-white">Recent activity</h3>
+                <h3 className="text-[14px] font-medium text-zinc-900 dark:text-white">Recent activity</h3>
                 <div className="mt-3 space-y-0.5">
                   {recentSessions.length === 0 ? (
                     <p className="text-sm text-zinc-500">No dated sessions are available yet.</p>
@@ -2092,13 +1752,13 @@ export default function Settings({
         {active === 'about' && (
           <Section title="About" first>
             <Row title="Twinkle AI" desc="Multi-model AI chat with Live Talk voice conversations.">
-              <span className="text-[15px] text-zinc-800 dark:text-zinc-200">v{APP_VERSION}</span>
+              <span className="text-[14px] text-zinc-800 dark:text-zinc-200">v{APP_VERSION}</span>
             </Row>
             <Row title="Signed in as" desc={user.email}>
-              <span className="text-[15px] text-zinc-800 dark:text-zinc-200">{providerLabel}</span>
+              <span className="text-[14px] text-zinc-800 dark:text-zinc-200">{providerLabel}</span>
             </Row>
             <Row title="Member since" desc="The date your account was created.">
-              <span className="text-[15px] text-zinc-800 dark:text-zinc-200">{memberSinceLabel}</span>
+              <span className="text-[14px] text-zinc-800 dark:text-zinc-200">{memberSinceLabel}</span>
             </Row>
             <Row title="Keyboard shortcuts" desc="See every shortcut in one place.">
               <Btn onClick={() => setActive('shortcuts')}>
@@ -2110,15 +1770,6 @@ export default function Settings({
         )}
       </motion.div>
 
-      <VoicePickerModal
-        open={voicePickerOpen}
-        selectedVoice={selectedVoice}
-        previewingVoice={previewingVoice}
-        voiceError={voiceError}
-        onSelect={voice => saveVoice(voice)}
-        onStep={stepVoice}
-        onClose={() => setVoicePickerOpen(false)}
-      />
 
       <ConfirmationModal
         isOpen={confirm === 'delete'}
