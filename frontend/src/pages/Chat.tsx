@@ -2352,13 +2352,15 @@ ${textToRead}` }] }], turnComplete: true },
   const [modelFlyout, setModelFlyout] = useState<{ left: number; bottom: number } | null>(null);
   const moreRowRef = useRef<HTMLButtonElement>(null);
   const flyoutCloseTimer = useRef<number | null>(null);
-  useEffect(() => { if (!modelPickerOpen) { setModelMoreOpen(false); setModelFlyout(null); } }, [modelPickerOpen]);
+  const flyoutPinned = useRef(false);
+  useEffect(() => { if (!modelPickerOpen) { flyoutPinned.current = false; setModelMoreOpen(false); setModelFlyout(null); } }, [modelPickerOpen]);
 
   const cancelFlyoutClose = () => {
     if (flyoutCloseTimer.current !== null) { window.clearTimeout(flyoutCloseTimer.current); flyoutCloseTimer.current = null; }
   };
   const scheduleFlyoutClose = () => {
     cancelFlyoutClose();
+    if (flyoutPinned.current) return; // clicked open: stay until toggled or a model is chosen
     flyoutCloseTimer.current = window.setTimeout(() => setModelFlyout(null), 160);
   };
   const openModelFlyout = (): boolean => {
@@ -5253,7 +5255,17 @@ if (isBlankDraft) {
                                   onFocus={() => { openModelFlyout(); }}
                                   onClick={(event) => {
                                     event.stopPropagation();
-                                    if (openModelFlyout()) return;
+                                    if (flyoutPinned.current) {
+                                      // Second click unpins and closes.
+                                      flyoutPinned.current = false;
+                                      cancelFlyoutClose();
+                                      setModelFlyout(null);
+                                      return;
+                                    }
+                                    if (openModelFlyout()) {
+                                      flyoutPinned.current = true;
+                                      return;
+                                    }
                                     setModelMoreOpen(prev => !prev);
                                   }}
                                   className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-[14px] font-medium text-zinc-900 transition-colors hover:bg-zinc-50 dark:text-zinc-100 dark:hover:bg-white/5 ${modelFlyout ? 'bg-zinc-50 dark:bg-white/5' : ''}`}
