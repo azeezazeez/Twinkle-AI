@@ -1882,3 +1882,38 @@ body {
   .twinkle-ring-core,
   .twinkle-ring[data-state="thinking"] .twinkle-ring-bars { animation: none !important; }
 }
+
+
+/* =========================================================
+   IN-CHAT COMPOSER: one row
+   [+]  [Ask Anything ........]  [model]  [mic]  [Live Talk / Send]
+   Applies only once a conversation has started; the home screen keeps
+   its two-row composer.
+   ========================================================= */
+.twinkle-composer-row.twinkle-composer-inline {
+  grid-template-columns: 32px minmax(0, 1fr) auto auto 32px !important;
+  grid-template-areas: "plus prompt model mic submit" !important;
+  align-items: end !important;
+  column-gap: 4px !important;
+  min-height: 0 !important;
+  padding: 10px !important;
+  border-radius: 24px !important;
+}
+.twinkle-composer-inline .twinkle-composer-prompt {
+  grid-area: prompt !important;
+  align-self: center !important;
+  min-height: 32px !important;
+  padding: 0 6px !important;
+  align-items: center !important;
+}
+.twinkle-composer-inline .twinkle-composer-textarea { min-height: 24px !important; }
+.twinkle-composer-inline .twinkle-composer-actions > .min-w-0.flex-1 { display: none !important; }
+.twinkle-composer-inline .twinkle-composer-plus,
+.twinkle-composer-inline .twinkle-composer-model,
+.twinkle-composer-inline .twinkle-composer-mic,
+.twinkle-composer-inline .twinkle-composer-submit { align-self: end !important; }
+.twinkle-composer-inline .twinkle-composer-model { margin: 0 2px 0 0 !important; }
+.twinkle-composer-inline .twinkle-composer-mic { margin: 0 !important; }
+@media (max-width: 640px) {
+  .twinkle-composer-row.twinkle-composer-inline { padding: 8px !important; }
+}
