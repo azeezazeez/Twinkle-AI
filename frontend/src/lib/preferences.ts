@@ -3,15 +3,22 @@
 
 export type FontSizePref = 'small' | 'default' | 'large';
 
+export type LineSpacingPref = 'compact' | 'default' | 'relaxed';
+export type FontFamilyPref = 'default' | 'serif' | 'mono';
+
 export interface DisplayPrefs {
   fontSize: FontSizePref;
   reduceMotion: boolean;
+  lineSpacing: LineSpacingPref;
+  fontFamily: FontFamilyPref;
+  /** Playback speed for Read Aloud (1 = normal). */
+  readAloudSpeed: number;
 }
 
 export const PREFS_KEY = 'twinkle_prefs';
 export const PREFS_EVENT = 'twinkle-prefs-change';
 
-const DEFAULT_PREFS: DisplayPrefs = { fontSize: 'default', reduceMotion: false };
+export const DEFAULT_PREFS: DisplayPrefs = { fontSize: 'default', reduceMotion: false, lineSpacing: 'default', fontFamily: 'default', readAloudSpeed: 1 };
 const FONT_PX: Record<FontSizePref, number> = { small: 13, default: 15, large: 17.5 };
 const BASE_PX = 15; // matches `html { font-size: 15px }` in index.css
 const TEXT_STYLE_ID = 'twinkle-text-size-style';
@@ -23,6 +30,9 @@ export const loadPrefs = (): DisplayPrefs => {
     return {
       fontSize: ['small', 'default', 'large'].includes(parsed.fontSize) ? parsed.fontSize : DEFAULT_PREFS.fontSize,
       reduceMotion: Boolean(parsed.reduceMotion),
+      lineSpacing: ['compact', 'default', 'relaxed'].includes(parsed.lineSpacing) ? parsed.lineSpacing : DEFAULT_PREFS.lineSpacing,
+      fontFamily: ['default', 'serif', 'mono'].includes(parsed.fontFamily) ? parsed.fontFamily : DEFAULT_PREFS.fontFamily,
+      readAloudSpeed: [0.75, 1, 1.25, 1.5].includes(Number(parsed.readAloudSpeed)) ? Number(parsed.readAloudSpeed) : DEFAULT_PREFS.readAloudSpeed,
     };
   } catch {
     return { ...DEFAULT_PREFS };
@@ -68,6 +78,19 @@ export const applyPreferences = (prefs: DisplayPrefs = loadPrefs()) => {
   root.style.fontSize = `${px}px`;
   root.dataset.textSize = prefs.fontSize;
   setStyle(TEXT_STYLE_ID, px === BASE_PX ? null : buildTextSizeCss(px / BASE_PX));
+
+  // Reading comfort: line spacing for chat text and an optional font family.
+  const lineHeight = { compact: '1.45', default: '', relaxed: '1.95' }[prefs.lineSpacing];
+  setStyle(
+    'twinkle-line-spacing-style',
+    lineHeight ? `[data-twinkle-message] :is(p,li,blockquote,td,th){line-height:${lineHeight}!important}` : null
+  );
+  const families: Record<FontFamilyPref, string> = {
+    default: '',
+    serif: '"Source Serif 4", ui-serif, Georgia, Cambria, "Times New Roman", serif',
+    mono: '"JetBrains Mono", ui-monospace, SFMono-Regular, monospace',
+  };
+  setStyle('twinkle-font-family-style', families[prefs.fontFamily] ? `body{font-family:${families[prefs.fontFamily]}!important}` : null);
 
   root.dataset.motion = prefs.reduceMotion ? 'reduced' : 'system';
   // Spinners keep turning so loading states stay visible.
