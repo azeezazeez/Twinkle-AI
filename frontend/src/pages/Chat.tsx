@@ -1303,7 +1303,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
       if (requestId !== speechRequestRef.current) return;
 
       const socket = new WebSocket(
-        `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}`
+        `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}`
       );
       speechSocketRef.current = socket;
       setSpeakingMessageId(message.id);
@@ -1614,7 +1614,7 @@ ${textToRead}` }] }], turnComplete: true },
       }
 
       const socket = new WebSocket(
-        `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}`
+        `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}`
       );
       voiceGeminiSocketRef.current = socket;
 
