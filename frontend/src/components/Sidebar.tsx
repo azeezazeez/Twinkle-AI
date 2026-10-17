@@ -14,6 +14,7 @@ import { chatApi } from '../lib/api';
 import SearchBar from './SearchBar';
 import LanguageModal from './LanguageModal';
 import { useLanguage, type AppLanguage } from '../lib/i18n';
+import { parseServerDate, serverTime } from '../lib/time';
 import { onShortcut, takePendingShortcut, isMac, type ShortcutAction } from '../lib/shortcuts';
 
 const TOGGLE_SIDEBAR_KEYS = isMac() ? '⌘B' : 'Ctrl+B';
@@ -73,9 +74,10 @@ const saveUnreadIds = (ids: number[]) => {
 const getGroupLabel = (session: Session): string => {
   const raw = (session as any).createdAt || (session as any).created_at;
   if (!raw) return 'Recent';
-  const date = new Date(raw);
+  const date = parseServerDate(raw);
+  if (!date) return 'Recent';
   const now = new Date();
-  const diffDays = Math.floor((now.getTime() - date.getTime()) / 86_400_000);
+  const diffDays = Math.max(0, Math.floor((now.getTime() - date.getTime()) / 86_400_000));
   if (diffDays === 0) return 'Today';
   if (diffDays === 1) return 'Yesterday';
   if (diffDays < 7) return 'This Week';
@@ -538,8 +540,7 @@ function SessionList({
       || (session as any).updated_at
       || (session as any).createdAt
       || (session as any).created_at;
-    const timestamp = value ? new Date(value).getTime() : 0;
-    return Number.isFinite(timestamp) ? timestamp : 0;
+    return serverTime(value);
   };
 
   const sortedByDate = [...displaySessions].sort((a, b) => {
@@ -1156,8 +1157,8 @@ function ChatSearchModal({
 
   const recentChats = [...results]
     .sort((a: any, b: any) => {
-      const aDate = new Date((a as any).updatedAt ?? (a as any).updated_at ?? (a as any).createdAt ?? (a as any).created_at ?? 0).getTime();
-      const bDate = new Date((b as any).updatedAt ?? (b as any).updated_at ?? (b as any).createdAt ?? (b as any).created_at ?? 0).getTime();
+      const aDate = serverTime((a as any).updatedAt ?? (a as any).updated_at ?? (a as any).createdAt ?? (a as any).created_at);
+      const bDate = serverTime((b as any).updatedAt ?? (b as any).updated_at ?? (b as any).createdAt ?? (b as any).created_at);
       return bDate - aDate;
     })
     .slice(0, 20);
