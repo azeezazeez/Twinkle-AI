@@ -101,6 +101,31 @@ public class CloudflareAiService {
         return new ArrayList<>(models);
     }
 
+    /** First configured text model; used when an image-model prompt is plain conversation. */
+    public String getDefaultChatModel() {
+        for (String m : split(configuredModels)) {
+            if (!isImageModel(m)) return m;
+        }
+        throw new AIServiceException("No Cloudflare chat model is configured.");
+    }
+
+    private static final java.util.regex.Pattern CONVERSATIONAL = java.util.regex.Pattern.compile(
+            "^\\s*(hi+|hello+|hey+|hii+|yo|hola|namaste|sup|howdy|good\\s+(morning|afternoon|evening|night)|"
+                    + "how\\s+are\\s+you|who\\s+are\\s+you|what\\s+can\\s+you\\s+do|what'?s\\s+up|thanks?|thank\\s+you|"
+                    + "ok(ay)?|bye|help|test|testing)\\b[\\s\\p{Punct}]*(there|twinkle|buddy|friend|bro)?[\\s\\p{Punct}]*$",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+    private static final java.util.regex.Pattern IMAGE_WORDS = java.util.regex.Pattern.compile(
+            "\\b(image|picture|photo|draw|paint|sketch|illustration|logo|wallpaper|render|portrait|poster|generate|create|make)\\b",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    /** False for greetings/small talk, which must get a text reply instead of a random image. */
+    public static boolean isImageRequest(String prompt) {
+        String t = prompt == null ? "" : prompt.trim();
+        if (t.isEmpty()) return false;
+        if (IMAGE_WORDS.matcher(t).find()) return true;
+        return !(t.length() <= 60 && CONVERSATIONAL.matcher(t).matches());
+    }
+
     private boolean isChatModel(String model) {
         return split(configuredModels).contains(model) && !isImageModel(model);
     }
