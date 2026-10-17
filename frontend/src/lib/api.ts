@@ -1238,7 +1238,17 @@ export const chatApi = {
       try {
         data = JSON.parse(rawData);
       } catch {
-        data = { text: rawData };
+        // Never surface unparseable payloads as chat text: only plain-text
+        // deltas are accepted; anything that looks like serialized data or
+        // a partial JSON/object payload is dropped.
+        if (eventName === 'delta' && !/^\s*[\[{]|^\[object /.test(rawData)) {
+          data = { text: rawData };
+        } else {
+          return;
+        }
+      }
+      if (data === null || typeof data !== 'object') {
+        data = eventName === 'delta' && typeof data === 'string' ? { text: data } : {};
       }
 
       // Backends/proxies can omit the SSE event name and send a completion
