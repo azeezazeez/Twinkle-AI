@@ -741,7 +741,8 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
                   (appLanguage === 'auto'
                     ? 'At the beginning of this conversation, identify the language of the user’s first clearly spoken sentence. Use that as the conversation language and keep speaking and transcribing naturally in that language for the rest of this Live Talk session. Do not switch languages just because later words or phrases are mixed-language. Switch only if the user explicitly asks you to change language. If the first sentence is genuinely ambiguous, use the next clearly spoken sentence to identify the language.'
                     : `${getLanguageInstruction(appLanguage)} Continue using the selected language consistently, while following an explicit request from the user to switch languages.`) +
-                  (assistantNameContext() ? `\n\n${assistantNameContext()}` : ''),
+                  (assistantNameContext() ? `\n\n${assistantNameContext()}` : '') +
+                  `\n\nCurrent local date and time for the user: ${new Intl.DateTimeFormat(undefined, { dateStyle: 'full', timeStyle: 'short' }).format(new Date())} (timezone ${Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown'}). Use this for date and time questions. You do not have live weather or location access in voice mode; if asked, say so briefly and suggest asking in the text chat.`,
               }],
             },
             inputAudioTranscription: inputTranscription,
