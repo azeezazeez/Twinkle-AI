@@ -51,6 +51,10 @@ export const assistantNameContext = (): string => {
   return `ASSISTANT NAME SET BY THE USER: The user has chosen to call you "${name}". Use "${name}" as your own name from now on: when you introduce yourself or are asked your name, say you are ${name}. If the user has just asked you to take this name, accept it briefly and warmly (for example: "Got it, you can call me ${name}."). Do not call yourself Twinkle AI unless the user asks about the product.`;
 };
 
+const getAppLanguageCode = (): string => {
+  try { return localStorage.getItem('twinkle_app_language') || 'auto'; } catch { return 'auto'; }
+};
+
 const getLiveContext = async (message: string): Promise<string | undefined> => {
   learnAssistantName(message);
   const persona = assistantNameContext();
@@ -1192,7 +1196,7 @@ export const chatApi = {
     const liveContext = await getLiveContext(message);
     return fetchWithAuth(
       `${API_BASE}/chat/send`,
-      { method: 'POST', signal, body: JSON.stringify({ message, sessionId, model, liveContext }) },
+      { method: 'POST', signal, body: JSON.stringify({ message, sessionId, model, liveContext, language: getAppLanguageCode() }) },
       CHAT_RETRIES
     );
   },
@@ -1229,6 +1233,7 @@ export const chatApi = {
           message,
           sessionId,
           model,
+          language: getAppLanguageCode(),
           liveContext: await getLiveContext(message),
         }),
       });
@@ -1486,6 +1491,7 @@ export const chatApi = {
 
     const liveContext = await getLiveContext(message);
     if (liveContext) formData.append('liveContext', liveContext);
+    formData.append('language', getAppLanguageCode());
 
     /* =====================================================
        FILES
