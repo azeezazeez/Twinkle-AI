@@ -19,8 +19,56 @@ import { AnimatePresence, motion } from 'motion/react';
 import type { User } from '../types';
 import { authApi, chatApi } from '../lib/api';
 import UserAvatar from '../components/UserAvatar';
-import { presetAvatars, removeLocalAvatar, saveLocalAvatar, withLocalAvatar } from '../lib/avatar';
 import { Btn, Row, Section, SettingsShell } from './Settings';
+
+// ── Local avatar helpers ────────────────────────────────────────────────────
+// The backend has no avatar-upload endpoint, so a photo chosen here is stored
+// in this browser only (per user id) and layered over the account picture.
+const avatarKey = (userId: string | number) => `twinkle_avatar_${userId}`;
+const AVATAR_REMOVED = '__removed__';
+
+const saveLocalAvatar = (userId: string | number, dataUrl: string) => {
+  try {
+    localStorage.setItem(avatarKey(userId), dataUrl);
+  } catch {
+    /* storage may be full or blocked */
+  }
+};
+
+const removeLocalAvatar = (userId: string | number) => {
+  try {
+    localStorage.setItem(avatarKey(userId), AVATAR_REMOVED);
+  } catch {
+    /* ignore */
+  }
+};
+
+const withLocalAvatar = (user: User): User => {
+  let stored: string | null = null;
+  try {
+    stored = localStorage.getItem(avatarKey(user.id));
+  } catch {
+    stored = null;
+  }
+  if (!stored) return user;
+  if (stored === AVATAR_REMOVED) return { ...user, avatarUrl: undefined };
+  return { ...user, avatarUrl: stored };
+};
+
+const AVATAR_COLORS = ['#C6613F', '#D97757', '#7C3AED', '#2563EB', '#0891B2', '#059669', '#CA8A04', '#DB2777'];
+
+// Simple preset avatars (coloured circle + initial) used by "Choose an avatar".
+const presetAvatars = (name: string): string[] => {
+  const letter = (name || '?').trim().charAt(0).toUpperCase() || '?';
+  return AVATAR_COLORS.map(color => {
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">` +
+      `<rect width="128" height="128" fill="${color}"/>` +
+      `<text x="64" y="66" dominant-baseline="central" text-anchor="middle" ` +
+      `font-family="Inter,Arial,sans-serif" font-size="60" font-weight="600" fill="#fff">${letter}</text></svg>`;
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  });
+};
 
 const formatNumber = (value: number) =>
   new Intl.NumberFormat('en-US', {
