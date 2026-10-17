@@ -210,7 +210,7 @@ public class GroqService {
         return requested;
     }
 
-    private List<Map<String, Object>> buildHistory(
+    public List<Map<String, Object>> buildHistory(
             List<Map<String, String>> history,
             String requestedLanguage) {
 
