@@ -41,6 +41,8 @@ import {
   X,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { createZip } from '../lib/zip';
+import { parseServerDate } from '../lib/time';
 import type { User, Session } from '../types';
 import {
   authApi,
@@ -308,8 +310,8 @@ const applyThemeChoice = (choice: ThemeChoice) => {
   } catch { /* storage may be blocked */ }
 };
 
-const downloadBlob = (content: string, filename: string, type: string) => {
-  const url = URL.createObjectURL(new Blob([content], { type }));
+const downloadBlob = (content: string | Blob, filename: string, type: string) => {
+  const url = URL.createObjectURL(content instanceof Blob ? content : new Blob([content], { type }));
   const link = document.createElement('a');
   link.href = url;
   link.download = filename;
@@ -317,6 +319,18 @@ const downloadBlob = (content: string, filename: string, type: string) => {
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+// Turns a chat title into a safe, readable file name.
+const safeFileName = (title: string, fallback: string) => {
+  const cleaned = (title || '')
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^\.+/, '')
+    .slice(0, 80)
+    .trim();
+  return cleaned || fallback;
 };
 
 const isMac = () =>
@@ -1231,12 +1245,24 @@ export default function Settings({
       }
 
       const stamp = new Date().toISOString().slice(0, 10);
-      if (format === 'json') {
-        const payload = {
-          app: 'Twinkle AI',
-          exportedAt: new Date().toISOString(),
-          account: { email: user.email, username: user.username },
-          conversations: bundles.map(({ session, messages }) => ({
+      const extension = format === 'json' ? 'json' : 'md';
+      const mime = format === 'json' ? 'application/json' : 'text/markdown';
+      const usedNames = new Set<string>();
+
+      // One file per chat, named after the chat title.
+      const files = bundles.map(({ session, messages }, index) => {
+        const base = safeFileName(session.sessionName, `Chat ${index + 1}`);
+        let name = `${base}.${extension}`;
+        let counter = 2;
+        while (usedNames.has(name.toLowerCase())) name = `${base} (${counter++}).${extension}`;
+        usedNames.add(name.toLowerCase());
+
+        let content: string;
+        if (format === 'json') {
+          content = JSON.stringify({
+            app: 'Twinkle AI',
+            exportedAt: new Date().toISOString(),
+            account: { email: user.email, username: user.username },
             id: session.id,
             title: session.sessionName,
             createdAt: session.createdAt,
@@ -1246,23 +1272,24 @@ export default function Settings({
               content: message?.content,
               timestamp: message?.timestamp,
             })),
-          })),
-        };
-        downloadBlob(JSON.stringify(payload, null, 2), `twinkle-chats-${stamp}.json`, 'application/json');
+          }, null, 2);
+        } else {
+          const body = messages
+            .map((message: any) => {
+              const who = message?.role === 'user' ? 'You' : 'Twinkle';
+              const when = parseServerDate(message?.timestamp);
+              return `**${who}**${when ? ` · ${when.toLocaleString()}` : ''}\n\n${message?.content ?? ''}`;
+            })
+            .join('\n\n---\n\n');
+          content = `# ${session.sessionName}\n\n${body}\n`;
+        }
+        return { name, content };
+      });
+
+      if (files.length === 1) {
+        downloadBlob(files[0].content, files[0].name, mime);
       } else {
-        const text = bundles
-          .map(({ session, messages }) => {
-            const body = messages
-              .map((message: any) => {
-                const who = message?.role === 'user' ? 'You' : 'Twinkle';
-                const when = message?.timestamp ? ` · ${new Date(message.timestamp).toLocaleString()}` : '';
-                return `**${who}**${when}\n\n${message?.content ?? ''}`;
-              })
-              .join('\n\n---\n\n');
-            return `# ${session.sessionName}\n\n${body}`;
-          })
-          .join('\n\n\n');
-        downloadBlob(text, `twinkle-chats-${stamp}.md`, 'text/markdown');
+        downloadBlob(createZip(files), `Twinkle chats ${stamp}.zip`, 'application/zip');
       }
       showToast(`Exported ${bundles.length} chat${bundles.length === 1 ? '' : 's'}`);
     } catch (error) {
@@ -1706,7 +1733,7 @@ export default function Settings({
             <Section title="Data controls" first>
               <Row
                 title="Export your chats"
-                desc={exporting ? exportProgress : 'Download every conversation as a file you keep.'}
+                desc={exporting ? exportProgress : 'Download each conversation as its own file, named after the chat.'}
               >
                 <div className="flex flex-wrap gap-2">
                   <Btn onClick={() => void exportChats('json')} disabled={Boolean(exporting)}>
