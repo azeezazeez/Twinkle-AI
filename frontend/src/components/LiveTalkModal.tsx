@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Mic, MicOff, RotateCw, X } from 'lucide-react';
-import FoggyOrb from './FoggyOrb';
+import VoiceRing from './VoiceRing';
 import { getVoiceOrbPalette } from '../lib/voiceThemes';
 import { VOICES, DEFAULT_VOICE } from '../lib/voices';
 import { chatApi, createLiveToken } from '../lib/api';
@@ -952,7 +952,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
     return () => window.clearInterval(id);
   }, [open]);
 
-  // ── Microphone level → orb size (written straight to the DOM, no re-render)
+  // ── Microphone level → voice ring (written straight to the DOM, no re-render)
   useEffect(() => {
     if (!open) return;
     let frame = 0;
@@ -1011,7 +1011,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
           ? 'Just start talking.'
           : 'Tap the microphone to talk again.';
 
-  const orbState = speaking ? 'speaking' : listening && !thinking ? 'listening' : 'idle';
+  const orbState = speaking ? 'speaking' : thinking ? 'thinking' : listening ? 'listening' : 'idle';
   const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
   const ss = String(elapsed % 60).padStart(2, '0');
   const captionText = caption.text.trim().slice(-240);
@@ -1068,14 +1068,12 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
 
           {/* Stage */}
           <main className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center px-6">
-            <div
-              ref={levelRef}
-              style={{ transform: 'scale(calc(1 + var(--lvl, 0) * 0.14))', transition: 'transform 90ms linear' }}
-            >
-              <FoggyOrb
+            <div ref={levelRef}>
+              <VoiceRing
                 palette={palette}
                 state={orbState}
-                className="h-48 w-48 sm:h-56 sm:w-56"
+                muted={!listening && !speaking && !thinking && !hasError}
+                className="h-56 w-56 sm:h-72 sm:w-72"
                 label={`${voiceName} voice`}
               />
             </div>
