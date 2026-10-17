@@ -1805,3 +1805,78 @@ body {
     scrollbar-gutter: stable both-edges;
   }
 }
+
+/* =========================================================
+   LIVE TALK – VOICE RING
+   Bars follow --lvl (microphone level, set by LiveTalkModal).
+   ========================================================= */
+.twinkle-ring { transition: opacity .4s ease; }
+.twinkle-ring[data-muted="true"] { opacity: .4; }
+
+.twinkle-ring-bars { transform-origin: 50% 50%; }
+.twinkle-ring[data-state="thinking"] .twinkle-ring-bars { animation: twinkle-ring-spin 9s linear infinite; }
+
+.twinkle-ring-spoke {
+  position: absolute;
+  inset: 0;
+  transform: rotate(var(--a));
+}
+
+.twinkle-ring-bar {
+  position: absolute;
+  left: 50%;
+  bottom: calc(50% + 25cqmin);
+  width: 1.9cqmin;
+  margin-left: -0.95cqmin;
+  height: calc((3 + var(--lvl, 0) * var(--amp)) * 1cqmin);
+  border-radius: 999px;
+  background: linear-gradient(to top, var(--c-strong), var(--c-mid));
+  transform-origin: 50% 100%;
+  transition: height 90ms linear;
+  animation: twinkle-ring-breathe 3.4s ease-in-out infinite;
+  animation-delay: var(--d);
+}
+
+.twinkle-ring[data-state="listening"] .twinkle-ring-bar {
+  height: calc((3.5 + var(--lvl, 0) * var(--amp)) * 1cqmin);
+  animation: twinkle-ring-breathe 1.5s ease-in-out infinite;
+  animation-delay: var(--d);
+}
+
+.twinkle-ring[data-state="speaking"] .twinkle-ring-bar {
+  height: calc((4 + var(--amp) * 0.85) * 1cqmin);
+  transition: none;
+  animation: twinkle-ring-speak .9s ease-in-out infinite alternate;
+  animation-delay: var(--d);
+}
+
+.twinkle-ring[data-state="thinking"] .twinkle-ring-bar {
+  height: calc((3 + var(--amp) * 0.22) * 1cqmin);
+  opacity: .85;
+}
+
+.twinkle-ring-core {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 38cqmin;
+  height: 38cqmin;
+  margin: -19cqmin 0 0 -19cqmin;
+  border-radius: 50%;
+  box-shadow: 0 0 14cqmin var(--c-glow), inset 0 0 7cqmin rgba(255, 255, 255, .35);
+  transform: scale(calc(1 + var(--lvl, 0) * 0.1));
+  transition: transform 90ms linear;
+  animation: twinkle-ring-core 4.2s ease-in-out infinite;
+}
+.twinkle-ring[data-state="speaking"] .twinkle-ring-core { animation-duration: 1.1s; }
+
+@keyframes twinkle-ring-breathe { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(.72); } }
+@keyframes twinkle-ring-speak { 0% { transform: scaleY(.22); } 100% { transform: scaleY(1); } }
+@keyframes twinkle-ring-spin { to { transform: rotate(360deg); } }
+@keyframes twinkle-ring-core { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.08); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .twinkle-ring-bar,
+  .twinkle-ring-core,
+  .twinkle-ring[data-state="thinking"] .twinkle-ring-bars { animation: none !important; }
+}
