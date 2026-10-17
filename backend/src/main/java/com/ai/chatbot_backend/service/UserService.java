@@ -733,6 +733,19 @@ public class UserService {
 
 
     @Transactional
+    public User updateFullName(Long userId, String requestedName) {
+        String name = requestedName == null ? "" : requestedName.trim().replaceAll("\\s+", " ");
+        if (name.length() < 2) {
+            throw new AIServiceException("Full name must be at least 2 characters");
+        }
+        if (name.length() > 100) {
+            throw new AIServiceException("Full name cannot exceed 100 characters");
+        }
+        User user = getUserById(userId);
+        user.setFullName(name);
+        return userRepository.save(user);
+    }
+
     public User updateUsername(Long userId, String requestedUsername) {
         if (requestedUsername == null || requestedUsername.trim().isEmpty()) {
             throw new AIServiceException("Username is required");
