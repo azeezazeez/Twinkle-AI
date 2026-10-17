@@ -77,6 +77,20 @@ public class ChatController {
     private final ChatShareService chatShareService;
     private final RagService ragService;
 
+    // Dedicated pool: the JVM common pool is tiny on small hosts and would
+    // serialize concurrent streams, delaying time-to-first-token.
+    private static final java.util.concurrent.ExecutorService STREAM_EXECUTOR =
+            java.util.concurrent.Executors.newCachedThreadPool(r -> {
+                Thread t = new Thread(r, "chat-stream");
+                t.setDaemon(true);
+                return t;
+            });
+
+    private static final String IMAGE_MODE_CHAT_HINT =
+            "You are Twinkle, a friendly AI assistant. The user is in image-generation mode but sent a "
+                    + "conversational message rather than an image description. Reply briefly and naturally "
+                    + "(for a greeting, greet back), and mention they can describe an image to generate one.";
+
 
     // =========================================================
     // HELPERS
@@ -307,7 +321,13 @@ public class ChatController {
                         }
                     };
 
-                    if (cloudflareRequested && cloudflareService.isImageModel(finalRequestedModel)) {
+                    if (cloudflareRequested && cloudflareService.isImageModel(finalRequestedModel)
+                            && !CloudflareAiService.isImageRequest(finalMessage)) {
+                        List<Map<String, Object>> msgs = buildCloudflareMessages(finalPromptMessage, conversationHistory, finalLanguage);
+                        msgs.add(0, Map.of("role", "system", "content", IMAGE_MODE_CHAT_HINT));
+                        fullResponse.append(cloudflareService.streamResponse(
+                                msgs, cloudflareService.getDefaultChatModel(), sendDelta));
+                    } else if (cloudflareRequested && cloudflareService.isImageModel(finalRequestedModel)) {
                         String imageMarkdown = "![" + imageAltText(finalMessage) + "]("
                                 + cloudflareService.generateImage(finalMessage) + ")";
                         sendDelta.accept(imageMarkdown);
@@ -367,7 +387,7 @@ public class ChatController {
                     }
                     emitter.completeWithError(e);
                 }
-            });
+            }, STREAM_EXECUTOR);
 
         } catch (Exception e) {
             try {
@@ -1384,7 +1404,13 @@ public class ChatController {
          */
         if (cloudflareRequested && (geminiMediaUrls == null || geminiMediaUrls.isEmpty())) {
 
-            aiResponse = cloudflareService.isImageModel(requestedModel)
+            boolean imageMode = cloudflareService.isImageModel(requestedModel);
+            if (imageMode && !CloudflareAiService.isImageRequest(message)) {
+                List<Map<String, Object>> msgs = buildCloudflareMessages(promptMessage, conversationHistory, language);
+                msgs.add(0, Map.of("role", "system", "content", IMAGE_MODE_CHAT_HINT));
+                aiResponse = cloudflareService.generateResponse(msgs, cloudflareService.getDefaultChatModel());
+            } else
+            aiResponse = imageMode
                     ? "![" + imageAltText(message) + "](" + cloudflareService.generateImage(message) + ")"
                     : cloudflareService.generateResponse(
                             buildCloudflareMessages(promptMessage, conversationHistory, language),
