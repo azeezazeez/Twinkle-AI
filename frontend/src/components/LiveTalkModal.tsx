@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Mic, MicOff, RotateCw, X } from 'lucide-react';
 import VoiceRing from './VoiceRing';
 import { getVoiceOrbPalette } from '../lib/voiceThemes';
-import { VOICES, DEFAULT_VOICE } from '../lib/voices';
+import { VOICES, DEFAULT_VOICE } from '../lib/voices'; 
 import { chatApi, createLiveToken, assistantNameContext, getAssistantName, learnAssistantName } from '../lib/api';
 import { APP_LANGUAGE_KEY, getLanguageInstruction, type AppLanguage } from '../lib/i18n';
 import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw';
