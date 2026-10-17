@@ -36,7 +36,7 @@ public class ChatShareService {
     private final SecureRandom secureRandom = new SecureRandom();
 
     @Transactional
-    public SharedChat createOrGetShare(Long sessionId, User user) {
+    public SharedChat createOrGetShare(Long sessionId, User user, Integer expiresInDays) {
         ChatSession chatSession = chatSessionRepository.findById(sessionId)
                 .orElseThrow(() -> new AIServiceException("Session not found"));
 
@@ -51,7 +51,39 @@ public class ChatShareService {
         sharedChat.setShareToken(generateUniqueToken());
         sharedChat.setCreatedAt(LocalDateTime.now());
         sharedChat.setRevoked(false);
+        if (expiresInDays != null && expiresInDays > 0) {
+            sharedChat.setExpiresAt(LocalDateTime.now().plusDays(Math.min(expiresInDays, 365)));
+        }
         return sharedChatRepository.save(sharedChat);
+    }
+
+    private ChatSession requireOwnedSession(Long sessionId, User user) {
+        ChatSession chatSession = chatSessionRepository.findById(sessionId)
+                .orElseThrow(() -> new AIServiceException("Session not found"));
+        if (!user.getId().equals(chatSession.getUserId())) {
+            throw new AIServiceException("You do not have access to this chat");
+        }
+        return chatSession;
+    }
+
+    /** Active (not revoked) public links of a chat, newest first. Owner only. */
+    @Transactional(readOnly = true)
+    public List<SharedChat> listShares(Long sessionId, User user) {
+        requireOwnedSession(sessionId, user);
+        LocalDateTime now = LocalDateTime.now();
+        return sharedChatRepository.findBySessionIdAndRevokedFalseOrderByCreatedAtDesc(sessionId).stream()
+                .filter(share -> share.getExpiresAt() == null || share.getExpiresAt().isAfter(now))
+                .collect(Collectors.toList());
+    }
+
+    /** Turns one public link off. Owner only. */
+    @Transactional
+    public void revokeShare(Long sessionId, Long shareId, User user) {
+        requireOwnedSession(sessionId, user);
+        SharedChat sharedChat = sharedChatRepository.findByIdAndSessionId(shareId, sessionId)
+                .orElseThrow(() -> new AIServiceException("Link not found"));
+        sharedChat.setRevoked(true);
+        sharedChatRepository.save(sharedChat);
     }
 
     @Transactional(readOnly = true)
@@ -63,6 +95,10 @@ public class ChatShareService {
         SharedChat sharedChat = sharedChatRepository
                 .findByShareTokenAndRevokedFalse(token)
                 .orElseThrow(() -> new AIServiceException("Shared chat not found or no longer available"));
+
+        if (sharedChat.getExpiresAt() != null && sharedChat.getExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new AIServiceException("Shared chat not found or no longer available");
+        }
 
         ChatSession session = chatSessionRepository.findById(sharedChat.getSessionId())
                 .orElseThrow(() -> new AIServiceException("Shared chat not found"));
