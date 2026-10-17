@@ -4,7 +4,16 @@ import { Mic, MicOff, RotateCw, X } from 'lucide-react';
 import VoiceRing from './VoiceRing';
 import { getVoiceOrbPalette } from '../lib/voiceThemes';
 import { VOICES, DEFAULT_VOICE } from '../lib/voices';
-import { chatApi, createLiveToken, assistantNameContext, getAssistantName, learnAssistantName } from '../lib/api';
+import {
+  chatApi,
+  createLiveToken,
+  assistantNameContext,
+  getAssistantName,
+  learnAssistantName,
+  buildLiveSocketUrl,
+  reportLiveSocketFailure,
+  reportLiveSocketSuccess,
+} from '../lib/api';
 import { APP_LANGUAGE_KEY, getLanguageInstruction, type AppLanguage } from '../lib/i18n';
 import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw';
 
@@ -57,6 +66,38 @@ const base64ToBytes = (base64: string): Uint8Array => {
 };
 
 
+// The capture worklet may be registered only ONCE per AudioContext. Calling
+// addModule() again for the same context (for example on "Try again", after a
+// reconnect, or in React StrictMode) throws "A processor with name
+// 'twinkle-pcm-capture' is already registered" - the "Uncaught" error seen in
+// the console. Tracking the load per context makes registration idempotent.
+const captureWorkletByContext = new WeakMap<BaseAudioContext, Promise<void>>();
+
+const ensureCaptureWorklet = (context: AudioContext): Promise<void> => {
+  let ready = captureWorkletByContext.get(context);
+  if (!ready) {
+    const workletUrl = URL.createObjectURL(
+      new Blob([pcmCaptureWorkletSource], { type: 'application/javascript' }),
+    );
+    ready = context.audioWorklet.addModule(workletUrl)
+      .finally(() => URL.revokeObjectURL(workletUrl));
+    captureWorkletByContext.set(context, ready);
+    ready.catch(() => captureWorkletByContext.delete(context));
+  }
+  return ready;
+};
+
+// BCP-47 hints for Gemini's input transcription when the user picked a
+// specific language. Telling the recogniser the language removes a whole class
+// of mis-hearings between similar-sounding words.
+const TRANSCRIPTION_LOCALES: Record<string, string> = {
+  en: 'en-US', hi: 'hi-IN', te: 'te-IN', ta: 'ta-IN', kn: 'kn-IN', ml: 'ml-IN',
+  bn: 'bn-IN', mr: 'mr-IN', gu: 'gu-IN', pa: 'pa-IN', ur: 'ur-PK', ar: 'ar-SA',
+  es: 'es-ES', fr: 'fr-FR', de: 'de-DE', it: 'it-IT', pt: 'pt-PT', ru: 'ru-RU',
+  ja: 'ja-JP', ko: 'ko-KR', zh: 'zh-CN', tr: 'tr-TR', vi: 'vi-VN', id: 'id-ID',
+  th: 'th-TH', fil: 'fil-PH',
+};
+
 const decodeLiveMessage = async (data: unknown): Promise<any> => {
   if (typeof data === 'string') return JSON.parse(data);
 
@@ -105,7 +146,10 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
   const nextPlayTimeRef = useRef(0);
   const connectAttemptRef = useRef(0);
   const startInputRef = useRef<(() => Promise<void>) | null>(null);
-  const audioWorkletReadyRef = useRef<Promise<void> | null>(null);
+  const setupDoneRef = useRef(false);
+  const autoRetryRef = useRef(0);
+  const useBasicSetupRef = useRef(false);
+  const connectRef = useRef<(() => Promise<void>) | null>(null);
   const liveSessionIdRef = useRef<number | null>(null);
   const liveSessionPromiseRef = useRef<Promise<number> | null>(null);
   const liveSavePromiseRef = useRef<Promise<void> | null>(null);
@@ -128,8 +172,11 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
   const vadSpeechStartedRef = useRef(false);
   const vadLastSpeechAtRef = useRef(0);
   const vadTurnEndedRef = useRef(false);
-  const VAD_SILENCE_MS = 300;
-  const VAD_THRESHOLD = 0.013;
+  // The server-side detector is the primary end-of-turn signal. This local
+  // fallback only fires after a clearly longer pause, so a natural gap inside a
+  // sentence ("Who ... are you?") can no longer split it into two turns.
+  const VAD_SILENCE_MS = 700;
+  const VAD_THRESHOLD = 0.006;
 
   const [connected, setConnected] = useState(false);
   const [listening, setListening] = useState(false);
@@ -355,7 +402,6 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
     vadLastSpeechAtRef.current = 0;
     vadTurnEndedRef.current = false;
     pendingPcmRef.current = [];
-    audioWorkletReadyRef.current = null;
 
     streamRef.current?.getTracks().forEach(track => track.stop());
     streamRef.current = null;
@@ -457,34 +503,19 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
     }
     if (context.state === 'suspended') await context.resume();
 
-    // The worklet is prepared independently from the Gemini WebSocket.
-    // connect() starts this promise in parallel with microphone permission
-    // and token acquisition, so worklet compilation never blocks the socket.
-    if (!audioWorkletReadyRef.current) {
-      const workletBlob = new Blob(
-        [pcmCaptureWorkletSource],
-        { type: 'application/javascript' },
-      );
-      const workletUrl = URL.createObjectURL(workletBlob);
-      audioWorkletReadyRef.current = context.audioWorklet.addModule(workletUrl)
-        .finally(() => URL.revokeObjectURL(workletUrl));
-    }
-    await audioWorkletReadyRef.current;
+    // The worklet is prepared independently from the Gemini WebSocket and is
+    // registered only once per AudioContext (see ensureCaptureWorklet).
+    await ensureCaptureWorklet(context);
 
     const source = context.createMediaStreamSource(stream);
 
-    // Quiet-speech enhancement: AGC/noise suppression is requested from the
-    // browser, then a controlled gain + compressor lifts low-volume speech
-    // without allowing louder speech to clip the PCM stream.
+    // Speech-recognition friendly capture: the browser already applies echo
+    // cancellation, noise suppression and automatic gain control. The old
+    // extra 3x gain plus a heavy -50 dB / 6:1 compressor on top of that pumped
+    // the noise floor and distorted soft consonants ("who" heard as "how"),
+    // so the signal now stays clean at unity gain.
     const inputGain = context.createGain();
-    inputGain.gain.value = 3;
-
-    const inputCompressor = context.createDynamicsCompressor();
-    inputCompressor.threshold.value = -50;
-    inputCompressor.knee.value = 24;
-    inputCompressor.ratio.value = 6;
-    inputCompressor.attack.value = 0.003;
-    inputCompressor.release.value = 0.22;
+    inputGain.gain.value = 1;
 
     const analyser = context.createAnalyser();
     analyser.fftSize = 1024;
@@ -516,6 +547,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
         vadSpeechStartedRef.current &&
         !vadTurnEndedRef.current &&
         socketRef.current?.readyState === WebSocket.OPEN &&
+        setupDoneRef.current &&
         now - vadLastSpeechAtRef.current >= VAD_SILENCE_MS
       ) {
         // Hybrid VAD: tell Gemini the turn ended immediately. This avoids
@@ -540,13 +572,14 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
         const encodedPcm = bytesToBase64(pcmBytes);
         const activeSocket = socketRef.current;
 
-        if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
-          // Keep a short startup buffer. This lets the user speak immediately
-          // while the token/WebSocket/Live setup finishes.
+        // Audio may only be sent after the server's setupComplete frame.
+        if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN || !setupDoneRef.current) {
+          // Keep a startup buffer. This lets the user speak immediately while
+          // the token/WebSocket/Live setup finishes, without losing the first
+          // word. About one second is kept (~10 ms per chunk); anything older
+          // would only make the model process stale speech.
           pendingPcmRef.current.push(encodedPcm);
-          // Keep only a short startup window. A large backlog makes the model
-          // process stale speech after the socket becomes ready.
-          if (pendingPcmRef.current.length > 25) pendingPcmRef.current.shift();
+          if (pendingPcmRef.current.length > 100) pendingPcmRef.current.shift();
           return;
         }
 
@@ -564,8 +597,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
     };
 
     source.connect(inputGain);
-    inputGain.connect(inputCompressor);
-    inputCompressor.connect(analyser);
+    inputGain.connect(analyser);
     analyser.connect(processor);
     processor.connect(silentGain);
     silentGain.connect(context.destination);
@@ -573,7 +605,6 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
     streamRef.current = stream;
     sourceRef.current = source;
     inputGainRef.current = inputGain;
-    inputCompressorRef.current = inputCompressor;
     inputAnalyserRef.current = analyser;
     processorRef.current = processor;
     vadSpeechStartedRef.current = false;
@@ -631,17 +662,9 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
       audioContextRef.current = context;
 
       // Prepare the AudioWorklet immediately, in parallel with getUserMedia()
-      // and token acquisition. Do not await it on the WebSocket path.
-      if (!audioWorkletReadyRef.current) {
-        const workletBlob = new Blob(
-          [pcmCaptureWorkletSource],
-          { type: 'application/javascript' },
-        );
-        const workletUrl = URL.createObjectURL(workletBlob);
-        audioWorkletReadyRef.current = context.audioWorklet.addModule(workletUrl)
-          .finally(() => URL.revokeObjectURL(workletUrl));
-      }
-      const workletPromise = audioWorkletReadyRef.current;
+      // and token acquisition. Do not await it on the WebSocket path. It is
+      // registered once per AudioContext, so retries cannot re-register it.
+      const workletPromise = ensureCaptureWorklet(context);
 
       // The microphone pipeline runs fully in parallel with the token and the
       // WebSocket handshake. The socket no longer waits for the permission
@@ -672,20 +695,34 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
         }
       })();
 
-      const { token, model } = await tokenPromise;
+      const { token, model, apiVersion } = await tokenPromise;
       if (endingRef.current || attempt !== connectAttemptRef.current) return;
 
-      const socket = new WebSocket(
-        `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(token)}`
-      );
+      // The ephemeral token is only valid on the API version that issued it.
+      const socket = new WebSocket(buildLiveSocketUrl(token, apiVersion));
       socket.binaryType = 'arraybuffer';
       socketRef.current = socket;
+      let opened = false;
+      let setupDone = false;
+      setupDoneRef.current = false;
 
       socket.onopen = () => {
         if (endingRef.current || attempt !== connectAttemptRef.current) {
           try { socket.close(1000, 'Live Talk ended'); } catch {}
           return;
         }
+        opened = true;
+        reportLiveSocketSuccess(apiVersion);
+
+        // Optional recognition hints. If the server ever rejects them
+        // (close code 1007 before setupComplete) the connection is retried
+        // automatically with the plain setup below.
+        const transcriptionLocale = TRANSCRIPTION_LOCALES[appLanguage];
+        const inputTranscription: Record<string, unknown> =
+          !useBasicSetupRef.current && transcriptionLocale
+            ? { languageCodes: [transcriptionLocale] }
+            : {};
+
         socket.send(JSON.stringify({
           setup: {
             model: `models/${model || LIVE_MODEL}`,
@@ -707,14 +744,17 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
                   (assistantNameContext() ? `\n\n${assistantNameContext()}` : ''),
               }],
             },
-            inputAudioTranscription: {},
+            inputAudioTranscription: inputTranscription,
             outputAudioTranscription: {},
             sessionResumption: {},
             realtimeInputConfig: {
               automaticActivityDetection: {
                 disabled: false,
-                prefixPaddingMs: 40,
-                silenceDurationMs: 300,
+                // 40 ms of lead-in cut off the first sound of an utterance, so
+                // "Who are you" arrived as "ho are you" / "How are you". Keep
+                // ~250 ms before detected speech so the whole first word is sent.
+                prefixPaddingMs: 250,
+                silenceDurationMs: 500,
                 startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH',
                 endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
               },
@@ -731,6 +771,9 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
             : await decodeLiveMessage(event.data);
 
           if (message.setupComplete) {
+            setupDone = true;
+            setupDoneRef.current = true;
+            autoRetryRef.current = 0;
             setConnected(true);
             setStatus('Listening');
             vadSpeechStartedRef.current = false;
@@ -838,20 +881,43 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
       };
 
       socket.onerror = () => {
+        // A close event always follows and decides whether to retry or report.
         if (endingRef.current || attempt !== connectAttemptRef.current) return;
-        setConnected(false);
-        setError('Live Talk connection failed. Check the Gemini API key and try again.');
-        setStatus('Connection error');
+        console.warn('Live Talk socket error', { apiVersion, opened });
       };
 
       socket.onclose = event => {
         if (socketRef.current === socket) socketRef.current = null;
+        setupDoneRef.current = false;
         cleanupAudioInput();
         setConnected(false);
-        if (!endingRef.current && event.code !== 1000 && attempt === connectAttemptRef.current) {
-          setError(`Live Talk disconnected (${event.code}).`);
-          setStatus('Disconnected');
+
+        if (endingRef.current || event.code === 1000 || attempt !== connectAttemptRef.current) return;
+
+        // Self-healing, at most twice per start:
+        //  - never opened (browsers report a rejected handshake as 1006):
+        //    discard the token and retry on the other Live API version;
+        //  - rejected setup (1007): retry without the optional hints.
+        if (!setupDone && autoRetryRef.current < 2) {
+          if (!opened) {
+            reportLiveSocketFailure(apiVersion, token);
+          } else if (event.code === 1007 && !useBasicSetupRef.current) {
+            useBasicSetupRef.current = true;
+          } else {
+            autoRetryRef.current = 2;
+          }
+
+          if (autoRetryRef.current < 2) {
+            autoRetryRef.current += 1;
+            setStatus('Reconnecting');
+            void connectRef.current?.();
+            return;
+          }
         }
+
+        const reason = event.reason ? `: ${event.reason}` : '';
+        setError(`Live Talk disconnected (${event.code})${reason}.`);
+        setStatus('Disconnected');
       };
     } catch (connectError) {
       if (attempt !== connectAttemptRef.current) return;
@@ -864,6 +930,8 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
     }
   }, [cleanupAudioInput, closeSocket, persistCompletedTurn, playPcm24k, stopAudioPlayback, voiceName, appLanguage]);
 
+  connectRef.current = connect;
+
   useEffect(() => {
     if (!open) return;
     setCaption({ role: 'user', text: '' });
@@ -874,6 +942,8 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
     setListening(true);
     setStatus('Listening');
     endingRef.current = false;
+    autoRetryRef.current = 0;
+    useBasicSetupRef.current = false;
     userTurnRef.current = '';
     assistantTurnRef.current = '';
     liveSessionIdRef.current = null;
@@ -1007,7 +1077,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
           const v = (buffer[i] - 128) / 128;
           sum += v * v;
         }
-        level = Math.min(1, Math.sqrt(sum / buffer.length) * 6);
+        level = Math.min(1, Math.sqrt(sum / buffer.length) * 10);
       }
       smooth += (level - smooth) * 0.25;
       levelRef.current?.style.setProperty('--lvl', smooth.toFixed(3));
@@ -1018,6 +1088,8 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
   }, [open]);
 
   const retry = () => {
+    autoRetryRef.current = 0;
+    useBasicSetupRef.current = false;
     cleanupAudioInput();
     closeSocket();
     void connect();
@@ -1033,9 +1105,11 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
       ? 'Speaking'
       : thinking
         ? 'Thinking'
-        : listening
-          ? connected || status === 'Listening' ? 'Listening' : status
-          : 'Microphone paused';
+        : status === 'Reconnecting'
+          ? 'Reconnecting'
+          : listening
+            ? connected || status === 'Listening' ? 'Listening' : status
+            : 'Microphone paused';
 
   const hint = hasError
     ? ''
