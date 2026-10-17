@@ -46,7 +46,7 @@ const FALLBACK_THEME: VoiceTheme = {
 export const getVoiceTheme = (voiceName: string): VoiceTheme =>
   VOICE_THEMES[voiceName] ?? FALLBACK_THEME;
 
-/** Palette for <FoggyOrb /> built from a voice's theme colors. */
+/** Palette for <VoiceRing /> built from a voice's theme colors. */
 export const getVoiceOrbPalette = (voiceName: string) => {
   const theme = getVoiceTheme(voiceName);
   return {
