@@ -44,6 +44,79 @@ public class ChatHistoryService {
         return chatSessionRepository.save(session);
     }
 
+    private static final int MAX_IMPORT_MESSAGES = 2000;
+    private static final int MAX_IMPORT_CHARS = 200_000;
+
+    /**
+     * Creates a new chat for the user from an exported conversation. Only the
+     * user and assistant roles are accepted; sizes are capped.
+     */
+    @Transactional
+    public ChatSession importConversation(User user, String title, List<Map<String, Object>> rawMessages) {
+        if (user == null || user.getId() == null) {
+            throw new AIServiceException("User is required to import a chat");
+        }
+        if (rawMessages == null || rawMessages.isEmpty()) {
+            throw new AIServiceException("This file has no messages to import");
+        }
+
+        String cleanTitle = title == null || title.isBlank() ? "Imported chat" : title.trim();
+        if (cleanTitle.length() > 120) {
+            cleanTitle = cleanTitle.substring(0, 120);
+        }
+
+        ChatSession session = createNewSession(user, cleanTitle);
+        LocalDateTime fallback = LocalDateTime.now();
+        int count = 0;
+
+        for (Map<String, Object> raw : rawMessages) {
+            if (count >= MAX_IMPORT_MESSAGES) {
+                break;
+            }
+            Object roleValue = raw.get("role");
+            String role = roleValue == null ? "" : roleValue.toString().trim().toLowerCase();
+            if (!role.equals("user") && !role.equals("assistant")) {
+                continue;
+            }
+            Object contentValue = raw.get("content");
+            String content = contentValue == null ? "" : contentValue.toString();
+            if (content.isBlank()) {
+                continue;
+            }
+            if (content.length() > MAX_IMPORT_CHARS) {
+                content = content.substring(0, MAX_IMPORT_CHARS);
+            }
+
+            LocalDateTime when = fallback.plusSeconds(count);
+            Object timestampValue = raw.get("timestamp");
+            if (timestampValue != null) {
+                try {
+                    String text = timestampValue.toString();
+                    when = text.matches(".*(Z|[+-]\\d{2}:?\\d{2})$")
+                            ? java.time.OffsetDateTime.parse(text).atZoneSameInstant(java.time.ZoneId.systemDefault()).toLocalDateTime()
+                            : LocalDateTime.parse(text);
+                } catch (Exception ignored) {
+                    // keep the fallback time
+                }
+            }
+
+            ChatMessage message = new ChatMessage();
+            message.setSessionId(session.getId());
+            message.setRole(role);
+            message.setContent(content);
+            message.setTimestamp(when);
+            chatMessageRepository.save(message);
+            count++;
+        }
+
+        if (count == 0) {
+            throw new AIServiceException("This file has no messages to import");
+        }
+
+        session.setUpdatedAt(LocalDateTime.now());
+        return chatSessionRepository.save(session);
+    }
+
     @Transactional(readOnly = true)
     public List<ChatSession> getUserSessions(User user) {
         if (user == null || user.getId() == null) {
