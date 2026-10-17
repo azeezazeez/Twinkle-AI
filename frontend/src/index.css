@@ -1602,9 +1602,9 @@ body {
 }
 @media (min-width: 1024px) {
   .twinkle-composer-position {
-    left: var(--desktop-sidebar-offset, 60px) !important;
+    left: var(--desktop-sidebar-offset, 0px) !important;
     right: 0 !important;
-    width: calc(100% - var(--desktop-sidebar-offset, 60px)) !important;
+    width: calc(100% - var(--desktop-sidebar-offset, 0px)) !important;
   }
 }
 
@@ -1689,7 +1689,7 @@ body {
 }
 
 /* ---- Sidebar surface (Claude's warm sidebar tone) ---- */
-.twinkle-sidebar { background-color: #F5F4ED !important; }
+.twinkle-sidebar { background-color: #FAF9F5 !important; }
 .dark .twinkle-sidebar { background-color: #1F1E1D !important; }
 .twinkle-sidebar .twinkle-newchat-box { width: 20px !important; height: 20px !important; flex: 0 0 20px !important; }
 .twinkle-sidebar .twinkle-newchat-icon { width: 18px !important; height: 18px !important; }
