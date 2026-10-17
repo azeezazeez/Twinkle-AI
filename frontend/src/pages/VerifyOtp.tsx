@@ -1,3 +1,10 @@
+/**
+ * Twinkle AI — OTP Verification
+ *
+ * Flow:
+ * Email → OTP → Chat
+ */
+
 import React, {
   useEffect,
   useRef,
@@ -17,6 +24,7 @@ import {
 } from 'lucide-react';
 
 import { authApi } from '../lib/api';
+import StormLogo from '../components/StormLogo';
 
 interface Props {
   onLogin: (user: any) => void;
@@ -405,6 +413,8 @@ export default function VerifyOtp({
             pt-2
           "
         >
+          <StormLogo className="mx-auto mb-5 h-12 w-12" />
+
           {/* TITLE */}
 
           <h1
