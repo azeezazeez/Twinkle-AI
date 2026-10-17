@@ -5048,7 +5048,7 @@ if (isBlankDraft) {
 
               <div
                 ref={modelPickerRef}
-                className="twinkle-composer-row relative z-[200] flex min-w-0 items-center"
+                className={`twinkle-composer-row relative z-[200] flex min-w-0 items-center${messages.length > 0 ? ' twinkle-composer-inline' : ''}`}
               >
                 {/* Hidden file input */}
                 <input
@@ -5384,10 +5384,10 @@ if (isBlankDraft) {
                           aria-hidden="true"
                         >
                           <path
-                            d="M4 8v8M9.3 3.5v17M14.7 6v12M20 8v8"
+                            d="M5 10v4M9 7v10M13 3.5v17M17 8v8M21 10.5v3"
                             fill="none"
                             stroke="currentColor"
-                            strokeWidth="2.5"
+                            strokeWidth="2"
                             strokeLinecap="round"
                           />
                         </svg>
@@ -5400,7 +5400,7 @@ if (isBlankDraft) {
                         disabled={!input.trim() && (!Array.isArray(filePreviews) || filePreviews.length === 0) && !isTyping}
                         aria-label={isTyping ? 'Stop response' : 'Send message'}
                         data-tooltip={isTyping ? 'Stop response' : 'Send message'}
-                        className={`twinkle-tooltip-trigger twinkle-composer-submit relative z-[30] flex h-7 w-7 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all duration-200 sm:h-7 sm:w-7 ${isTyping ? 'border-transparent text-white' : 'border-transparent text-white'}`}
+                        className={`twinkle-tooltip-trigger twinkle-composer-submit relative z-[30] flex h-7 w-7 shrink-0 items-center justify-center border border-transparent text-white shadow-sm transition-all duration-200 sm:h-7 sm:w-7 ${isTyping ? 'rounded-full' : 'rounded-[9px]'}`}
                         style={{
                           // Match the exact Live Talk modal button background.
                           // Do not use the settings swatch/solid color here.
@@ -5409,20 +5409,21 @@ if (isBlankDraft) {
                         }}
                       >
                         {isTyping ? (
-                          <span className="relative flex h-full w-full items-center justify-center">
-                            <span className="h-3.5 w-3.5 rounded-[3px] bg-white shadow-sm" />
-                          </span>
+                          <svg viewBox="0 0 24 24" className="h-[20px] w-[20px]" aria-hidden="true">
+                            <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" strokeWidth="2" />
+                            <circle cx="12" cy="12" r="3.8" fill="currentColor" />
+                          </svg>
                         ) : (
                           <svg
                             viewBox="0 0 24 24"
-                            className="h-[16px] w-[16px]"
+                            className="h-[18px] w-[18px]"
                             aria-hidden="true"
                           >
                             <path
-                              d="M12 21V4M6.25 9.75 12 4l5.75 5.75"
+                              d="M12 19V5M5.5 11.5 12 5l6.5 6.5"
                               fill="none"
                               stroke="currentColor"
-                              strokeWidth="2.1"
+                              strokeWidth="2.2"
                               strokeLinecap="round"
                               strokeLinejoin="round"
                             />
