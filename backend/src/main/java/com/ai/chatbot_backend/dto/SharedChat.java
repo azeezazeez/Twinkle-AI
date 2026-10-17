@@ -33,6 +33,10 @@ public class SharedChat {
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
+    /** Optional expiry. Null means the link never expires. */
+    @Column(name = "expires_at")
+    private LocalDateTime expiresAt;
+
     @Column(name = "revoked", nullable = false)
     private boolean revoked = false;
 }
