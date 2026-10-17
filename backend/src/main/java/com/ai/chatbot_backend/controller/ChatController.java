@@ -1722,6 +1722,7 @@ public class ChatController {
     @PostMapping("/session/{sessionId}/share")
     public ResponseEntity<Map<String, Object>> shareSession(
             @PathVariable Long sessionId,
+            @RequestParam(value = "expiresInDays", required = false) Integer expiresInDays,
             HttpSession session
     ) {
 
@@ -1734,7 +1735,7 @@ public class ChatController {
         }
 
         try {
-            SharedChat sharedChat = chatShareService.createOrGetShare(sessionId, currentUser);
+            SharedChat sharedChat = chatShareService.createOrGetShare(sessionId, currentUser, expiresInDays);
             response.put("success", true);
             response.put("shareToken", sharedChat.getShareToken());
             return ResponseEntity.ok(response);
@@ -1751,6 +1752,114 @@ public class ChatController {
     }
 
     // Public endpoint: authentication is intentionally not required.
+    // =========================================================
+    // IMPORT CHAT (from a Twinkle export file)
+    // =========================================================
+
+    @PostMapping("/import")
+    @SuppressWarnings("unchecked")
+    public ResponseEntity<Map<String, Object>> importChat(
+            @RequestBody Map<String, Object> request,
+            HttpSession session
+    ) {
+        Map<String, Object> response = new HashMap<>();
+        User currentUser = getCurrentUser(session);
+        if (currentUser == null) {
+            response.put("error", "User not logged in");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+        try {
+            Object title = request.get("title");
+            Object messages = request.get("messages");
+            if (!(messages instanceof List)) {
+                response.put("success", false);
+                response.put("error", "This file is not a valid chat export");
+                return ResponseEntity.badRequest().body(response);
+            }
+            ChatSession imported = chatHistoryService.importConversation(
+                    currentUser,
+                    title == null ? null : title.toString(),
+                    (List<Map<String, Object>>) messages
+            );
+            response.put("success", true);
+            response.put("sessionId", imported.getId());
+            return ResponseEntity.ok(response);
+        } catch (AIServiceException e) {
+            response.put("success", false);
+            response.put("error", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        } catch (Exception e) {
+            log.error("Error importing chat: {}", e.getMessage(), e);
+            response.put("success", false);
+            response.put("error", "Could not import this chat");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
+    }
+
+    @GetMapping("/session/{sessionId}/shares")
+    public ResponseEntity<Map<String, Object>> listSessionShares(
+            @PathVariable Long sessionId,
+            HttpSession session
+    ) {
+        Map<String, Object> response = new HashMap<>();
+        User currentUser = getCurrentUser(session);
+        if (currentUser == null) {
+            response.put("error", "User not logged in");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+        try {
+            List<Map<String, Object>> links = new ArrayList<>();
+            for (SharedChat share : chatShareService.listShares(sessionId, currentUser)) {
+                Map<String, Object> item = new HashMap<>();
+                item.put("id", share.getId());
+                item.put("shareToken", share.getShareToken());
+                item.put("createdAt", share.getCreatedAt() == null ? null : share.getCreatedAt().toString());
+                item.put("expiresAt", share.getExpiresAt() == null ? null : share.getExpiresAt().toString());
+                links.add(item);
+            }
+            response.put("success", true);
+            response.put("links", links);
+            return ResponseEntity.ok(response);
+        } catch (AIServiceException e) {
+            response.put("success", false);
+            response.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+        } catch (Exception e) {
+            log.error("Error listing share links for session {}: {}", sessionId, e.getMessage(), e);
+            response.put("success", false);
+            response.put("error", "Could not load share links");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
+    }
+
+    @DeleteMapping("/session/{sessionId}/share/{shareId}")
+    public ResponseEntity<Map<String, Object>> revokeSessionShare(
+            @PathVariable Long sessionId,
+            @PathVariable Long shareId,
+            HttpSession session
+    ) {
+        Map<String, Object> response = new HashMap<>();
+        User currentUser = getCurrentUser(session);
+        if (currentUser == null) {
+            response.put("error", "User not logged in");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+        try {
+            chatShareService.revokeShare(sessionId, shareId, currentUser);
+            response.put("success", true);
+            return ResponseEntity.ok(response);
+        } catch (AIServiceException e) {
+            response.put("success", false);
+            response.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+        } catch (Exception e) {
+            log.error("Error revoking share link {} for session {}: {}", shareId, sessionId, e.getMessage(), e);
+            response.put("success", false);
+            response.put("error", "Could not remove the link");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
+    }
+
     @GetMapping("/shared/{shareToken}")
     public ResponseEntity<?> getSharedSession(
             @PathVariable String shareToken
