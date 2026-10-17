@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://twinkle-ai-i7td.onrender.com/api/:path*"
+      "destination": "https://twinkle-ai-5doo.onrender.com/api/:path*"
     },
     {
       "source": "/(.*)",
