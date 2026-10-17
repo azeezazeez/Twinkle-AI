@@ -214,7 +214,7 @@ function MenuItem({
       type="button"
       role="menuitem"
       onClick={onClick}
-      className={`flex ${roomy ? 'h-11' : 'h-9'} w-full items-center gap-3 rounded-lg px-3 text-left text-[14px] leading-none transition-colors focus-visible:outline-none ${
+      className={`flex ${roomy ? 'min-h-[48px]' : 'h-9'} w-full items-center gap-3.5 rounded-lg px-3.5 py-2 text-left text-[14px] leading-6 transition-colors focus-visible:outline-none ${
         danger
           ? 'text-[#B53333] hover:bg-[#B53333]/10 focus-visible:bg-[#B53333]/10 dark:text-[#F2877E] dark:hover:bg-[#F2877E]/10'
           : 'text-zinc-800 hover:bg-zinc-100 focus-visible:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:bg-zinc-800'
@@ -231,7 +231,7 @@ function MenuItem({
 }
 
 function MenuDivider({ roomy = false }: { roomy?: boolean }) {
-  return <div role="separator" className={`mx-3 ${roomy ? 'my-2' : 'my-1'} h-px bg-zinc-200 dark:bg-zinc-700/70`} />;
+  return <div role="separator" className={`mx-3 ${roomy ? 'my-2.5' : 'my-1'} h-px bg-zinc-200 dark:bg-zinc-700/70`} />;
 }
 
 // ─── ChatContextMenu (the "⋮" dropdown on a chat row) ─────────────────────────
@@ -1015,9 +1015,9 @@ function AccountMenu({
             transition={{ duration: 0.12, ease: 'easeOut' }}
             role="menu"
             aria-label="Account"
-            className={`absolute bottom-[calc(100%+8px)] left-0 right-0 z-[60] max-h-[calc(100dvh-96px)] origin-bottom overflow-y-auto overscroll-contain ${MENU_SURFACE.replace('p-1.5', 'p-2.5')}`}
+            className={`absolute bottom-[calc(100%+8px)] left-0 right-0 z-[60] max-h-[calc(100dvh-96px)] origin-bottom overflow-y-auto overscroll-contain ${MENU_SURFACE.replace('p-1.5', 'p-3')} flex flex-col gap-1`}
           >
-            <div className="truncate px-3 pb-3 pt-2 text-[13px] font-medium leading-tight text-zinc-500 dark:text-zinc-400">
+            <div className="truncate px-3.5 pb-4 pt-3 text-[13px] font-medium leading-6 text-zinc-500 dark:text-zinc-400">
               {user.email || user.name || user.username}
             </div>
 
