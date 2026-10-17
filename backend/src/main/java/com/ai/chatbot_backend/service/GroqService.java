@@ -286,9 +286,10 @@ public class GroqService {
                 : requestedLanguage.trim().toLowerCase(java.util.Locale.ROOT);
 
         if (code.isEmpty() || "auto".equals(code)) {
-            return "Detect the language of the user's latest message and respond in that same language. "
-                    + "If the user changes language, immediately follow the new language. "
-                    + "Do not default to English when the user is speaking another language. ";
+            return "Respond in the language of the user's latest message, and only that message. "
+                    + "If the latest message is written in English, answer in English, even if earlier messages, the conversation history or the user's name are in another language. "
+                    + "Never switch to a different language on your own. "
+                    + "If the user explicitly asks for another language, or writes in a new language, follow that. ";
         }
 
         String name = switch (code) {
