@@ -5,7 +5,7 @@ import { createPortal, flushSync } from 'react-dom';
 import { User, Session, Message } from '../types';
 import Sidebar from '../components/Sidebar'; 
 import { chatApi, authApi, createLiveToken, startLiveTokenKeepWarm, warmLiveToken } from '../lib/api'; 
-import { motion, AnimatePresence } from 'motion/react'; 
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react'; 
 import StormLogo from '../components/StormLogo';
 import ConfirmationModal from '../components/ConfirmationModal';
 import ShareChatModal from '../components/ShareChatModal';
@@ -400,6 +400,7 @@ You can ask me questions, give me a file or image to analyze, ask for help with 
 
 const IMAGE_MODEL_ID = '@cf/black-forest-labs/flux-1-schnell';
 const IMAGE_CHAT_PATTERN = /^\s*(hi+|hello+|hey+|hii+|yo|hola|namaste|sup|howdy|good\s+(morning|afternoon|evening|night)|how\s+are\s+you|who\s+are\s+you|what\s+can\s+you\s+do|what.?s\s+up|thanks?|thank\s+you|ok(ay)?|bye|help|test|testing)\b[\s\p{P}]*(there|twinkle|buddy|friend|bro)?[\s\p{P}]*$/iu;
+const IMAGE_GENERATION_INTENT = /^\s*(?:(?:please|can you|could you|would you|i (?:want|need)(?: you to)?|let'?s|just)\s+)*(?:(?:generate|create|make|draw|paint|design|render|produce|illustrate|sketch)\b[^.?!\n]{0,40}?\b(?:image|images|picture|pictures|photo|photos|illustration|logo|wallpaper|portrait|poster|artwork|avatar|drawing|painting)\b|(?:draw|paint|sketch|illustrate)\s+(?:me\s+|a\s+|an\s+|the\s+)\w+)/i;
 const IMAGE_WORDS_PATTERN = /\b(image|picture|photo|draw|paint|sketch|illustration|logo|wallpaper|render|portrait|poster|generate|create|make)\b/i;
 
 /** Mirrors the backend: greetings/small talk get a text reply, everything else an image. */
@@ -420,89 +421,75 @@ function shouldShowImageProgress(
 
 /**
  * "Creating your image" card. The image service returns the finished picture in
- * one piece and reports no real progress, so the percentage is an estimate: it
- * climbs quickly, slows down as it nears the end and never shows 100% until the
- * image actually arrives (the card is then replaced by the image).
+ * one piece and reports no real progress, so no percentage is shown: an
+ * indeterminate progress bar and the real elapsed time are used instead.
  */
 function ImageGenerationProgress({ prompt }: { prompt: string }) {
-  const [percent, setPercent] = useState(0);
+  const [seconds, setSeconds] = useState(0);
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     const startedAt = performance.now();
-    const timer = window.setInterval(() => {
-      const seconds = (performance.now() - startedAt) / 1000;
-      setPercent(Math.min(97, Math.round(97 * (1 - Math.exp(-seconds / 4)))));
-    }, 150);
+    const timer = window.setInterval(() => setSeconds(Math.floor((performance.now() - startedAt) / 1000)), 500);
     return () => window.clearInterval(timer);
   }, []);
-
-  const stage =
-    percent < 18 ? 'Understanding your prompt'
-    : percent < 55 ? 'Composing the scene'
-    : percent < 85 ? 'Adding details and color'
-    : 'Applying finishing touches';
 
   return (
     <motion.div
       key="twinkle-image-generation"
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -4 }}
-      transition={{ duration: 0.22, ease: 'easeOut' }}
+      exit={{ opacity: 0, scale: 0.98 }}
+      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
       role="status"
       aria-live="polite"
-      aria-label={`Creating your image, ${percent}% complete`}
-      className="my-1 w-[min(100%,340px)] overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-[0_4px_16px_rgba(0,0,0,0.05)] dark:border-zinc-700 dark:bg-zinc-900"
+      aria-label="Creating your image"
+      className="my-2 w-[min(100%,360px)] overflow-hidden rounded-3xl border border-zinc-200/80 bg-white shadow-[0_8px_30px_rgba(0,0,0,0.06)] dark:border-zinc-700/70 dark:bg-zinc-900"
     >
-      <div className="relative aspect-square w-full overflow-hidden">
+      <div className="relative aspect-square w-full overflow-hidden bg-zinc-100 dark:bg-zinc-800">
         <motion.div
-          className="absolute inset-0"
+          className="absolute -inset-[30%] blur-3xl"
           style={{
             backgroundImage:
-              'linear-gradient(115deg, rgba(217,119,87,0.28), rgba(167,139,250,0.30), rgba(96,165,250,0.28), rgba(217,119,87,0.28))',
-            backgroundSize: '300% 300%',
+              'radial-gradient(40% 40% at 30% 35%, rgba(217,119,87,0.55), transparent 70%), radial-gradient(40% 40% at 70% 60%, rgba(139,124,246,0.50), transparent 70%), radial-gradient(35% 35% at 45% 80%, rgba(96,165,250,0.45), transparent 70%)',
           }}
-          animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
-          transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
+          animate={reduceMotion ? undefined : { rotate: [0, 12, -8, 0], scale: [1, 1.08, 1] }}
+          transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
         />
-        <motion.div
-          className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/40 to-transparent dark:via-white/10"
-          initial={{ x: '-120%' }}
-          animate={{ x: '420%' }}
-          transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
-        />
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+        {!reduceMotion && (
           <motion.div
-            animate={{ scale: [1, 1.12, 1], rotate: [0, 8, 0] }}
-            transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+            className="absolute inset-y-0 w-1/2 bg-gradient-to-r from-transparent via-white/35 to-transparent dark:via-white/10"
+            initial={{ x: '-120%' }}
+            animate={{ x: '260%' }}
+            transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut', repeatDelay: 0.4 }}
+          />
+        )}
+        <div className="absolute inset-0 flex items-center justify-center">
+          <motion.div
+            className="flex h-14 w-14 items-center justify-center rounded-full bg-white/70 shadow-lg backdrop-blur-md dark:bg-zinc-900/60"
+            animate={reduceMotion ? undefined : { scale: [1, 1.08, 1] }}
+            transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
           >
-            <Sparkles className="h-9 w-9 text-[#D97757]" strokeWidth={1.6} />
+            <Sparkles className="h-6 w-6 text-[#D97757]" strokeWidth={1.6} />
           </motion.div>
-          <span className="text-[34px] font-semibold tabular-nums leading-none tracking-tight text-zinc-800 dark:text-zinc-100">
-            {percent}%
-          </span>
         </div>
       </div>
 
-      <div className="px-4 pb-4 pt-3">
-        <div className="flex items-center justify-between gap-3 text-[14px]">
-          <span className="font-medium text-zinc-800 dark:text-zinc-100">Creating your image…</span>
-          <span className="shrink-0 text-[12px] text-zinc-500 dark:text-zinc-400">{stage}</span>
+      <div className="px-4 pb-4 pt-3.5">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[14px] font-medium text-zinc-900 dark:text-zinc-100">Creating your image</span>
+          <span className="shrink-0 text-[12px] tabular-nums text-zinc-400 dark:text-zinc-500">{seconds}s</span>
         </div>
-        <div
-          className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={percent}
-        >
-          <div
-            className="h-full rounded-full bg-[#D97757] transition-[width] duration-200 ease-out"
-            style={{ width: `${percent}%` }}
+        <div className="relative mt-2.5 h-1 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700" role="progressbar" aria-label="Generating">
+          <motion.div
+            className="absolute inset-y-0 w-2/5 rounded-full bg-[#D97757]"
+            initial={{ x: '-100%' }}
+            animate={{ x: '250%' }}
+            transition={{ duration: reduceMotion ? 0 : 1.4, repeat: Infinity, ease: 'easeInOut' }}
           />
         </div>
         {prompt && (
-          <p className="mt-2.5 line-clamp-2 text-[12px] leading-4 text-zinc-500 dark:text-zinc-400">{prompt}</p>
+          <p className="mt-3 line-clamp-2 text-[12px] leading-[1.35] text-zinc-500 dark:text-zinc-400">{prompt}</p>
         )}
       </div>
     </motion.div>
@@ -546,6 +533,7 @@ async function downloadGeneratedImage(src: string) {
 /** Generated/response image with click-to-preview (full screen) and download. */
 function GeneratedImage({ src, alt }: { src?: string; alt?: string }) {
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     if (!previewOpen) return;
@@ -565,10 +553,16 @@ function GeneratedImage({ src, alt }: { src?: string; alt?: string }) {
         <img
           src={src}
           alt={label}
-          loading="lazy"
           decoding="async"
+          onLoad={() => setLoaded(true)}
           onClick={() => setPreviewOpen(true)}
-          style={{ cursor: 'zoom-in' }}
+          style={{
+            cursor: 'zoom-in',
+            opacity: loaded ? 1 : 0,
+            filter: loaded ? 'none' : 'blur(14px)',
+            transform: loaded ? 'none' : 'scale(1.02)',
+            transition: 'opacity .5s ease, filter .6s ease, transform .6s ease',
+          }}
         />
         <div className="flex items-center gap-2 border-t border-zinc-200 px-2.5 py-2 dark:border-zinc-700">
           <button
@@ -588,15 +582,16 @@ function GeneratedImage({ src, alt }: { src?: string; alt?: string }) {
         </div>
       </figure>
 
-      {previewOpen && (
+      {previewOpen && typeof document !== 'undefined' && createPortal(
         <div
           role="dialog"
           aria-modal="true"
           aria-label="Image preview"
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4"
+          style={{ zIndex: 2147483000, paddingTop: 'max(1rem, env(safe-area-inset-top))', paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+          className="fixed inset-0 flex items-center justify-center bg-black/85 px-4 backdrop-blur-sm"
           onClick={() => setPreviewOpen(false)}
         >
-          <div className="absolute right-4 top-4 flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
+          <div style={{ top: 'max(1rem, env(safe-area-inset-top))' }} className="absolute right-4 flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
             <button
               type="button"
               onClick={() => void downloadGeneratedImage(src)}
@@ -618,9 +613,10 @@ function GeneratedImage({ src, alt }: { src?: string; alt?: string }) {
             src={src}
             alt={label}
             onClick={(event) => event.stopPropagation()}
-            className="max-h-[88vh] max-w-[94vw] rounded-lg object-contain shadow-2xl"
+            className="max-h-[calc(100dvh-7rem)] max-w-[94vw] rounded-xl object-contain shadow-2xl"
           />
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
@@ -1217,50 +1213,20 @@ const getNextEmptyChatPrompt = (current: string): string => {
 };
 
 const EMPTY_CHAT_GREETINGS = [
-  'Good to see you, {name} 👋',
-  'Welcome back, {name} ✨',
-  'Hey {name}, ready to dive in? 🚀',
-  'Nice to see you 😊',
-  'Great to have you here 🌟',
-  'Hello there 👋',
-  'What would you like to explore? 🔍',
-  'What can we work on today? 💡',
-  'Ready when you are ⚡',
-  'Let’s make something great today 🎨',
-  'What’s on your mind? 💡',
-  'Where should we start? 🧭',
-  'Let’s get started 🚀',
-  'Have something in mind? 💡',
-  'What are we building today? 🛠️',
-  'What would you like to accomplish? 🎯',
-  'Let’s figure it out together 🤝',
+  'Hello, {name}',
+  'Welcome back, {name}',
+  'Hi, {name}',
+  'Hello there',
+  'Ready when you are',
+  'What’s on your mind?',
+  'How can I help?',
+  'Where should we start?',
 ];
 
 const TIME_BASED_CHAT_GREETINGS = {
-  morning: [
-    'Good morning, {name} ☀️',
-    'Good morning ☀️',
-    'A fresh morning, a fresh start 🌅',
-    'Good morning. What shall we work on? ☕',
-    'Hope your morning is going well 🌼',
-    'Ready to make the most of your morning? 🚀',
-  ],
-  afternoon: [
-    'Good afternoon, {name} 🌤️',
-    'Good afternoon 🌤️',
-    'Good afternoon. What can we work on? 💡',
-    'Hope your afternoon is going well 😊',
-    'Ready for a productive afternoon? ⚡',
-    'What would you like to explore this afternoon? 🔍',
-  ],
-  evening: [
-    'Good evening, {name} 🌙',
-    'Good evening 🌆',
-    'Good evening. What shall we work on? ✨',
-    'Hope your evening is going well 🌙',
-    'Ready to get something done this evening? 💪',
-    'What would you like to explore this evening? 🔭',
-  ],
+  morning: ['Good morning, {name}', 'Good morning'],
+  afternoon: ['Good afternoon, {name}', 'Good afternoon'],
+  evening: ['Good evening, {name}', 'Good evening'],
 };
 
 const getTimeOfDay = (): 'morning' | 'afternoon' | 'evening' => {
@@ -1271,43 +1237,13 @@ const getTimeOfDay = (): 'morning' | 'afternoon' | 'evening' => {
   return 'evening';
 };
 
-// Each model greets in its own voice.
+// Each model greets in its own short voice.
 const MODEL_GREETINGS: Record<string, string[]> = {
-  // Spark: warm and chatty
-  '@cf/openai/gpt-oss-20b': [
-    'Hey {name}! What are we up to today? 😊',
-    'Hi there! Got something on your mind? 💬',
-    'Hey {name}, good to see you! What can I help with? 🌟',
-    'Hello! Ask me anything, big or small 😄',
-  ],
-  // Flow: short and snappy
-  '@cf/meta/llama-3.1-8b-instruct-fp8-fast': [
-    'Hi {name}. Go ahead, I’m listening ⚡',
-    'Ready when you are.',
-    'Quick question? Fire away ⚡',
-    'Hey {name}. What’s up?',
-  ],
-  // Prime: composed and professional
-  '@cf/openai/gpt-oss-120b': [
-    'Welcome, {name}. What would you like to analyze or build?',
-    'Good to see you, {name}. Which problem shall we solve?',
-    'Ready for the hard questions. Where shall we begin?',
-    'Hello. Share the task, and we’ll work through it step by step.',
-  ],
-  // Canvas: imaginative
-  '@cf/black-forest-labs/flux-1-schnell': [
-    'Hello {name}, what shall we picture today? 🎨',
-    'Describe a scene and I’ll paint it ✨',
-    'A blank canvas awaits, {name}. What do you imagine? 🖌️',
-    'Dream it up, then let’s see it come to life 🌈',
-  ],
-  // Sight: curious and observant
-  'gemini-3.8-flash': [
-    'Show me something, {name} 👀',
-    'Drop in an image, a file or a question. I’ll take a look 🔍',
-    'Hi {name}! What should we take a closer look at? 👁️',
-    'Got a picture or document? Let’s look at it together 📎',
-  ],
+  '@cf/openai/gpt-oss-20b': ['Hi, {name}', 'What’s on your mind?', 'Ask me anything'],
+  '@cf/meta/llama-3.1-8b-instruct-fp8-fast': ['Ready when you are', 'Hi, {name}', 'Go ahead'],
+  '@cf/openai/gpt-oss-120b': ['Welcome, {name}', 'What shall we solve?', 'Where shall we begin?'],
+  '@cf/black-forest-labs/flux-1-schnell': ['What shall we create?', 'Describe an image', 'Hello, {name}'],
+  'gemini-3.8-flash': ['Show me something', 'Share a file or image', 'Hi, {name}'],
 };
 
 const getRandomChatGreeting = (userName = '', previousGreeting = '', modelId = ''): string => {
@@ -1325,16 +1261,14 @@ const getRandomChatGreeting = (userName = '', previousGreeting = '', modelId = '
 
   const pool = (MODEL_GREETINGS[modelId] ?? [
     ...TIME_BASED_CHAT_GREETINGS[getTimeOfDay()],
-    ...TIME_BASED_CHAT_GREETINGS[getTimeOfDay()], // weight the time-aware greetings
     ...EMPTY_CHAT_GREETINGS,
-    ...EMPTY_CHAT_PROMPTS,
   ])
     .map(fill)
     .filter((greeting): greeting is string => Boolean(greeting));
 
   const choices = [...new Set(pool)].filter(greeting => greeting !== previousGreeting);
   const available = choices.length ? choices : [...new Set(pool)];
-  return available[Math.floor(Math.random() * available.length)] || 'What’s on your mind? 💡';
+  return available[Math.floor(Math.random() * available.length)] || 'What’s on your mind?';
 };
 
 const LongTailArrowDown = ({ className = '' }: { className?: string }) => (
@@ -3221,7 +3155,7 @@ const chooseModel = useCallback((modelId: string) => {
     }
   };
 
-  const handleFileSelection = async (files: FileList | null) => {
+  const handleFileSelection = async (files: FileList | File[] | null) => {
     if (!files || files.length === 0) return;
 
     setIsProcessingFiles(true);
@@ -3318,6 +3252,23 @@ const chooseModel = useCallback((modelId: string) => {
         content: `I can’t read images with ${activeModel.name}. Please switch to Sight and send the image again.`,
         timestamp: new Date().toISOString(),
       }]);
+      return;
+    }
+
+    // Text/vision models cannot generate images: point to the exact image model.
+    if (!includesImage && selectedModel !== IMAGE_MODEL_ID && IMAGE_GENERATION_INTENT.test(messageText)) {
+      const imageModel = MODEL_OPTIONS.find(option => option.id === IMAGE_MODEL_ID);
+      const now = Date.now();
+      setMessages(prev => [...prev,
+        { id: `image-request-${now}`, sessionId: currentSessionId || 0, role: 'user', content: messageText, timestamp: new Date().toISOString() },
+        {
+          id: `image-model-hint-${now}`,
+          sessionId: currentSessionId || 0,
+          role: 'assistant',
+          content: `${activeModel.name} can’t generate images. **${imageModel?.name ?? 'Canvas'}** is the image-generation model. Switch to it from the model menu in the message box, then send your prompt again.`,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
       return;
     }
 
@@ -5049,9 +5000,12 @@ if (isBlankDraft) {
                   className="hidden"
                   accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.tsv,.json,.xml,.html,.htm,.md,.markdown,.rtf,.odt,.ods,.odp"
                   onChange={(e) => {
-                    void handleFileSelection(e.target.files);
+                    // FileList is live: copy it BEFORE resetting the input, otherwise
+                    // clearing the value empties it and nothing gets attached.
+                    const picked = Array.from(e.currentTarget.files ?? []);
                     e.currentTarget.value = '';
                     setUploadModalOpen(false);
+                    if (picked.length) void handleFileSelection(picked);
                   }}
                 />
 
@@ -5218,16 +5172,15 @@ if (isBlankDraft) {
                           transition={{ duration: 0.16, ease: 'easeOut' }}
                           role="listbox"
                           aria-label="Select AI model"
-                          className="model-dropdown z-[99999] max-h-[min(360px,calc(100dvh-150px))] overflow-y-auto overflow-x-hidden border border-zinc-200/90 bg-white/95 p-1.5 shadow-2xl shadow-zinc-900/20 backdrop-blur-2xl dark:border-zinc-700/90 dark:bg-zinc-900/95 dark:shadow-black/50 sm:max-h-[420px] sm:overflow-y-auto sm:rounded-2xl sm:p-2"
+                          className="model-dropdown z-[99999] max-h-[min(360px,calc(100dvh-150px))] overflow-y-auto overflow-x-hidden border border-zinc-200/90 bg-white/95 p-1.5 shadow-2xl shadow-zinc-900/20 backdrop-blur-2xl dark:border-zinc-700/90 dark:bg-zinc-900/95 dark:shadow-black/50 sm:max-h-[420px] sm:overflow-y-auto sm:rounded-2xl sm:p-2" style={{ width: 'min(320px, calc(100vw - 24px))' }}
                         >
                           <div className="px-2 pb-2 pt-1">
-                            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400 dark:text-zinc-500">
+                            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-zinc-400 dark:text-zinc-500">
                               Select AI model
                             </p>
                           </div>
                           <div className="space-y-1">
                             {MODEL_OPTIONS.map(option => {
-                              const Icon = option.icon;
                               const selected = option.id === selectedModel;
                               return (
                                 <motion.button
@@ -5239,23 +5192,18 @@ if (isBlankDraft) {
                                        event.stopPropagation();
                                        chooseModel(option.id);
                                               }}
-                                  whileHover={{ x: 2 }}
-                                  whileTap={{ scale: 0.985 }}
-                                  transition={{ type: 'spring', stiffness: 450, damping: 28 }}
-                                  className={`flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-all ${selected ? 'border-zinc-500 bg-zinc-100 shadow-sm dark:border-zinc-500 dark:bg-zinc-950/40' : 'border-transparent hover:border-zinc-200 hover:bg-zinc-50 dark:hover:border-zinc-700 dark:hover:bg-zinc-800/80'}`}
+                                  whileTap={{ scale: 0.99 }}
+                                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${selected ? 'bg-zinc-100 dark:bg-white/10' : 'hover:bg-zinc-50 dark:hover:bg-white/5'}`}
                                 >
-                                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${selected ? 'bg-black text-white shadow-md' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'}`}>
-                                    <Icon className="h-4 w-4" />
-                                  </span>
                                   <span className="min-w-0 flex-1">
                                     <span className="flex items-center gap-2">
-                                      <span className="truncate text-xs font-medium text-zinc-800 dark:text-zinc-100">{option.name}</span>
+                                      <span className="truncate text-[14px] font-medium text-zinc-900 dark:text-zinc-100">{option.name}</span>
                                     </span>
-                                    <span className="mt-0.5 block truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
+                                    <span className="mt-0.5 block truncate text-[12px] text-zinc-500 dark:text-zinc-400">
                                       {option.description}{option.vision ? ' · Vision' : ''}
                                     </span>
                                   </span>
-                                  {selected && <Check className="h-4 w-4 shrink-0 text-zinc-600 dark:text-zinc-300" />}
+                                  {selected && <Check className="h-4 w-4 shrink-0 text-zinc-900 dark:text-zinc-100" strokeWidth={2} />}
                                 </motion.button>
                               );
                             })}
