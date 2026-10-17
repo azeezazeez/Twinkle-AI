@@ -1,13 +1,4 @@
-/**
- * One source of truth for keyboard shortcuts.
- *
- * - `matchShortcut` turns a keydown event into an action id.
- * - GlobalShortcuts (App.tsx) listens once for the whole app and either
- *   navigates or broadcasts the action with `dispatchShortcut`.
- * - Sidebar / Chat listen for the broadcast with `onShortcut`.
- * - `SHORTCUT_GROUPS` feeds the list shown in Settings → Shortcuts, so the
- *   list can never drift away from what really works.
- */
+
 export type ShortcutAction =
   | 'search'
   | 'new-chat'
@@ -39,6 +30,7 @@ export function matchShortcut(event: KeyboardEvent): ShortcutAction | null {
     return null;
   }
 
+  if (is('b', 'KeyB')) return 'toggle-sidebar';
   if (is('k', 'KeyK')) return 'search';
   if (code === 'Comma' || key === ',') return 'settings';
   if (code === 'Slash' || key === '/') return 'shortcuts';
@@ -79,7 +71,7 @@ export const shortcutGroups = (mod: string): Array<{ heading: string; items: Sho
     items: [
       { title: 'Search chats', desc: 'Open chat search from anywhere.', keys: [mod, 'K'] },
       { title: 'New chat', desc: 'Start a fresh conversation.', keys: [mod, 'Shift', 'O'] },
-      { title: 'Toggle sidebar', desc: 'Collapse or expand the chat list.', keys: [mod, 'Shift', 'S'] },
+      { title: 'Toggle sidebar', desc: 'Collapse or expand the chat list.', keys: [mod, 'B'] },
       { title: 'Open settings', desc: 'Jump straight to Settings.', keys: [mod, 'Shift', ','] },
       { title: 'Show shortcuts', desc: 'Open this list.', keys: [mod, '/'] },
     ],
