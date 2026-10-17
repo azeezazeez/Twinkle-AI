@@ -1,10 +1,3 @@
-/**
- * Twinkle AI — OTP Verification
- *
- * Flow:
- * Email → OTP → Chat
- */
-
 import React, {
   useEffect,
   useRef,
@@ -193,10 +186,10 @@ export default function VerifyOtp({
        */
 
       const response =
-        await authApi.verifyOtp(
+        (await authApi.verifyOtp(
           email,
           normalizedOtp
-        );
+        )) as { user?: any } | null;
 
       /*
        * --------------------------------------------------------
