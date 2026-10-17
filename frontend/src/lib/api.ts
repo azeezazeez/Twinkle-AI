@@ -61,6 +61,20 @@ const getAppLanguageCode = (): string => {
   try { return localStorage.getItem('twinkle_app_language') || 'auto'; } catch { return 'auto'; }
 };
 
+/* The latest live-weather lookup, so the chat can show a weather card. */
+export interface WeatherSnapshot {
+  label: string;
+  at: number;
+  current: Record<string, number>;
+  daily: { time?: string[]; temperature_2m_max?: number[]; temperature_2m_min?: number[]; precipitation_probability_max?: number[] };
+}
+let pendingWeatherSnapshot: WeatherSnapshot | null = null;
+export const takeWeatherSnapshot = (): WeatherSnapshot | null => {
+  const snapshot = pendingWeatherSnapshot;
+  pendingWeatherSnapshot = null;
+  return snapshot;
+};
+
 const getLiveContext = async (message: string): Promise<string | undefined> => {
   learnAssistantName(message);
   const persona = assistantNameContext();
@@ -151,6 +165,14 @@ const getVerifiedLiveContext = async (message: string): Promise<string | undefin
           const weather = await response.json();
           lines.push('Live weather data from Open-Meteo (metric units): ' + JSON.stringify({ current: weather.current, daily: weather.daily, timezone: weather.timezone }));
           lines.push('Weather code reference: https://open-meteo.com/en/docs');
+          if (weather?.current) {
+            pendingWeatherSnapshot = {
+              label: /permission-approved/.test(coordinates.label) ? 'Your location' : coordinates.label,
+              at: Date.now(),
+              current: weather.current,
+              daily: weather.daily || {},
+            };
+          }
         } catch {
           lines.push('Live weather: retrieval failed. Clearly say live weather could not be retrieved; do not invent current conditions.');
         }
@@ -1228,27 +1250,52 @@ export const chatApi = {
       'Cache-Control': 'no-cache',
     };
 
-    let response: Response;
-    try {
-      response = await fetch(`${API_BASE}/chat/send/stream`, {
-        method: 'POST',
-        credentials: 'include',
-        headers,
-        signal,
-        body: JSON.stringify({
-          message,
-          sessionId,
-          model,
-          language: getAppLanguageCode(),
-          liveContext: await getLiveContext(message),
-        }),
-      });
-    } catch (error) {
-      if (
-        (error as any)?.name === 'AbortError' ||
-        (error as any)?.name === 'TimeoutError'
-      ) throw error;
-      throw new Error('Server is starting up, please wait a moment and try again.');
+    // Gather live context once so a retry never asks for location again.
+    const requestBody = JSON.stringify({
+      message,
+      sessionId,
+      model,
+      language: getAppLanguageCode(),
+      liveContext: await getLiveContext(message),
+    });
+
+    const wait = (ms: number) => new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(resolve, ms);
+      signal?.addEventListener('abort', () => {
+        window.clearTimeout(timer);
+        reject(new DOMException('Aborted', 'AbortError'));
+      }, { once: true });
+    });
+
+    // One quiet automatic retry for connection drops and busy-server replies
+    // (502/503/504), before any text has been streamed.
+    let response!: Response;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        response = await fetch(`${API_BASE}/chat/send/stream`, {
+          method: 'POST',
+          credentials: 'include',
+          headers,
+          signal,
+          body: requestBody,
+        });
+      } catch (error) {
+        if (
+          (error as any)?.name === 'AbortError' ||
+          (error as any)?.name === 'TimeoutError'
+        ) throw error;
+        if (attempt === 0) {
+          await wait(1200);
+          continue;
+        }
+        throw new Error('Server is starting up, please wait a moment and try again.');
+      }
+      if (attempt === 0 && [502, 503, 504].includes(response.status)) {
+        try { await response.body?.cancel(); } catch { /* ignore */ }
+        await wait(1500);
+        continue;
+      }
+      break;
     }
 
     if (!response.ok) {
@@ -1604,14 +1651,24 @@ export const chatApi = {
      ======================================================= */
 
   shareSession: (
-    sessionId: number
+    sessionId: number,
+    expiresInDays?: number
   ) =>
     fetchWithAuth(
-      `${API_BASE}/chat/session/${sessionId}/share`,
+      `${API_BASE}/chat/session/${sessionId}/share${expiresInDays ? `?expiresInDays=${expiresInDays}` : ''}`,
       {
         method: 'POST',
       }
     ),
+
+  importChat: (payload: { title: string; messages: Array<{ role: string; content: string; timestamp?: string }> }) =>
+    fetchWithAuth(`${API_BASE}/chat/import`, { method: 'POST', body: JSON.stringify(payload) }),
+
+  listShares: (sessionId: number) =>
+    fetchWithAuth(`${API_BASE}/chat/session/${sessionId}/shares`, { method: 'GET' }),
+
+  revokeShare: (sessionId: number, shareId: number) =>
+    fetchWithAuth(`${API_BASE}/chat/session/${sessionId}/share/${shareId}`, { method: 'DELETE' }),
 
   /* =======================================================
      PUBLIC SHARED SESSION
