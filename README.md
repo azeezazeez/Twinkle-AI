@@ -337,6 +337,10 @@ Set secrets in your local environment or hosting provider's secret manager. **Do
 | `GROQ_MODEL` | Default Groq model |
 | `GROQ_MODELS` | Comma-separated available chat models |
 | `GROQ_VISION_MODELS` | Configured models for vision requests |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID (Workers AI) |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API token with Workers AI access (server-side only) |
+| `CLOUDFLARE_MODELS` | Optional comma-separated Workers AI chat models |
+| `CLOUDFLARE_IMAGE_MODEL` | Optional image model (default `@cf/black-forest-labs/flux-1-schnell`) |
 | `GEMINI_API_KEY` | Gemini API key |
 | `GEMINI_API_URL` | Optional Gemini API base URL |
 | `GEMINI_MODEL` | Gemini chat model |
