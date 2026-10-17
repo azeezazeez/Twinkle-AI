@@ -71,3 +71,39 @@ export const createZip = (files: Array<{ name: string; content: string }>): Blob
 
   return new Blob([...parts, ...central, new Uint8Array(end.buffer)] as BlobPart[], { type: 'application/zip' });
 };
+
+/** Reads a ZIP made by createZip (stored entries). Returns [] if unreadable. */
+export const readZip = async (file: Blob): Promise<Array<{ name: string; content: string }>> => {
+  const buffer = await file.arrayBuffer();
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  const decoder = new TextDecoder();
+  const results: Array<{ name: string; content: string }> = [];
+
+  // Find the end-of-central-directory record.
+  let end = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) {
+    if (view.getUint32(i, true) === 0x06054b50) { end = i; break; }
+  }
+  if (end < 0) return results;
+
+  const total = view.getUint16(end + 10, true);
+  let pointer = view.getUint32(end + 16, true);
+  for (let n = 0; n < total; n++) {
+    if (view.getUint32(pointer, true) !== 0x02014b50) break;
+    const method = view.getUint16(pointer + 10, true);
+    const size = view.getUint32(pointer + 24, true);
+    const nameLength = view.getUint16(pointer + 28, true);
+    const extraLength = view.getUint16(pointer + 30, true);
+    const commentLength = view.getUint16(pointer + 32, true);
+    const localOffset = view.getUint32(pointer + 42, true);
+    const name = decoder.decode(bytes.subarray(pointer + 46, pointer + 46 + nameLength));
+    pointer += 46 + nameLength + extraLength + commentLength;
+    if (method !== 0) continue; // compressed entries are not supported
+    const localNameLength = view.getUint16(localOffset + 26, true);
+    const localExtraLength = view.getUint16(localOffset + 28, true);
+    const start = localOffset + 30 + localNameLength + localExtraLength;
+    results.push({ name, content: decoder.decode(bytes.subarray(start, start + size)) });
+  }
+  return results;
+};
