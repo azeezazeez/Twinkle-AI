@@ -5,7 +5,7 @@ import { Session, User } from '../types';
 import {
   LogOut, Trash2, X, Search, Plus, MoreVertical, PinOff, Loader2,
   MessageCircle, Pencil, Upload, Eye, EyeOff,
-  Settings2, UserCircle2, ChevronDown, ChevronRight, SlidersHorizontal, ArrowUpDown, Check,
+  Settings2, Settings as SettingsGear, UserCircle2, ChevronDown, ChevronRight, SlidersHorizontal, ArrowUpDown, Check,
   Globe, Info,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -214,13 +214,13 @@ function MenuItem({
       type="button"
       role="menuitem"
       onClick={onClick}
-      className={`flex ${roomy ? 'min-h-[48px]' : 'h-9'} w-full items-center gap-3.5 rounded-lg px-3.5 py-2 text-left text-[14px] leading-6 transition-colors focus-visible:outline-none ${
+      className={`flex ${roomy ? 'h-9 text-[14.5px]' : 'h-9 text-[14px]'} w-full items-center gap-3 rounded-lg px-3 text-left leading-5 transition-colors focus-visible:outline-none ${
         danger
           ? 'text-[#B53333] hover:bg-[#B53333]/10 focus-visible:bg-[#B53333]/10 dark:text-[#F2877E] dark:hover:bg-[#F2877E]/10'
           : 'text-zinc-800 hover:bg-zinc-100 focus-visible:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:bg-zinc-800'
       }`}
     >
-      <span className="flex h-4 w-4 shrink-0 items-center justify-center">{icon}</span>
+      <span className={`flex shrink-0 items-center justify-center ${roomy ? 'h-5 w-5' : 'h-4 w-4'}`}>{icon}</span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {trailing}
       {shortcut && (
@@ -231,7 +231,7 @@ function MenuItem({
 }
 
 function MenuDivider({ roomy = false }: { roomy?: boolean }) {
-  return <div role="separator" className={`mx-3 ${roomy ? 'my-2.5' : 'my-1'} h-px bg-zinc-200 dark:bg-zinc-700/70`} />;
+  return <div role="separator" className={`mx-2 ${roomy ? 'my-1' : 'my-1'} h-px bg-zinc-200 dark:bg-zinc-700/70`} />;
 }
 
 // ─── ChatContextMenu (the "⋮" dropdown on a chat row) ─────────────────────────
@@ -1015,37 +1015,31 @@ function AccountMenu({
             transition={{ duration: 0.12, ease: 'easeOut' }}
             role="menu"
             aria-label="Account"
-            className={`absolute bottom-[calc(100%+8px)] left-0 right-0 z-[60] max-h-[calc(100dvh-96px)] origin-bottom overflow-y-auto overscroll-contain ${MENU_SURFACE.replace('p-1.5', 'p-3')} flex flex-col gap-1`}
+            className={`absolute bottom-[calc(100%+8px)] left-0 right-0 z-[60] max-h-[calc(100dvh-96px)] origin-bottom overflow-y-auto overscroll-contain ${MENU_SURFACE}`}
           >
-            <div className="truncate px-3.5 pb-4 pt-3 text-[13px] font-medium leading-6 text-zinc-500 dark:text-zinc-400">
+            <div className="truncate px-3 pb-1.5 pt-2 text-[13px] font-medium leading-5 text-zinc-500 dark:text-zinc-400">
               {user.email || user.name || user.username}
             </div>
 
             <MenuItem
               roomy
-              icon={<Settings2 className="h-4 w-4" strokeWidth={1.7} />}
+              icon={<SettingsGear className="h-[18px] w-[18px]" strokeWidth={1.7} />}
               label="Settings"
               shortcut="Ctrl+Shift+,"
               onClick={goSettings}
             />
             <MenuItem
               roomy
-              icon={<Globe className="h-4 w-4" strokeWidth={1.7} />}
+              icon={<Globe className="h-[18px] w-[18px]" strokeWidth={1.7} />}
               label="Language"
               onClick={openLanguage}
-              trailing={
-                <span className="ml-2 flex shrink-0 items-center gap-1 text-[12px] text-zinc-400 dark:text-zinc-500">
-                  <span data-no-translate className="max-w-[72px] truncate">{currentLanguage.native}</span>
-                  <ChevronRight className="h-3.5 w-3.5" strokeWidth={1.8} />
-                </span>
-              }
             />
 
             <MenuDivider roomy />
 
             <MenuItem
               roomy
-              icon={<Info className="h-4 w-4" strokeWidth={1.7} />}
+              icon={<Info className="h-[18px] w-[18px]" strokeWidth={1.7} />}
               label="Learn more"
               onClick={learnMore}
               trailing={<ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-400 dark:text-zinc-500" strokeWidth={1.8} />}
@@ -1055,7 +1049,7 @@ function AccountMenu({
 
             <MenuItem
               roomy
-              icon={<LogOut className="h-4 w-4" strokeWidth={1.7} />}
+              icon={<LogOut className="h-[18px] w-[18px]" strokeWidth={1.7} />}
               label="Log out"
               onClick={logout}
             />
