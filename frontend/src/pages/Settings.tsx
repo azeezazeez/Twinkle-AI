@@ -36,12 +36,13 @@ import {
   SlidersHorizontal,
   Sun,
   Trash2,
+  Upload,
   UserRound,
   Volume2,
   X,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { createZip } from '../lib/zip';
+import { createZip, readZip } from '../lib/zip';
 import { parseServerDate } from '../lib/time';
 import type { User, Session } from '../types';
 import {
@@ -57,6 +58,9 @@ import {
   savePrefs,
   type DisplayPrefs,
   type FontSizePref,
+  type LineSpacingPref,
+  type FontFamilyPref,
+  DEFAULT_PREFS,
 } from '../lib/preferences';
 import ConfirmationModal from '../components/ConfirmationModal';
 import VoiceGrid from '../components/VoiceGrid';
@@ -956,7 +960,7 @@ export default function Settings({
 
   const resetAppearance = () => {
     changeTheme('system');
-    const next: DisplayPrefs = { fontSize: 'default', reduceMotion: false };
+    const next: DisplayPrefs = { ...DEFAULT_PREFS };
     setPrefs(next);
     savePrefs(next);
     showToast('Appearance reset to defaults');
@@ -1226,12 +1230,70 @@ export default function Settings({
   );
 
   // ── Data controls ────────────────────────────────────────────────────────
-  const [exporting, setExporting] = useState<'json' | 'markdown' | null>(null);
+  const [exporting, setExporting] = useState<'json' | 'markdown' | 'pdf' | null>(null);
   const [exportProgress, setExportProgress] = useState('');
   const [confirm, setConfirm] = useState<'delete' | 'browser' | 'signout' | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const exportChats = async (format: 'json' | 'markdown') => {
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+
+  // Imports chats from Twinkle export files (.json, or the .zip of .json files).
+  const importChats = async (fileList: FileList | null) => {
+    const picked = Array.from(fileList || []);
+    if (importing || picked.length === 0) return;
+    setImporting(true);
+    try {
+      const texts: string[] = [];
+      for (const file of picked) {
+        if (/\.zip$/i.test(file.name)) {
+          (await readZip(file)).filter(entry => /\.json$/i.test(entry.name)).forEach(entry => texts.push(entry.content));
+        } else {
+          texts.push(await file.text());
+        }
+      }
+
+      const chats: Array<{ title: string; messages: any[] }> = [];
+      for (const text of texts) {
+        try {
+          const data = JSON.parse(text);
+          const list = Array.isArray(data?.conversations) ? data.conversations : [data];
+          for (const item of list) {
+            if (Array.isArray(item?.messages)) chats.push({ title: String(item.title || 'Imported chat'), messages: item.messages });
+          }
+        } catch { /* skip files that are not valid JSON */ }
+      }
+      if (chats.length === 0) {
+        showToast('No importable chats found. Choose files exported from Twinkle (JSON).', 'error');
+        return;
+      }
+
+      let imported = 0;
+      for (const chat of chats) {
+        try {
+          const result = await chatApi.importChat({
+            title: chat.title,
+            messages: chat.messages.map((message: any) => ({
+              role: String(message?.role || ''),
+              content: String(message?.content ?? ''),
+              timestamp: message?.timestamp ? String(message.timestamp) : undefined,
+            })),
+          }) as any;
+          if (result?.success !== false) imported++;
+        } catch { /* continue with the next chat */ }
+      }
+      if (imported === 0) showToast('Import failed. Please try again.', 'error');
+      else showToast(`Imported ${imported} chat${imported === 1 ? '' : 's'}. Reload the page to see them.`);
+    } catch (error) {
+      console.error('Chat import failed:', error);
+      showToast('Import failed. Please try again.', 'error');
+    } finally {
+      setImporting(false);
+      if (importInputRef.current) importInputRef.current.value = '';
+    }
+  };
+
+  const exportChats = async (format: 'json' | 'markdown' | 'pdf') => {
     if (exporting) return;
     setExporting(format);
     setExportProgress('Preparing…');
@@ -1245,6 +1307,33 @@ export default function Settings({
       }
 
       const stamp = new Date().toISOString().slice(0, 10);
+
+      if (format === 'pdf') {
+        // Opens a clean, printable page; choose "Save as PDF" in the print dialog.
+        const escapeHtml = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const body = bundles.map(({ session, messages }) => `
+          <section>
+            <h1>${escapeHtml(session.sessionName || 'Untitled chat')}</h1>
+            ${messages.map((message: any) => {
+              const when = parseServerDate(message?.timestamp);
+              return `<div class="m ${message?.role === 'user' ? 'u' : 'a'}"><b>${message?.role === 'user' ? 'You' : 'Twinkle'}</b>${when ? ` <i>${escapeHtml(when.toLocaleString())}</i>` : ''}<pre>${escapeHtml(String(message?.content ?? ''))}</pre></div>`;
+            }).join('')}
+          </section>`).join('');
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) {
+          showToast('Allow pop-ups to export as PDF', 'error');
+          return;
+        }
+        printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Twinkle chats ${stamp}</title>
+          <style>body{font:14px/1.6 system-ui,sans-serif;margin:32px;color:#1f1e1d}section{page-break-after:always}h1{font-size:22px;border-bottom:1px solid #ddd;padding-bottom:8px}
+          .m{margin:14px 0}.m i{color:#777;font-style:normal;font-size:12px}pre{white-space:pre-wrap;word-wrap:break-word;font:inherit;margin:4px 0 0}.u pre{background:#f0eee6;padding:8px 12px;border-radius:10px}</style></head><body>${body}</body></html>`);
+        printWindow.document.close();
+        printWindow.focus();
+        window.setTimeout(() => printWindow.print(), 400);
+        showToast(`Prepared ${bundles.length} chat${bundles.length === 1 ? '' : 's'} for PDF`);
+        return;
+      }
+
       const extension = format === 'json' ? 'json' : 'md';
       const mime = format === 'json' ? 'application/json' : 'text/markdown';
       const usedNames = new Set<string>();
@@ -1411,6 +1500,43 @@ export default function Settings({
                   ]}
                 />
               </Row>
+              <Row title="Line spacing" desc="Space between lines in chat messages.">
+                <Segmented<LineSpacingPref>
+                  label="Line spacing"
+                  value={prefs.lineSpacing}
+                  onChange={lineSpacing => updatePrefs({ lineSpacing })}
+                  options={[
+                    { value: 'compact', label: 'Compact' },
+                    { value: 'default', label: 'Default' },
+                    { value: 'relaxed', label: 'Relaxed' },
+                  ]}
+                />
+              </Row>
+              <Row title="Font" desc="Typeface used across the app.">
+                <Segmented<FontFamilyPref>
+                  label="Font"
+                  value={prefs.fontFamily}
+                  onChange={fontFamily => updatePrefs({ fontFamily })}
+                  options={[
+                    { value: 'default', label: 'Default' },
+                    { value: 'serif', label: 'Serif' },
+                    { value: 'mono', label: 'Mono' },
+                  ]}
+                />
+              </Row>
+              <Row title="Read aloud speed" desc="How fast answers are read aloud.">
+                <Segmented<string>
+                  label="Read aloud speed"
+                  value={String(prefs.readAloudSpeed)}
+                  onChange={next => updatePrefs({ readAloudSpeed: Number(next) })}
+                  options={[
+                    { value: '0.75', label: '0.75×' },
+                    { value: '1', label: '1×' },
+                    { value: '1.25', label: '1.25×' },
+                    { value: '1.5', label: '1.5×' },
+                  ]}
+                />
+              </Row>
               <Row title="Motion" desc="Reduce animation in streaming responses and other interface elements.">
                 <Segmented<'system' | 'reduced'>
                   label="Motion"
@@ -1422,7 +1548,7 @@ export default function Settings({
                   ]}
                 />
               </Row>
-              <Row title="Reset appearance" desc="Return theme, text size and motion to their defaults.">
+              <Row title="Reset appearance" desc="Return theme, text size, spacing, font and motion to their defaults.">
                 <Btn onClick={resetAppearance}>
                   <RefreshCw className="h-3.5 w-3.5" />
                   Reset
@@ -1744,7 +1870,29 @@ export default function Settings({
                     {exporting === 'markdown' ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
                     Markdown
                   </Btn>
+                  <Btn onClick={() => void exportChats('pdf')} disabled={Boolean(exporting)}>
+                    {exporting === 'pdf' ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                    PDF
+                  </Btn>
                 </div>
+              </Row>
+
+              <Row
+                title="Import chats"
+                desc="Add chats from a Twinkle export (JSON file, or the zip of JSON files). They are added as new chats."
+              >
+                <input
+                  ref={importInputRef}
+                  type="file"
+                  accept=".json,.zip,application/json,application/zip"
+                  multiple
+                  className="hidden"
+                  onChange={event => void importChats(event.target.files)}
+                />
+                <Btn onClick={() => importInputRef.current?.click()} disabled={importing}>
+                  {importing ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                  {importing ? 'Importing…' : 'Import'}
+                </Btn>
               </Row>
 
               <Row
