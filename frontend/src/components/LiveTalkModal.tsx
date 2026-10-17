@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Mic, MicOff, RotateCw, X } from 'lucide-react';
 import VoiceRing from './VoiceRing';
 import { getVoiceOrbPalette } from '../lib/voiceThemes';
-import { VOICES, DEFAULT_VOICE } from '../lib/voices'; 
+import { VOICES, DEFAULT_VOICE } from '../lib/voices';
 import { chatApi, createLiveToken, assistantNameContext, getAssistantName, learnAssistantName } from '../lib/api';
 import { APP_LANGUAGE_KEY, getLanguageInstruction, type AppLanguage } from '../lib/i18n';
 import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw';
@@ -129,7 +129,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
   const vadLastSpeechAtRef = useRef(0);
   const vadTurnEndedRef = useRef(false);
   const VAD_SILENCE_MS = 300;
-  const VAD_THRESHOLD = 0.018;
+  const VAD_THRESHOLD = 0.013;
 
   const [connected, setConnected] = useState(false);
   const [listening, setListening] = useState(false);
@@ -477,10 +477,10 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
     // browser, then a controlled gain + compressor lifts low-volume speech
     // without allowing louder speech to clip the PCM stream.
     const inputGain = context.createGain();
-    inputGain.gain.value = 2.2;
+    inputGain.gain.value = 3;
 
     const inputCompressor = context.createDynamicsCompressor();
-    inputCompressor.threshold.value = -42;
+    inputCompressor.threshold.value = -50;
     inputCompressor.knee.value = 24;
     inputCompressor.ratio.value = 6;
     inputCompressor.attack.value = 0.003;
@@ -713,7 +713,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
             realtimeInputConfig: {
               automaticActivityDetection: {
                 disabled: false,
-                prefixPaddingMs: 100,
+                prefixPaddingMs: 40,
                 silenceDurationMs: 300,
                 startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH',
                 endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
