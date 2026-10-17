@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { Check, X, Link2, Globe, MessageSquarePlus, AlertCircle } from 'lucide-react';
+import { Check, X, Link2, Globe, MessageSquarePlus, AlertCircle, Trash2 } from 'lucide-react';
 
 interface ShareChatModalProps {
   isOpen: boolean;
@@ -14,11 +14,14 @@ interface ShareChatModalProps {
   /** 'prompt' shares a single prompt; 'conversation' shares the whole chat. */
   mode?: 'prompt' | 'conversation';
   /** Conversation mode: creates the public link when the user asks for it. */
-  onCreateLink?: () => void;
+  onCreateLink?: (expiresInDays?: number) => void;
   /** True when there is no saved conversation yet, so there is nothing to share. */
   emptyChat?: boolean;
   /** Empty-chat state: closes the dialog and focuses the message box. */
   onStartChat?: () => void;
+  /** Conversation mode: links already created for this chat. */
+  links?: Array<{ id: number; url: string; createdAt?: string; expiresAt?: string }>;
+  onRevokeLink?: (id: number) => void;
   onClose: () => void;
 }
 
@@ -34,9 +37,13 @@ const ShareChatModal: React.FC<ShareChatModalProps> = ({
   onCreateLink,
   emptyChat = false,
   onStartChat,
+  links = [],
+  onRevokeLink,
   onClose,
 }) => {
   const [copied, setCopied] = useState(false);
+  const [copiedLinkId, setCopiedLinkId] = useState<number | null>(null);
+  const [expiryDays, setExpiryDays] = useState<number>(0);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const isConversation = mode === 'conversation';
   const title = 'Share chat';
@@ -80,6 +87,16 @@ const ShareChatModal: React.FC<ShareChatModalProps> = ({
       const input = document.querySelector<HTMLInputElement>('[data-share-url-input="true"]');
       input?.focus();
       input?.select();
+    }
+  };
+
+  const copyExistingLink = async (id: number, url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedLinkId(id);
+      window.setTimeout(() => setCopiedLinkId(current => (current === id ? null : current)), 1800);
+    } catch (copyError) {
+      console.error('Could not copy share link:', copyError);
     }
   };
 
@@ -196,7 +213,7 @@ const ShareChatModal: React.FC<ShareChatModalProps> = ({
                       <div className="mt-3 flex justify-end">
                         <button
                           type="button"
-                          onClick={onCreateLink}
+                          onClick={() => onCreateLink(expiryDays || undefined)}
                           className="inline-flex h-9 items-center justify-center rounded-lg bg-zinc-900 px-4 text-[14px] font-medium text-white transition-colors hover:bg-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
                         >
                           Create link again
@@ -205,10 +222,23 @@ const ShareChatModal: React.FC<ShareChatModalProps> = ({
                     )}
                    </div>
                      ) : isConversation && !shareUrl && onCreateLink ? (
-              <div className="mt-4 flex justify-end border-t border-zinc-100 pt-4 dark:border-zinc-800 sm:mt-5 sm:pt-5">
+              <div className="mt-4 flex flex-wrap items-center justify-end gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800 sm:mt-5 sm:pt-5">
+                <label className="flex items-center gap-2 text-[13px] text-zinc-600 dark:text-zinc-300">
+                  Link expires
+                  <select
+                    value={expiryDays}
+                    onChange={event => setExpiryDays(Number(event.target.value))}
+                    className="h-9 rounded-lg border border-zinc-200 bg-white px-2 text-[13px] text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                  >
+                    <option value={0}>Never</option>
+                    <option value={1}>After 1 day</option>
+                    <option value={7}>After 7 days</option>
+                    <option value={30}>After 30 days</option>
+                  </select>
+                </label>
                 <button
                   type="button"
-                  onClick={onCreateLink}
+                  onClick={() => onCreateLink(expiryDays || undefined)}
                   className="inline-flex h-9 items-center justify-center rounded-lg bg-zinc-900 px-4 text-[14px] font-medium text-white transition-colors hover:bg-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
                 >
                   Create public link
@@ -242,6 +272,29 @@ const ShareChatModal: React.FC<ShareChatModalProps> = ({
                 </button>
               </div>
             ) : null}
+
+            {isConversation && !emptyChat && links.length > 0 && (
+              <div className="mt-4 border-t border-zinc-100 pt-4 dark:border-zinc-800">
+                <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Your public links</p>
+                <ul className="mt-2 max-h-[160px] space-y-1.5 overflow-y-auto">
+                  {links.map(link => (
+                    <li key={link.id} className="flex items-center gap-2 rounded-lg bg-zinc-50 px-3 py-2 dark:bg-zinc-800/60">
+                      <span className="min-w-0 flex-1 truncate text-[13px] text-zinc-600 dark:text-zinc-300" title={link.url}>
+                        {link.createdAt ? `Created ${new Date(link.createdAt).toLocaleDateString()} · ` : ''}{link.expiresAt ? `Expires ${new Date(link.expiresAt).toLocaleDateString()} · ` : ''}{link.url.replace(/^https?:\/\//, '')}
+                      </span>
+                      <button type="button" onClick={() => void copyExistingLink(link.id, link.url)} className="shrink-0 rounded-md px-2 py-1 text-[13px] font-medium text-zinc-800 hover:bg-zinc-200 dark:text-zinc-100 dark:hover:bg-zinc-700">
+                        {copiedLinkId === link.id ? 'Copied!' : 'Copy'}
+                      </button>
+                      {onRevokeLink && (
+                        <button type="button" onClick={() => onRevokeLink(link.id)} aria-label="Turn off this link" title="Turn off this link" className="shrink-0 rounded-md p-1.5 text-zinc-500 hover:bg-red-50 hover:text-red-600 dark:text-zinc-400 dark:hover:bg-red-950/30 dark:hover:text-red-400">
+                          <Trash2 className="h-4 w-4" strokeWidth={1.8} />
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <input
               data-share-url-input="true"
