@@ -425,12 +425,17 @@ function shouldShowImageProgress(
  * indeterminate progress bar and the real elapsed time are used instead.
  */
 function ImageGenerationProgress({ prompt }: { prompt: string }) {
-  const [seconds, setSeconds] = useState(0);
+  const [percent, setPercent] = useState(0);
   const reduceMotion = useReducedMotion();
 
+  // The image service reports no real progress, so this is an eased estimate:
+  // it slows down near the end and never reaches 100% until the image arrives.
   useEffect(() => {
     const startedAt = performance.now();
-    const timer = window.setInterval(() => setSeconds(Math.floor((performance.now() - startedAt) / 1000)), 500);
+    const timer = window.setInterval(() => {
+      const seconds = (performance.now() - startedAt) / 1000;
+      setPercent(Math.min(95, Math.round(95 * (1 - Math.exp(-seconds / 4)))));
+    }, 150);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -443,7 +448,7 @@ function ImageGenerationProgress({ prompt }: { prompt: string }) {
       transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
       role="status"
       aria-live="polite"
-      aria-label="Creating your image"
+      aria-label={`Creating your image, ${percent}%`}
       className="my-2 w-[min(100%,360px)] overflow-hidden rounded-3xl border border-zinc-200/80 bg-white shadow-[0_8px_30px_rgba(0,0,0,0.06)] dark:border-zinc-700/70 dark:bg-zinc-900"
     >
       <div className="relative aspect-square w-full overflow-hidden bg-zinc-100 dark:bg-zinc-800">
@@ -464,28 +469,17 @@ function ImageGenerationProgress({ prompt }: { prompt: string }) {
             transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut', repeatDelay: 0.4 }}
           />
         )}
-        <div className="absolute inset-0 flex items-center justify-center">
-          <motion.div
-            className="flex h-14 w-14 items-center justify-center rounded-full bg-white/70 shadow-lg backdrop-blur-md dark:bg-zinc-900/60"
-            animate={reduceMotion ? undefined : { scale: [1, 1.08, 1] }}
-            transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
-          >
-            <Sparkles className="h-6 w-6 text-[#D97757]" strokeWidth={1.6} />
-          </motion.div>
-        </div>
       </div>
 
       <div className="px-4 pb-4 pt-3.5">
         <div className="flex items-center justify-between gap-3">
           <span className="text-[14px] font-medium text-zinc-900 dark:text-zinc-100">Creating your image</span>
-          <span className="shrink-0 text-[12px] tabular-nums text-zinc-400 dark:text-zinc-500">{seconds}s</span>
+          <span className="shrink-0 text-[13px] font-medium tabular-nums text-zinc-500 dark:text-zinc-400">{percent}%</span>
         </div>
-        <div className="relative mt-2.5 h-1 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700" role="progressbar" aria-label="Generating">
-          <motion.div
-            className="absolute inset-y-0 w-2/5 rounded-full bg-[#D97757]"
-            initial={{ x: '-100%' }}
-            animate={{ x: '250%' }}
-            transition={{ duration: reduceMotion ? 0 : 1.4, repeat: Infinity, ease: 'easeInOut' }}
+        <div className="relative mt-2.5 h-1 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
+          <div
+            className="h-full rounded-full bg-[#D97757] transition-[width] duration-200 ease-out"
+            style={{ width: `${percent}%` }}
           />
         </div>
         {prompt && (
@@ -530,10 +524,24 @@ async function downloadGeneratedImage(src: string) {
   }
 }
 
+const SEEN_GENERATED_IMAGES = new Set<string>();
+
 /** Generated/response image with click-to-preview (full screen) and download. */
 function GeneratedImage({ src, alt }: { src?: string; alt?: string }) {
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  // Fade in only the first time this image is shown. When the message
+  // re-mounts (scrolling, id swap after saving) it must appear instantly,
+  // otherwise it flashes blurred/transparent again.
+  const [loaded, setLoaded] = useState(() => !!src && SEEN_GENERATED_IMAGES.has(src));
+  const [animateIn] = useState(() => !(src && SEEN_GENERATED_IMAGES.has(src)));
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  useEffect(() => {
+    if (imgRef.current?.complete && imgRef.current.naturalWidth > 0) {
+      if (src) SEEN_GENERATED_IMAGES.add(src);
+      setLoaded(true);
+    }
+  }, [src]);
 
   useEffect(() => {
     if (!previewOpen) return;
@@ -551,17 +559,16 @@ function GeneratedImage({ src, alt }: { src?: string; alt?: string }) {
     <>
       <figure className="twinkle-response-image">
         <img
+          ref={imgRef}
           src={src}
           alt={label}
           decoding="async"
-          onLoad={() => setLoaded(true)}
+          onLoad={() => { SEEN_GENERATED_IMAGES.add(src); setLoaded(true); }}
           onClick={() => setPreviewOpen(true)}
           style={{
             cursor: 'zoom-in',
             opacity: loaded ? 1 : 0,
-            filter: loaded ? 'none' : 'blur(14px)',
-            transform: loaded ? 'none' : 'scale(1.02)',
-            transition: 'opacity .5s ease, filter .6s ease, transform .6s ease',
+            transition: animateIn ? 'opacity .45s ease' : 'none',
           }}
         />
         <div className="flex items-center gap-2 border-t border-zinc-200 px-2.5 py-2 dark:border-zinc-700">
@@ -2338,6 +2345,8 @@ ${textToRead}` }] }], turnComplete: true },
     }
   });
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [modelMoreOpen, setModelMoreOpen] = useState(false);
+  useEffect(() => { if (!modelPickerOpen) setModelMoreOpen(false); }, [modelPickerOpen]);
   const [emptyChatPrompt, setEmptyChatPrompt] = useState(() =>
     EMPTY_CHAT_PROMPTS[Math.floor(Math.random() * EMPTY_CHAT_PROMPTS.length)]
   );
@@ -5179,35 +5188,65 @@ if (isBlankDraft) {
                               Select AI model
                             </p>
                           </div>
-                          <div className="space-y-1">
-                            {MODEL_OPTIONS.map(option => {
-                              const selected = option.id === selectedModel;
-                              return (
-                                <motion.button
-                                  key={option.id}
-                                  type="button"
-                                  role="option"
-                                  aria-selected={selected}                                
-                                      onClick={(event) => {
-                                       event.stopPropagation();
-                                       chooseModel(option.id);
-                                              }}
-                                  whileTap={{ scale: 0.99 }}
-                                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${selected ? 'bg-zinc-100 dark:bg-white/10' : 'hover:bg-zinc-50 dark:hover:bg-white/5'}`}
-                                >
-                                  <span className="min-w-0 flex-1">
-                                    <span className="flex items-center gap-2">
-                                      <span className="truncate text-[14px] font-medium text-zinc-900 dark:text-zinc-100">{option.name}</span>
-                                    </span>
-                                    <span className="mt-0.5 block truncate text-[12px] text-zinc-500 dark:text-zinc-400">
-                                      {option.description}{option.vision ? ' · Vision' : ''}
-                                    </span>
+                          {(() => {
+                            const otherModels = MODEL_OPTIONS.filter(option => option.id !== selectedModel);
+                            const renderOption = (option: ModelOption, selected: boolean) => (
+                              <motion.button
+                                key={option.id}
+                                type="button"
+                                role="option"
+                                aria-selected={selected}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  chooseModel(option.id);
+                                }}
+                                whileTap={{ scale: 0.99 }}
+                                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${selected ? 'bg-zinc-100 dark:bg-white/10' : 'hover:bg-zinc-50 dark:hover:bg-white/5'}`}
+                              >
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-[14px] font-medium text-zinc-900 dark:text-zinc-100">{option.name}</span>
+                                  <span className="mt-0.5 block truncate text-[12px] text-zinc-500 dark:text-zinc-400">
+                                    {option.description}{option.vision ? ' · Vision' : ''}
                                   </span>
-                                  {selected && <Check className="h-4 w-4 shrink-0 text-zinc-900 dark:text-zinc-100" strokeWidth={2} />}
-                                </motion.button>
-                              );
-                            })}
-                          </div>
+                                </span>
+                                {selected && <Check className="h-4 w-4 shrink-0 text-zinc-900 dark:text-zinc-100" strokeWidth={2} />}
+                              </motion.button>
+                            );
+                            return (
+                              <>
+                                {renderOption(activeModel, true)}
+                                <div className="mx-2 my-1.5 h-px bg-zinc-200/80 dark:bg-white/10" />
+                                <button
+                                  type="button"
+                                  aria-expanded={modelMoreOpen}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setModelMoreOpen(prev => !prev);
+                                  }}
+                                  className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-[14px] font-medium text-zinc-900 transition-colors hover:bg-zinc-50 dark:text-zinc-100 dark:hover:bg-white/5"
+                                >
+                                  More models
+                                  <ChevronDown className={`h-4 w-4 text-zinc-500 transition-transform duration-200 dark:text-zinc-400 ${modelMoreOpen ? 'rotate-180' : ''}`} />
+                                </button>
+                                <AnimatePresence initial={false}>
+                                  {modelMoreOpen && (
+                                    <motion.div
+                                      key="more-models"
+                                      initial={{ height: 0, opacity: 0 }}
+                                      animate={{ height: 'auto', opacity: 1 }}
+                                      exit={{ height: 0, opacity: 0 }}
+                                      transition={{ duration: 0.2, ease: 'easeOut' }}
+                                      className="overflow-hidden"
+                                    >
+                                      <div className="space-y-0.5 pt-0.5">
+                                        {otherModels.map(option => renderOption(option, false))}
+                                      </div>
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
+                              </>
+                            );
+                          })()}
                         </motion.div>
                       )}
                     </AnimatePresence>
