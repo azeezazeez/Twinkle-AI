@@ -3,7 +3,7 @@ const API_BASE = (
 ).replace(/\/$/, '');
 
 const GEMINI_LIVE_WS_ENDPOINT =
-  'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained';
+  'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained';
 
 const CHAT_RETRIES = 1;
 const RETRY_DELAY_MS = 450;
@@ -1785,6 +1785,43 @@ export async function createLiveToken(
   return { ...fresh };
 }
 
+// Voice samples that already played once are kept in memory, so replaying or
+// re-selecting a voice starts instantly without a token, WebSocket or model
+// round trip.
+const voicePreviewCache = new Map<string, Int16Array[]>();
+
+function playCachedVoicePreview(context: AudioContext, chunks: Int16Array[]): Promise<void> {
+  return new Promise<void>(resolve => {
+    const sources = new Set<AudioBufferSourceNode>();
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      sources.forEach(source => { try { source.stop(); } catch {} });
+      sources.clear();
+      if (activeVoicePreviewStop === finish) activeVoicePreviewStop = null;
+      void context.close();
+      resolve();
+    };
+    activeVoicePreviewStop = finish;
+
+    let startAt = context.currentTime + 0.005;
+    chunks.forEach((pcm, index) => {
+      const buffer = context.createBuffer(1, pcm.length, 24000);
+      const channel = buffer.getChannelData(0);
+      for (let i = 0; i < pcm.length; i += 1) channel[i] = pcm[i] / 32768;
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.playbackRate.value = 1.12;
+      source.connect(context.destination);
+      sources.add(source);
+      if (index === chunks.length - 1) source.onended = finish;
+      source.start(startAt);
+      startAt += buffer.duration / 1.12;
+    });
+  });
+}
+
 /** Cancels any voice preview that is currently playing or loading. */
 export function stopGeminiVoicePreview(): void {
   voicePreviewGeneration += 1;
@@ -1829,6 +1866,12 @@ export async function previewGeminiVoice(
   const context = new AudioContextCtor();
   await context.resume();
 
+  const cacheKey = `${voiceName}|${language}|${text}`;
+  const cachedChunks = voicePreviewCache.get(cacheKey);
+  if (cachedChunks?.length) {
+    return playCachedVoicePreview(context, cachedChunks);
+  }
+
   const { token, model } = await createLiveToken(voiceName, language);
 
   // A newer voice selection may have happened while the token request was
@@ -1856,6 +1899,8 @@ export async function previewGeminiVoice(
     let settled = false;
     let nextPlayTime = context.currentTime + 0.01;
     let receivedAudio = false;
+    let completedTurn = false;
+    const collected: Int16Array[] = [];
     const sources = new Set<AudioBufferSourceNode>();
     const socket = new WebSocket(
       `${GEMINI_LIVE_WS_ENDPOINT}?access_token=${encodeURIComponent(token)}`
@@ -1869,6 +1914,13 @@ export async function previewGeminiVoice(
       sources.forEach(source => { try { source.stop(); } catch {} });
       sources.clear();
       if (activeVoicePreviewStop === stop) activeVoicePreviewStop = null;
+      if (!error && completedTurn && receivedAudio && collected.length) {
+        if (voicePreviewCache.size >= 40) {
+          const oldest = voicePreviewCache.keys().next().value;
+          if (oldest !== undefined) voicePreviewCache.delete(oldest);
+        }
+        voicePreviewCache.set(cacheKey, collected);
+      }
       try { socket.close(1000, 'Voice preview complete'); } catch {}
       void context.close();
       if (error) reject(error); else resolve();
@@ -1899,8 +1951,8 @@ export async function previewGeminiVoice(
           systemInstruction: {
             parts: [{
               text:
-                `You are Twinkle AI. Speak exactly one short greeting using the user's provided text. ` +
-                `Do not change the username, do not add an introduction, and stop immediately after the greeting.` +
+                `You are Twinkle AI. Say the user's message aloud word for word, in your own voice and style. ` +
+                `Do not change, add or remove any words, do not add an introduction, and stop immediately after saying it.` +
                 languageInstruction,
             }],
           },
@@ -1941,6 +1993,7 @@ export async function previewGeminiVoice(
           return;
         }
 
+        if (message.serverContent?.turnComplete) completedTurn = true;
         const parts = message.serverContent?.modelTurn?.parts;
         if (Array.isArray(parts)) {
           for (const part of parts) {
@@ -1951,6 +2004,7 @@ export async function previewGeminiVoice(
             receivedAudio = true;
             const pcm = previewBase64ToInt16(data);
             if (!pcm.length) continue;
+            collected.push(pcm);
 
             const buffer = context.createBuffer(1, pcm.length, 24000);
             const channel = buffer.getChannelData(0);
