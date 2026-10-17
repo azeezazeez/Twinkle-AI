@@ -1139,6 +1139,34 @@ public class AuthController {
                 return badRequest("Profile update request is required");
             }
 
+            // Full name update (independent of the username).
+            if (request.containsKey("name") && !request.containsKey("username")) {
+                String fullName = request.get("name") == null ? "" : request.get("name").trim();
+
+                if (fullName.length() < 2) {
+                    return badRequest("Full name must be at least 2 characters");
+                }
+                if (fullName.length() > 100) {
+                    return badRequest("Full name cannot exceed 100 characters");
+                }
+
+                HttpSession nameSession = httpRequest.getSession(false);
+                Object nameSessionUser = nameSession == null ? null : nameSession.getAttribute("user");
+
+                if (!(nameSessionUser instanceof User) || ((User) nameSessionUser).getId() == null) {
+                    return unauthorized("Not authenticated");
+                }
+
+                User renamed = userService.updateFullName(((User) nameSessionUser).getId(), fullName);
+                nameSession.setAttribute("user", renamed);
+
+                Map<String, Object> nameResponse = new HashMap<>();
+                nameResponse.put("success", true);
+                nameResponse.put("message", "Name updated successfully");
+                nameResponse.put("user", buildUserData(renamed));
+                return ResponseEntity.ok(nameResponse);
+            }
+
             String username = request.get("username");
 
             if (username == null || username.trim().isEmpty()) {
@@ -1671,6 +1699,7 @@ public class AuthController {
         );
 
         userData.put("avatarUrl", safeString(user.getAvatarUrl()));
+        userData.put("name", safeString(user.getFullName()));
         userData.put("authProvider", safeString(user.getAuthProvider()));
         userData.put("createdAt", user.getCreatedAt());
 
