@@ -17,11 +17,11 @@ import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw';
 
 import {
   Copy, Check, Edit2, Pencil, Upload, Volume2, VolumeX, Share2, CheckCircle2, LoaderCircle,
-  X, RotateCcw, RotateCw, Download, ChevronDown, Eye, Zap, Brain, Plus, FileText, Mic, AudioLines,
+  X, RotateCcw, RotateCw, Download, ChevronDown, Eye, Zap, Brain, Sparkles, Plus, FileText, Mic, AudioLines,
   ThumbsUp, ThumbsDown, Paperclip, Camera,
 } from 'lucide-react';
 
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import AttachmentTile from '../components/AttachmentTile';
 import type { Components } from 'react-markdown'; 
 import remarkGfm from 'remark-gfm';
@@ -940,8 +940,10 @@ interface ModelOption {
 }
 
 const MODEL_OPTIONS: ModelOption[] = [
-  { id: 'openai/gpt-oss-20b', name: 'Twinkle', description: 'Fast everyday conversations', icon: Zap },
-  { id: 'openai/gpt-oss-120b', name: 'Twinkle Pro', description: 'Advanced reasoning and coding', icon: Brain },
+  { id: '@cf/openai/gpt-oss-20b', name: 'Twinkle', description: 'Fast everyday conversations', icon: Zap },
+  { id: '@cf/meta/llama-3.1-8b-instruct-fp8-fast', name: 'Twinkle Live', description: 'Ultra-low latency real-time chat', icon: Zap },
+  { id: '@cf/openai/gpt-oss-120b', name: 'Twinkle Pro', description: 'Advanced reasoning and coding', icon: Brain },
+  { id: '@cf/black-forest-labs/flux-1-schnell', name: 'Twinkle Imagine', description: 'Generate images from a text prompt', icon: Sparkles },
   { id: 'gemini-3.8-flash', name: 'Twinkle Vision', description: 'Advanced image & file understanding', icon: Eye, vision: true, documents: true },
 ];
 
@@ -4384,6 +4386,9 @@ if (isBlankDraft) {
                               ) : (
                                 <ReactMarkdown
                                   remarkPlugins={[remarkGfm]}
+                                  urlTransform={(url: string) =>
+                                    url.startsWith('data:image/') ? url : defaultUrlTransform(url)
+                                  }
                                   components={{
                                     h1({ children, ...props }: any) {
                                       return (
