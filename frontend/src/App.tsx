@@ -33,6 +33,7 @@ const Settings = lazy(() => import('./pages/Settings'));
 const LiveTalkColor = lazy(() => import('./pages/LiveTalkColor'));
 const SharedChat = lazy(() => import('./pages/SharedChat'));
 const KnowledgeBase = lazy(() => import('./pages/KnowledgeBase'));
+const LearnMore = lazy(() => import('./pages/LearnMore'));
 
 import StormLogo from './components/StormLogo';
 
@@ -346,6 +347,11 @@ function AuthenticatedApp({
         element={<SharedChat />}
       />
 
+
+      <Route
+        path="/learn-more"
+        element={user ? <LearnMore /> : <Navigate to="/login" replace />}
+      />
 
       {/* =====================================================
           PRIVATE DOCUMENT KNOWLEDGE BASE (RAG)
