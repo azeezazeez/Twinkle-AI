@@ -44,6 +44,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { createZip, readZip } from '../lib/zip';
 import { parseServerDate } from '../lib/time';
+import { markdownToPrintHtml } from '../lib/printHtml';
 import type { User, Session } from '../types';
 import {
   authApi,
@@ -1316,7 +1317,7 @@ export default function Settings({
             <h1>${escapeHtml(session.sessionName || 'Untitled chat')}</h1>
             ${messages.map((message: any) => {
               const when = parseServerDate(message?.timestamp);
-              return `<div class="m ${message?.role === 'user' ? 'u' : 'a'}"><b>${message?.role === 'user' ? 'You' : 'Twinkle'}</b>${when ? ` <i>${escapeHtml(when.toLocaleString())}</i>` : ''}<pre>${escapeHtml(String(message?.content ?? ''))}</pre></div>`;
+              return `<div class="m ${message?.role === 'user' ? 'u' : 'a'}"><b>${message?.role === 'user' ? 'You' : 'Twinkle'}</b>${when ? ` <i>${escapeHtml(when.toLocaleString())}</i>` : ''}<div class="c">${markdownToPrintHtml(String(message?.content ?? ''))}</div></div>`;
             }).join('')}
           </section>`).join('');
         const printWindow = window.open('', '_blank');
@@ -1326,7 +1327,9 @@ export default function Settings({
         }
         printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Twinkle chats ${stamp}</title>
           <style>body{font:14px/1.6 system-ui,sans-serif;margin:32px;color:#1f1e1d}section{page-break-after:always}h1{font-size:22px;border-bottom:1px solid #ddd;padding-bottom:8px}
-          .m{margin:14px 0}.m i{color:#777;font-style:normal;font-size:12px}pre{white-space:pre-wrap;word-wrap:break-word;font:inherit;margin:4px 0 0}.u pre{background:#f0eee6;padding:8px 12px;border-radius:10px}</style></head><body>${body}</body></html>`);
+          .m{margin:14px 0}.m i{color:#777;font-style:normal;font-size:12px}.c p{margin:4px 0}.c h3{font-size:15px;margin:10px 0 4px}.c ul{margin:4px 0 4px 20px;padding:0}.c img{max-width:100%;max-height:520px;height:auto;display:block;margin:8px 0;border-radius:8px;page-break-inside:avoid}
+          .c code{background:#f0eee6;padding:1px 4px;border-radius:4px;font:12px ui-monospace,monospace}.c pre.code{background:#f0eee6;padding:10px 12px;border-radius:8px;white-space:pre-wrap;word-break:break-word;page-break-inside:avoid}.c pre.code code{background:none;padding:0}
+          .u .c{background:#f0eee6;padding:6px 12px;border-radius:10px}.c a{color:#c6613f}@page{margin:14mm}</style></head><body>${body}</body></html>`);
         printWindow.document.close();
         printWindow.focus();
         window.setTimeout(() => printWindow.print(), 400);
