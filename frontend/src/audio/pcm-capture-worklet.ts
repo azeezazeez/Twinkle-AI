@@ -1,20 +1,12 @@
-// AudioWorklet source for Twinkle Live Talk.
-//
-// IMPORTANT:
-// This file intentionally contains JavaScript-compatible TypeScript only.
-// LiveTalkModal imports it with ?raw and loads it through a Blob with the
-// explicit application/javascript MIME type. This prevents Vite/Vercel from
-// guessing the MIME type from the .ts extension.
-
 class TwinklePcmCaptureProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
 
     this.inputRate = sampleRate;
     this.targetRate = 16000;
-    // Batch ~20 ms of 16 kHz PCM per message instead of one message per
+    // Batch ~10 ms of 16 kHz PCM per message instead of one message per
     // 128-sample render quantum (~375 msgs/s), cutting main-thread work.
-    this.chunkSamples = 320;
+    this.chunkSamples = 160;
     this.pending = new Int16Array(this.chunkSamples * 2);
     this.pendingLength = 0;
   }
