@@ -8,18 +8,29 @@ const MAX_VISIBLE = 3;
 const TOAST_MAX_WIDTH = 420;
 
 const MOBILE_QUERY = '(max-width: 639px)';
-function useIsMobile() {
-  const [mobile, setMobile] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia(MOBILE_QUERY).matches
+// PC / laptop screens: toasts are pinned to the exact bottom-right corner here.
+const DESKTOP_QUERY = '(min-width: 1024px)';
+
+function useMediaQuery(queryString: string) {
+  const [matches, setMatches] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(queryString).matches
   );
   useEffect(() => {
-    const query = window.matchMedia(MOBILE_QUERY);
-    const sync = () => setMobile(query.matches);
+    const query = window.matchMedia(queryString);
+    const sync = () => setMatches(query.matches);
     sync();
     query.addEventListener('change', sync);
     return () => query.removeEventListener('change', sync);
-  }, []);
-  return mobile;
+  }, [queryString]);
+  return matches;
+}
+
+function useIsMobile() {
+  return useMediaQuery(MOBILE_QUERY);
+}
+
+function useIsDesktop() {
+  return useMediaQuery(DESKTOP_QUERY);
 }
 
 function ToastCard({ item, fromTop }: { item: ToastItem; fromTop: boolean }) {
@@ -109,14 +120,18 @@ function ToastCard({ item, fromTop }: { item: ToastItem; fromTop: boolean }) {
 /** Renders every toast. Mount once, near the root of the app. */
 export default function Toaster() {
   const [items, setItems] = useState<ToastItem[]>([]);
-  // Toasts live in the bottom-right corner. They are lifted above the chat
-  // message box only when the two would actually overlap (narrow screens); on
-  // wide screens the corner is free, so nothing moves.
+  // On PC / laptop screens toasts always sit in the bottom-right corner. On
+  // in-between (tablet) widths they are still lifted above the chat message
+  // box when the two would actually overlap.
   const [composerLift, setComposerLift] = useState(0);
   const isMobile = useIsMobile();
+  const isDesktop = useIsDesktop();
 
   useEffect(() => {
-    if (items.length === 0 || isMobile) return;
+    if (items.length === 0 || isMobile || isDesktop) {
+      setComposerLift(0);
+      return;
+    }
     const measure = () => {
       const composer = document.querySelector<HTMLElement>('.twinkle-composer-shell, .chat-composer-shell');
       if (!composer) { setComposerLift(0); return; }
@@ -130,7 +145,7 @@ export default function Toaster() {
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, [items.length, isMobile]);
+  }, [items.length, isMobile, isDesktop]);
 
   useEffect(
     () =>
@@ -162,7 +177,7 @@ export default function Toaster() {
           ? 'top-0 items-center pt-[calc(env(safe-area-inset-top)+12px)]'
           : 'bottom-0 items-end pb-[calc(env(safe-area-inset-bottom)+24px)]'
       }`}
-      style={!isMobile && composerLift > 0 ? { paddingBottom: composerLift } : undefined}
+      style={!isMobile && !isDesktop && composerLift > 0 ? { paddingBottom: composerLift } : undefined}
     >
       <div className="flex w-full max-w-[420px] flex-col gap-2">
         <AnimatePresence initial={false}>
