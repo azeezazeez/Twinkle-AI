@@ -1,0 +1,513 @@
+package com.ai.chatbot_backend.service;
+
+import com.ai.chatbot_backend.exception.AIServiceException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.*;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestTemplate;
+
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+
+@Service
+@Slf4j
+public class GroqService {
+
+    private static final int MAX_RATE_LIMIT_RETRIES = 2;
+    private static final long DEFAULT_BACKOFF_MS = 1000L;
+    private static final long MAX_BACKOFF_MS = 30000L;
+    private static final int MAX_OUTPUT_TOKENS = 4096;
+
+    @Value("${groq.api.key}")
+    private String apiKey;
+
+    @Value("${groq.api.url}")
+    private String apiUrl;
+
+    @Value("${groq.model}")
+    private String defaultModel;
+
+    @Value("${groq.models:${groq.model}}")
+    private String configuredModels;
+
+    private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper;
+    private final OkHttpClient streamClient;
+
+    public GroqService(RestTemplate restTemplate, ObjectMapper objectMapper) {
+        this.restTemplate = restTemplate;
+        this.objectMapper = objectMapper;
+        this.streamClient = new OkHttpClient.Builder()
+                .connectTimeout(30, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
+                .readTimeout(0, TimeUnit.MILLISECONDS)
+                .build();
+    }
+
+    public List<String> getAvailableModels() {
+        LinkedHashSet<String> models = new LinkedHashSet<>();
+
+        for (String model : configuredModels.split(",")) {
+            String value = model.trim();
+            if (!value.isEmpty()) {
+                models.add(value);
+            }
+        }
+
+        if (models.isEmpty()) {
+            models.add(defaultModel);
+        }
+
+        return new ArrayList<>(models);
+    }
+
+    public String generateResponse(
+            String userMessage,
+            List<Map<String, String>> conversationHistory) {
+        return generateResponse(userMessage, conversationHistory, null);
+    }
+
+    public String generateResponse(
+            String userMessage,
+            List<Map<String, String>> conversationHistory,
+            String requestedModel) {
+        return generateResponse(userMessage, conversationHistory, requestedModel, null);
+    }
+
+    public String generateResponse(
+            String userMessage,
+            List<Map<String, String>> conversationHistory,
+            String requestedModel,
+            String requestedLanguage) {
+
+        String resolvedModel = resolveModel(requestedModel);
+        List<Map<String, Object>> messages =
+                buildHistory(conversationHistory, requestedLanguage);
+
+        messages.add(Map.of(
+                "role", "user",
+                "content", userMessage == null ? "" : userMessage
+        ));
+
+        return callGroq(messages, resolvedModel);
+    }
+
+    /** Streams Groq output as soon as the provider sends content. */
+    public String streamResponse(
+            String userMessage,
+            List<Map<String, String>> conversationHistory,
+            String requestedModel,
+            String requestedLanguage,
+            Consumer<String> onDelta) {
+
+        String resolvedModel = resolveModel(requestedModel);
+        List<Map<String, Object>> messages = buildHistory(conversationHistory, requestedLanguage);
+        messages.add(Map.of(
+                "role", "user",
+                "content", userMessage == null ? "" : userMessage
+        ));
+
+        try {
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("model", resolvedModel);
+            requestBody.put("messages", messages);
+            requestBody.put("temperature", 0.5);
+            requestBody.put("max_tokens", MAX_OUTPUT_TOKENS);
+            requestBody.put("stream", true);
+            // gpt-oss models "think" before answering, which shows up as a long
+            // pause and then a burst of text. Keep reasoning short so the
+            // answer starts quickly and streams steadily.
+            if (resolvedModel.startsWith("openai/gpt-oss")) {
+                requestBody.put("reasoning_effort", "low");
+            }
+
+            okhttp3.MediaType json = okhttp3.MediaType.get("application/json; charset=utf-8");
+            RequestBody body = RequestBody.create(objectMapper.writeValueAsBytes(requestBody), json);
+            Request request = new Request.Builder()
+                    .url(apiUrl + "/chat/completions")
+                    .header("Authorization", "Bearer " + apiKey)
+                    .header("Content-Type", "application/json")
+                    .post(body)
+                    .build();
+
+            StringBuilder full = new StringBuilder();
+            try (Response response = streamClient.newCall(request).execute()) {
+                if (!response.isSuccessful()) {
+                    String errorBody = response.body() == null ? "" : response.body().string();
+                    throw new AIServiceException("Groq API error " + response.code() + ": " + errorBody);
+                }
+                if (response.body() == null) {
+                    throw new AIServiceException("Groq returned an empty stream.");
+                }
+
+                try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(response.body().byteStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        if (!line.startsWith("data:")) continue;
+                        String data = line.substring(5).trim();
+                        if (data.isEmpty()) continue;
+                        if ("[DONE]".equals(data)) break;
+
+                        try {
+                            Map<?, ?> root = objectMapper.readValue(data, Map.class);
+                            Object choicesObject = root.get("choices");
+                            if (!(choicesObject instanceof List<?> choices) || choices.isEmpty()) continue;
+                            Object choiceObject = choices.get(0);
+                            if (!(choiceObject instanceof Map<?, ?> choice)) continue;
+                            Object deltaObject = choice.get("delta");
+                            if (!(deltaObject instanceof Map<?, ?> delta)) continue;
+                            Object content = delta.get("content");
+                            if (content == null) continue;
+                            String chunk = content.toString();
+                            if (chunk.isEmpty()) continue;
+                            full.append(chunk);
+                            onDelta.accept(chunk);
+                        } catch (Exception parseError) {
+                            log.debug("Ignoring malformed Groq stream event: {}", parseError.getMessage());
+                        }
+                    }
+                }
+            }
+            return full.toString();
+        } catch (AIServiceException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Groq streaming failed: {}", e.getMessage(), e);
+            throw new AIServiceException("Unable to stream the Groq response.", e);
+        }
+    }
+
+    private String resolveModel(String requestedModel) {
+        String requested = requestedModel == null ? "" : requestedModel.trim();
+
+        if (requested.isEmpty()) {
+            return defaultModel;
+        }
+
+        if (!getAvailableModels().contains(requested)) {
+            throw new IllegalArgumentException(
+                    "Unsupported Groq model: " + requested
+            );
+        }
+
+        return requested;
+    }
+
+    public List<Map<String, Object>> buildHistory(
+            List<Map<String, String>> history,
+            String requestedLanguage) {
+
+        List<Map<String, Object>> messages = new ArrayList<>();
+
+        String languageInstruction =
+                buildLanguageInstruction(requestedLanguage);
+        java.time.ZonedDateTime now = java.time.ZonedDateTime.now();
+        String clockContext = "Current date and time: " + now.format(java.time.format.DateTimeFormatter.ofPattern("EEEE, dd MMMM uuuu HH:mm:ss z"))
+                + " (timezone " + now.getZone().getId() + "). Use this live context for current date/time questions; do not claim you lack a clock. ";
+
+        messages.add(Map.of(
+                "role", "system",
+                "content",
+                "You are Twinkle AI, a professional, intelligent, and helpful general-purpose AI assistant. For simple questions about current date, time, or location, answer casually and briefly in plain language. Do not display raw ISO timestamps, coordinates, or technical timezone details unless the user asks. Use client-verified live context when provided; never guess the user's location. "
+                        + clockContext
+                        + "Understand emoji-only messages and respond naturally to emojis; use relevant emojis when appropriate and preserve Unicode emoji characters. "
+                        + "Use friendly user-facing error wording; never expose raw stack traces, provider payloads, or internal code. "
+                        + "Response quality rules: always reply with a clean, complete, well-formed answer. Never output raw error messages, error or status codes, stack traces, JSON payloads, partial or broken Markdown, or unfinished code blocks. If something cannot be done, say so briefly in friendly plain language and offer the next best step. Only include code when the user asks for it, and then always inside a properly closed fenced code block. "
+                        + "Understand the user's actual intent and answer using your model intelligence. "
+                        + "Interpret common typos, misspellings, transposed letters, missing spaces, autocorrect errors, phonetic spellings, and imperfect grammar using the surrounding context. Infer the most likely intended meaning when confidence is high and answer directly without scolding or asking for clarification. If two or more meanings are genuinely plausible, briefly state the likely interpretation or ask one concise clarifying question. Preserve exact spelling for names, code, commands, identifiers, and quoted text unless the user asks to correct them. Do not silently change the meaning of ambiguous technical terms. "
+                        + "Stay strictly relevant: answer exactly what the user asked, start with the answer itself, and never open with filler such as 'Great question' or restate the question. Keep the length proportional to the question: one or two sentences for simple questions, more depth only when the task needs it. Do not add unrelated background, disclaimers, or unsolicited suggestions. "
+                        + "If the request is genuinely ambiguous (for example a single word that could mean several things), give the single most likely interpretation in one line and answer it, then offer one short alternative, instead of replying only with a clarifying question. "
+                        + "Use the earlier messages in this conversation to resolve references like 'it', 'that', or 'the previous one'. "
+                        + "Do not follow a rigid response template. "
+                        + "Prioritize readable prose, short paragraphs, meaningful headings, and bullets or numbered steps when they improve clarity. "
+                        + "Do not use Markdown tables by default; use a table only when the user explicitly requests one or when a compact side-by-side comparison genuinely benefits from tabular layout. Never turn ordinary explanations, lists, procedures, or summaries into tables. "
+                        + "Preserve technical terms, code, identifiers, and proper names when appropriate. "
+                        + "Use conversation history and supplied text as context when relevant. "
+                        + "Answer simply for simple requests and provide appropriate depth for complex requests. "
+                        + "Be accurate, practical, clear, and natural. Do not invent facts. "
+                        + "For normal questions, answer directly and naturally. "
+                        + "For code, writing, calculations, explanations, and other tasks, adapt naturally to what the user asks. "
+                        + languageInstruction
+        ));
+
+        if (history != null) {
+            for (Map<String, String> item : history) {
+                if (item == null) {
+                    continue;
+                }
+
+                String role = item.get("role");
+                String content = item.get("content");
+
+                if (role == null || content == null || content.isBlank()) {
+                    continue;
+                }
+
+                String normalizedRole =
+                        "assistant".equalsIgnoreCase(role)
+                                ? "assistant"
+                                : "user".equalsIgnoreCase(role)
+                                ? "user"
+                                : null;
+
+                if (normalizedRole == null) {
+                    continue;
+                }
+
+                messages.add(Map.of(
+                        "role", normalizedRole,
+                        "content", content
+                ));
+            }
+        }
+
+        return messages;
+    }
+
+    private String buildLanguageInstruction(String requestedLanguage) {
+        String code = requestedLanguage == null
+                ? ""
+                : requestedLanguage.trim().toLowerCase(java.util.Locale.ROOT);
+
+        if (code.isEmpty() || "auto".equals(code)) {
+            return "Respond in the language of the user's latest message, and only that message. "
+                    + "If the latest message is written in English, answer in English, even if earlier messages, the conversation history or the user's name are in another language. "
+                    + "Never switch to a different language on your own. "
+                    + "If the user explicitly asks for another language, or writes in a new language, follow that. ";
+        }
+
+        String name = switch (code) {
+            case "en" -> "English";
+            case "hi" -> "Hindi";
+            case "te" -> "Telugu";
+            case "ta" -> "Tamil";
+            case "kn" -> "Kannada";
+            case "ml" -> "Malayalam";
+            case "bn" -> "Bengali";
+            case "mr" -> "Marathi";
+            case "gu" -> "Gujarati";
+            case "pa" -> "Punjabi";
+            case "ur" -> "Urdu";
+            case "ar" -> "Arabic";
+            case "es" -> "Spanish";
+            case "fr" -> "French";
+            case "de" -> "German";
+            case "it" -> "Italian";
+            case "pt" -> "Portuguese";
+            case "ru" -> "Russian";
+            case "ja" -> "Japanese";
+            case "ko" -> "Korean";
+            case "zh" -> "Chinese";
+            case "tr" -> "Turkish";
+            case "vi" -> "Vietnamese";
+            case "id" -> "Indonesian";
+            case "th" -> "Thai";
+            case "fil" -> "Filipino";
+            default -> null;
+        };
+
+        if (name == null) {
+            return "Detect the language of the user's latest message and respond in that same language. ";
+        }
+
+        return "The user selected " + name
+                + ". Respond entirely in " + name
+                + " unless the user explicitly asks for another language. "
+                + "Never switch to English merely because technical terms or the interface are in English. ";
+    }
+
+    private String callGroq(
+            List<Map<String, Object>> messages,
+            String model) {
+
+        int rateLimitAttempt = 0;
+
+        while (true) {
+            try {
+                Map<String, Object> requestBody = new HashMap<>();
+                requestBody.put("model", model);
+                requestBody.put("messages", messages);
+                requestBody.put("temperature", 0.7);
+                requestBody.put("max_tokens", MAX_OUTPUT_TOKENS);
+
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                headers.setBearerAuth(apiKey);
+
+                HttpEntity<Map<String, Object>> entity =
+                        new HttpEntity<>(requestBody, headers);
+
+                ResponseEntity<Map> response = restTemplate.postForEntity(
+                        apiUrl + "/chat/completions",
+                        entity,
+                        Map.class
+                );
+
+                Map<String, Object> body = response.getBody();
+
+                if (body != null
+                        && body.get("choices") instanceof List<?> choices
+                        && !choices.isEmpty()
+                        && choices.get(0) instanceof Map<?, ?> choice
+                        && choice.get("message") instanceof Map<?, ?> message) {
+
+                    Object content = message.get("content");
+
+                    if (content != null && !content.toString().isBlank()) {
+                        return content.toString();
+                    }
+                }
+
+                throw new AIServiceException(
+                        "Groq returned an invalid or empty response."
+                );
+
+            } catch (HttpClientErrorException e) {
+
+                int status = e.getStatusCode().value();
+
+                if (status == 429
+                        && rateLimitAttempt < MAX_RATE_LIMIT_RETRIES) {
+
+                    long delay =
+                            resolveRetryDelay(e, rateLimitAttempt);
+
+                    log.warn(
+                            "Groq rate limited. Retrying in {} ms. model={}, attempt={}/{}",
+                            delay,
+                            model,
+                            rateLimitAttempt + 1,
+                            MAX_RATE_LIMIT_RETRIES
+                    );
+
+                    sleep(delay);
+                    rateLimitAttempt++;
+                    continue;
+                }
+
+                String body = e.getResponseBodyAsString();
+
+                log.error(
+                        "Groq client error. model={}, status={}, response={}",
+                        model,
+                        status,
+                        body
+                );
+
+                String message = status == 429
+                        ? "The AI service is temporarily rate-limited. Please wait a few seconds and try again."
+                        : "Groq API error " + status + ": " + body;
+
+                throw new AIServiceException(message, e);
+
+            } catch (HttpServerErrorException e) {
+
+                int status = e.getStatusCode().value();
+                String body = e.getResponseBodyAsString();
+
+                log.error(
+                        "Groq server error. model={}, status={}, response={}",
+                        model,
+                        status,
+                        body
+                );
+
+                String message =
+                        status == 502 || status == 503 || status == 504
+                                ? "The Groq AI service is temporarily unavailable. Please try again shortly."
+                                : "Groq API error " + status + ": " + body;
+
+                throw new AIServiceException(message, e);
+
+            } catch (ResourceAccessException e) {
+
+                log.error(
+                        "Unable to reach Groq. model={}, error={}",
+                        model,
+                        e.getMessage(),
+                        e
+                );
+
+                throw new AIServiceException(
+                        "Unable to connect to Groq AI service.",
+                        e
+                );
+
+            } catch (AIServiceException e) {
+                throw e;
+
+            } catch (Exception e) {
+
+                log.error(
+                        "Unexpected Groq error. model={}, error={}",
+                        model,
+                        e.getMessage(),
+                        e
+                );
+
+                throw new AIServiceException(
+                        "Unexpected error while communicating with the AI service.",
+                        e
+                );
+            }
+        }
+    }
+
+    private long resolveRetryDelay(
+            HttpClientErrorException exception,
+            int attempt) {
+
+        String retryAfter =
+                exception.getResponseHeaders() == null
+                        ? null
+                        : exception.getResponseHeaders()
+                                .getFirst("Retry-After");
+
+        if (retryAfter != null && !retryAfter.isBlank()) {
+            try {
+                return Math.min(
+                        Long.parseLong(retryAfter.trim()) * 1000L,
+                        MAX_BACKOFF_MS
+                );
+            } catch (NumberFormatException ignored) {
+                // Fall back to exponential backoff.
+            }
+        }
+
+        long delay =
+                DEFAULT_BACKOFF_MS
+                        * (1L << Math.min(attempt, 4));
+
+        return Math.min(delay, MAX_BACKOFF_MS);
+    }
+
+    private void sleep(long delay) {
+        try {
+            Thread.sleep(Math.max(0L, delay));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+
+            throw new AIServiceException(
+                    "Groq retry was interrupted.",
+                    e
+            );
+        }
+    }
+}
