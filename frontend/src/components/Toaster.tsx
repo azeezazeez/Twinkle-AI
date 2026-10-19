@@ -4,7 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
 import { dismissToast, subscribeToasts, type ToastItem } from '../lib/toast';
 
-const MAX_VISIBLE = 3;
+const MAX_VISIBLE = 3; 
 const TOAST_MAX_WIDTH = 420;
 
 const MOBILE_QUERY = '(max-width: 639px)';
