@@ -12,6 +12,7 @@ import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -96,6 +97,27 @@ public class OAuthService {
      */
     @Value("${oauth.google.redirect-uri}")
     private String googleRedirectUri;
+
+    /**
+     * The callback must be served through the frontend domain (Vercel proxies /api/* to Render).
+     * If it points at the Render host, the session cookie is set on onrender.com and the
+     * browser never sends it with the frontend's /api calls, so login silently fails.
+     */
+    @PostConstruct
+    void checkRedirectUriHost() {
+        try {
+            String callbackHost = java.net.URI.create(googleRedirectUri).getHost();
+            String frontendHost = java.net.URI.create(frontendUrl).getHost();
+            if (callbackHost != null && frontendHost != null && !callbackHost.equalsIgnoreCase(frontendHost)
+                    && !"localhost".equalsIgnoreCase(callbackHost)) {
+                log.warn("OAUTH_GOOGLE_REDIRECT_URI host '{}' differs from FRONTEND_URL host '{}'. "
+                        + "Google login will not persist; use {}/api/auth/oauth/google/callback",
+                        callbackHost, frontendHost, frontendUrl.replaceAll("/+$", ""));
+            }
+        } catch (Exception ignored) {
+            // malformed URL is reported when the flow starts
+        }
+    }
 
     // ========================================================================
     // GOOGLE AUTHORIZATION URL
