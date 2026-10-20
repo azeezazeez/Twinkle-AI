@@ -4,8 +4,8 @@ const API_BASE = (
   import.meta.env.VITE_API_BASE_URL || '/api'
 ).replace(/\/$/, '');
 
-export type LiveApiVersion = 'v1alpha';
-export const LIVE_API_VERSION: LiveApiVersion = 'v1alpha';
+export type LiveApiVersion = 'v1beta';
+export const LIVE_API_VERSION: LiveApiVersion = 'v1beta';
 
 export const buildLiveSocketUrl = (
   token: string,
@@ -1824,7 +1824,7 @@ const invalidateCachedLiveToken = (token?: string) => {
  * Call when a Live WebSocket closed before it ever opened (a handshake
  * failure, which browsers report only as code 1006). Drops the cached token
  * (and any token request still in flight) so the retry mints a fresh one.
- * The API version never changes: ephemeral tokens only work on v1alpha.
+ * The API version never changes: ephemeral tokens only work on v1beta.
  */
 export function reportLiveSocketFailure(_apiVersion?: LiveApiVersion, token?: string): void {
   invalidateCachedLiveToken(token);
@@ -1832,7 +1832,7 @@ export function reportLiveSocketFailure(_apiVersion?: LiveApiVersion, token?: st
   liveTokenPromise = null;
 }
 
-/** Kept for API compatibility; the Live API version is fixed to v1alpha. */
+/** Kept for API compatibility; the Live API version is fixed to v1beta. */
 export function reportLiveSocketSuccess(_apiVersion?: LiveApiVersion): void {
   /* nothing to remember */
 }
