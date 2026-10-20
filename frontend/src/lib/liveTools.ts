@@ -17,8 +17,18 @@ export const LIVE_TOOL_DECLARATIONS = [
     description:
       "Returns the user's exact current local date, day of week, time and timezone. " +
       'Call it for ANY question about the time, date, day, month, year or timezone, ' +
-      'and whenever you need to know "today" or "now".',
-    parameters: { type: 'OBJECT', properties: {} },
+      'and whenever you need to know "today" or "now". If the user asks the time or date in another ' +
+      'city or country (for example "what time is it in London"), pass it in `place`. Omit `place` for ' +
+      "the user's own local time.",
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        place: {
+          type: 'STRING',
+          description: 'Optional city or country whose current time is wanted, for example "Tokyo" or "New York". Omit for the user\'s own time.',
+        },
+      },
+    },
   },
   {
     name: 'get_user_location',
@@ -51,6 +61,38 @@ export const LIVE_TOOL_DECLARATIONS = [
     },
   },
   {
+    name: 'search_web',
+    description:
+      'Looks up general facts on the web (people, places, companies, events, science, history, sports, ' +
+      'definitions, "who is", "what is", "tell me about"). Call it for any factual question you are not ' +
+      'completely sure about, or that may have changed recently. Use a short, specific query.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        query: {
+          type: 'STRING',
+          description: 'A short search query, for example "Chandrayaan 3" or "Sundar Pichai".',
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'get_exchange_rate',
+    description:
+      'Returns the LIVE currency exchange rate and converts an amount. Call it for any question about ' +
+      'currency conversion, dollar / rupee / euro rates, or "how much is X in Y".',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        from: { type: 'STRING', description: 'Three-letter source currency code, for example "USD".' },
+        to: { type: 'STRING', description: 'Three-letter target currency code, for example "INR".' },
+        amount: { type: 'NUMBER', description: 'Amount to convert. Defaults to 1.' },
+      },
+      required: ['from', 'to'],
+    },
+  },
+  {
     name: 'search_knowledge_base',
     description:
       "Searches the documents the user has uploaded to their personal knowledge base and returns an " +
@@ -74,6 +116,8 @@ export const LIVE_TOOL_ACTIVITY: Record<string, string> = {
   get_current_datetime: 'Checking the time',
   get_user_location: 'Finding your location',
   get_weather: 'Checking the weather',
+  search_web: 'Looking that up',
+  get_exchange_rate: 'Checking the exchange rate',
   search_knowledge_base: 'Searching your documents',
 };
 
@@ -150,10 +194,13 @@ type ResolvedLocation = {
   accuracyMeters: number | null;
   label: string;
   parts: { locality?: string; subdistrict?: string; district?: string; state?: string; country?: string };
+  /** 'gps' = the device position; 'network' = approximate, from the internet connection. */
+  source: 'gps' | 'network';
   at: number;
 };
 
 let cachedLocation: ResolvedLocation | null = null;
+let cachedNetworkLocation: ResolvedLocation | null = null;
 let locationPromise: Promise<ResolvedLocation> | null = null;
 
 class ToolError extends Error {}
@@ -218,24 +265,86 @@ const reverseGeocode = async (latitude: number, longitude: number): Promise<{ la
   return { label: ordered.join(', '), parts };
 };
 
+// City-level location from the internet connection. It needs no permission, so
+// "where am I" and local weather still work when device location is blocked.
+const resolveNetworkLocation = async (): Promise<ResolvedLocation | null> => {
+  if (cachedNetworkLocation && Date.now() - cachedNetworkLocation.at < POSITION_CACHE_MS) return cachedNetworkLocation;
+
+  const providers: Array<() => Promise<{ lat: unknown; lon: unknown; city?: string; region?: string; country?: string }>> = [
+    async () => {
+      const d = await fetchJson('https://ipwho.is/', 6000);
+      if (d?.success === false) throw new Error('ipwho failed');
+      return { lat: d.latitude, lon: d.longitude, city: d.city, region: d.region, country: d.country };
+    },
+    async () => {
+      const d = await fetchJson('https://ipapi.co/json/', 6000);
+      if (d?.error) throw new Error('ipapi failed');
+      return { lat: d.latitude, lon: d.longitude, city: d.city, region: d.region, country: d.country_name };
+    },
+    async () => {
+      const d = await fetchJson('https://get.geojs.io/v1/ip/geo.json', 6000);
+      return { lat: Number(d.latitude), lon: Number(d.longitude), city: d.city, region: d.region, country: d.country };
+    },
+  ];
+
+  for (const provider of providers) {
+    try {
+      const found = await provider();
+      const latitude = num(found.lat);
+      const longitude = num(found.lon);
+      if (latitude === null || longitude === null) continue;
+      const parts: ResolvedLocation['parts'] = {
+        locality: found.city || undefined,
+        state: found.region || undefined,
+        country: found.country || undefined,
+      };
+      const label = [parts.locality, parts.state, parts.country]
+        .filter((value, index, all): value is string => Boolean(value) && all.indexOf(value) === index)
+        .join(', ');
+      cachedNetworkLocation = {
+        latitude,
+        longitude,
+        accuracyMeters: null,
+        label: label || 'your area',
+        parts,
+        source: 'network',
+        at: Date.now(),
+      };
+      return cachedNetworkLocation;
+    } catch {
+      /* try the next provider */
+    }
+  }
+  return null;
+};
+
 const resolveCurrentLocation = async (): Promise<ResolvedLocation> => {
   if (cachedLocation && Date.now() - cachedLocation.at < POSITION_CACHE_MS) return cachedLocation;
   if (locationPromise) return locationPromise;
 
   locationPromise = (async () => {
-    const position = await getBrowserPosition();
-    const { latitude, longitude, accuracy } = position.coords;
-    const { label, parts } = await reverseGeocode(latitude, longitude);
-    const resolved: ResolvedLocation = {
-      latitude,
-      longitude,
-      accuracyMeters: roundTo(accuracy),
-      label: label || 'your current location',
-      parts,
-      at: Date.now(),
-    };
-    cachedLocation = resolved;
-    return resolved;
+    try {
+      const position = await getBrowserPosition();
+      const { latitude, longitude, accuracy } = position.coords;
+      const { label, parts } = await reverseGeocode(latitude, longitude);
+      const resolved: ResolvedLocation = {
+        latitude,
+        longitude,
+        accuracyMeters: roundTo(accuracy),
+        label: label || 'your current location',
+        parts,
+        source: 'gps',
+        at: Date.now(),
+      };
+      cachedLocation = resolved;
+      return resolved;
+    } catch (gpsError) {
+      // Device location is blocked or unavailable: fall back to the approximate
+      // network location rather than leaving the user without an answer.
+      const approximate = await resolveNetworkLocation();
+      if (approximate) return approximate;
+      throw gpsError;
+    }
   })().finally(() => {
     locationPromise = null;
   });
@@ -243,19 +352,76 @@ const resolveCurrentLocation = async (): Promise<ResolvedLocation> => {
   return locationPromise;
 };
 
+/**
+ * Starts resolving the user's location in the background so the voice session
+ * already knows roughly where they are on the first question. It never shows a
+ * permission prompt: the device position is used only if it was already allowed,
+ * otherwise the approximate network location is used.
+ */
+let warmLocation: ResolvedLocation | null = null;
+export const warmLiveContext = async (): Promise<void> => {
+  try {
+    let granted = false;
+    try {
+      const status = await navigator.permissions?.query({ name: 'geolocation' as PermissionName });
+      granted = status?.state === 'granted';
+    } catch { /* Permissions API unavailable */ }
+    warmLocation = granted ? await resolveCurrentLocation() : await resolveNetworkLocation();
+  } catch {
+    warmLocation = (await resolveNetworkLocation().catch(() => null)) ?? null;
+  }
+};
+
+/** One sentence describing what is already known about the user's whereabouts. */
+export const getLiveContextLine = (): string => {
+  if (!warmLocation) return '';
+  const how = warmLocation.source === 'gps' ? 'from the device location' : 'approximate, from the network';
+  return `Known location of the user (${how}): ${warmLocation.label}. Use it for "near me" and local questions; call get_user_location for the exact, current answer.`;
+};
+
 /* ------------------------------------------------------------------ */
 /*  Tools                                                              */
 /* ------------------------------------------------------------------ */
 
-const toolGetCurrentDateTime = (): LiveToolResult => {
-  const now = new Date();
-  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown';
+const formatDateTime = (now: Date, timeZone?: string): Record<string, string> => {
+  const zone = timeZone ? { timeZone } : {};
   return {
-    fullDateTime: new Intl.DateTimeFormat(undefined, { dateStyle: 'full', timeStyle: 'long' }).format(now),
-    dayOfWeek: new Intl.DateTimeFormat(undefined, { weekday: 'long' }).format(now),
-    date: new Intl.DateTimeFormat(undefined, { dateStyle: 'long' }).format(now),
-    time: new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(now),
-    timezone,
+    fullDateTime: new Intl.DateTimeFormat(undefined, { dateStyle: 'full', timeStyle: 'long', ...zone }).format(now),
+    dayOfWeek: new Intl.DateTimeFormat(undefined, { weekday: 'long', ...zone }).format(now),
+    date: new Intl.DateTimeFormat(undefined, { dateStyle: 'long', ...zone }).format(now),
+    time: new Intl.DateTimeFormat(undefined, { timeStyle: 'short', ...zone }).format(now),
+  };
+};
+
+const toolGetCurrentDateTime = async (args: Record<string, unknown>): Promise<LiveToolResult> => {
+  const now = new Date();
+  const requestedPlace = typeof args.place === 'string' ? args.place.trim() : '';
+  const ownZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown';
+
+  if (requestedPlace && !/^(here|my location|local|my time|current location)$/i.test(requestedPlace)) {
+    try {
+      const match = await geocodePlace(requestedPlace);
+      if (match?.timezone) {
+        return {
+          place: match.label,
+          ...formatDateTime(now, match.timezone),
+          timezone: match.timezone,
+          utc: now.toISOString(),
+          note: `This is the current date and time in ${match.label}, not the user's own time.`,
+        };
+      }
+    } catch { /* fall through to the user's own time below */ }
+    return {
+      ...formatDateTime(now),
+      timezone: ownZone,
+      utc: now.toISOString(),
+      note: `The time zone of "${requestedPlace}" could not be looked up. Give the user's own local time below and say so in one short phrase; do not refuse.`,
+    };
+  }
+
+  return {
+    ...formatDateTime(now),
+    timezone: ownZone,
     utc: now.toISOString(),
     note: "This is the user's own local date and time. Use it, not any other timezone, unless asked.",
   };
@@ -275,13 +441,18 @@ const toolGetUserLocation = async (): Promise<LiveToolResult> => {
       longitude: roundTo(location.longitude, 4),
       accuracyMeters: location.accuracyMeters,
     },
+    locationSource: location.source === 'gps' ? 'device GPS (precise)' : 'internet connection (approximate, city level)',
     note:
+      (location.source === 'gps'
+        ? ''
+        : 'Device location is not allowed, so this is the approximate city-level location from the internet connection. ' +
+          'Answer with it confidently, add one short phrase that it is approximate, and mention that allowing location in the browser makes it exact. ') +
       'Say the location in ordinary words, from the most local level to the broadest. ' +
       'Never invent a village or mandal that is null here. Do not read coordinates unless asked.',
   };
 };
 
-type PlaceMatch = { latitude: number; longitude: number; label: string };
+type PlaceMatch = { latitude: number; longitude: number; label: string; timezone?: string };
 
 const geocodePlace = async (place: string): Promise<PlaceMatch | null> => {
   const [name, ...rest] = place.split(',').map(part => part.trim()).filter(Boolean);
@@ -305,6 +476,7 @@ const geocodePlace = async (place: string): Promise<PlaceMatch | null> => {
     latitude: best.latitude,
     longitude: best.longitude,
     label: [best.name, best.admin1, best.country].filter(Boolean).join(', '),
+    timezone: typeof best.timezone === 'string' ? best.timezone : undefined,
   };
 };
 
@@ -315,6 +487,7 @@ const toolGetWeather = async (args: Record<string, unknown>, effects: LiveToolEf
   let latitude: number;
   let longitude: number;
   let label: string;
+  let approximateLocation = false;
 
   if (!usesCurrentLocation) {
     let match: PlaceMatch | null = null;
@@ -328,9 +501,16 @@ const toolGetWeather = async (args: Record<string, unknown>, effects: LiveToolEf
     }
     ({ latitude, longitude, label } = match);
   } else {
-    const location = await resolveCurrentLocation();
+    let location: ResolvedLocation;
+    try {
+      location = await resolveCurrentLocation();
+    } catch (locationError) {
+      const message = locationError instanceof Error ? locationError.message : 'Location is unavailable.';
+      return { error: `${message} Ask the user which city they want the weather for, then call get_weather again with that place.` };
+    }
     ({ latitude, longitude } = location);
     label = location.label;
+    approximateLocation = location.source === 'network';
   }
 
   let weather: any;
@@ -364,6 +544,9 @@ const toolGetWeather = async (args: Record<string, unknown>, effects: LiveToolEf
   return {
     location: label,
     isUsersCurrentLocation: usesCurrentLocation,
+    ...(usesCurrentLocation && approximateLocation
+      ? { locationNote: 'The location is approximate (city level, from the internet connection). Mention that briefly.' }
+      : {}),
     timezone: weather.timezone ?? null,
     now: {
       conditions: describeWeatherCode(Number(current.weather_code), isDay).label,
@@ -387,6 +570,70 @@ const toolGetWeather = async (args: Record<string, unknown>, effects: LiveToolEf
     })),
     note: 'Metric units. Speak it naturally and briefly (for example "about 31 degrees and partly cloudy"); never read codes or raw numbers lists.',
   };
+};
+
+const toolSearchWeb = async (args: Record<string, unknown>): Promise<LiveToolResult> => {
+  const query = typeof args.query === 'string' ? args.query.trim() : '';
+  if (!query) return { error: 'No search query was provided.' };
+
+  try {
+    const data = await fetchJson(
+      'https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&generator=search' +
+      `&gsrsearch=${encodeURIComponent(query)}&gsrlimit=3&prop=extracts&exintro=1&explaintext=1&exchars=650&redirects=1`,
+      8000,
+    );
+    const pages: any[] = Object.values(data?.query?.pages ?? {});
+    const results = pages
+      .sort((a, b) => Number(a?.index ?? 99) - Number(b?.index ?? 99))
+      .map(page => ({ title: String(page?.title ?? ''), summary: String(page?.extract ?? '').trim() }))
+      .filter(item => item.title && item.summary);
+
+    if (!results.length) {
+      return {
+        results: [],
+        note: 'Nothing matching was found online. Answer from your own knowledge as helpfully and confidently as you can, and say briefly if it may not be the latest. Never reply with just "I don\'t know".',
+      };
+    }
+    return {
+      query,
+      results,
+      note:
+        'Reference summaries from Wikipedia. Answer the question directly from the most relevant one in one or two spoken sentences. ' +
+        'For breaking news, live scores or prices these may be slightly out of date: say so in a few words rather than refusing.',
+    };
+  } catch {
+    return {
+      error: 'The web lookup is not reachable right now. Answer from your own knowledge as helpfully as you can, note briefly that it may not be the very latest, and never reply with just "I don\'t know".',
+    };
+  }
+};
+
+const toolGetExchangeRate = async (args: Record<string, unknown>): Promise<LiveToolResult> => {
+  const from = String(args.from ?? '').trim().toUpperCase();
+  const to = String(args.to ?? '').trim().toUpperCase();
+  const amount = num(args.amount) ?? 1;
+  if (!/^[A-Z]{3}$/.test(from) || !/^[A-Z]{3}$/.test(to)) {
+    return { error: 'Use three-letter currency codes such as USD, INR, EUR. Work out the right codes and call again.' };
+  }
+
+  try {
+    const data = await fetchJson(`https://open.er-api.com/v6/latest/${from}`, 8000);
+    const rate = num(data?.rates?.[to]);
+    if (data?.result === 'error' || rate === null) {
+      return { error: `No exchange rate was found for ${from} to ${to}. Check the currency codes.` };
+    }
+    return {
+      from,
+      to,
+      amount,
+      rate: roundTo(rate, 4),
+      converted: roundTo(amount * rate, 2),
+      updated: typeof data?.time_last_update_utc === 'string' ? data.time_last_update_utc : null,
+      note: 'Say the converted amount naturally, for example "about 83 rupees". Rates change during the day.',
+    };
+  } catch {
+    return { error: 'The live exchange rate could not be retrieved right now. Say so briefly and offer to try again.' };
+  }
 };
 
 const toolSearchKnowledgeBase = async (args: Record<string, unknown>): Promise<LiveToolResult> => {
@@ -428,11 +675,15 @@ export const runLiveTool = async (
   const run = async (): Promise<LiveToolResult> => {
     switch (name) {
       case 'get_current_datetime':
-        return toolGetCurrentDateTime();
+        return toolGetCurrentDateTime(input);
       case 'get_user_location':
         return toolGetUserLocation();
       case 'get_weather':
         return toolGetWeather(input, effects);
+      case 'search_web':
+        return toolSearchWeb(input);
+      case 'get_exchange_rate':
+        return toolGetExchangeRate(input);
       case 'search_knowledge_base':
         return toolSearchKnowledgeBase(input);
       default:
