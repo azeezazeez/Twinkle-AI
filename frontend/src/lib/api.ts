@@ -3,7 +3,7 @@ import { describeTokenFailure } from './liveErrors';
 const API_BASE = (
   import.meta.env.VITE_API_BASE_URL || '/api'
 ).replace(/\/$/, '');
-
+ 
 export type LiveApiVersion = 'v1beta';
 export const LIVE_API_VERSION: LiveApiVersion = 'v1beta';
 
