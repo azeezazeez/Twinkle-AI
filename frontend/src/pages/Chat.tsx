@@ -22,11 +22,12 @@ import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw';
 import {
   Copy, Check, Edit2, Pencil, Upload, Volume2, VolumeX, Share2, CheckCircle2, LoaderCircle,
   X, RotateCcw, RotateCw, Download, ChevronDown, Eye, Zap, Brain, Sparkles, Plus, FileText, Mic, AudioLines,
-  ThumbsUp, ThumbsDown, Paperclip, Camera, Search as SearchIcon, ChevronUp,
+  ThumbsUp, ThumbsDown, Paperclip, Camera, Search as SearchIcon, ChevronUp, Files,
 } from 'lucide-react';
 
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import AttachmentTile from '../components/AttachmentTile';
+import ChatFilesPanel, { detectFileKind, type ChatFileItem } from '../components/ChatFilesPanel';
 import WeatherCard from '../components/WeatherCard';
 import ChatTitleMenu from '../components/ChatTitleMenu';
 import type { Components } from 'react-markdown'; 
@@ -1386,11 +1387,38 @@ interface ModelOption {
 }
 
 const MODEL_OPTIONS: ModelOption[] = [
-  { id: '@cf/openai/gpt-oss-20b', name: 'Spark', description: 'Fast, friendly everyday answers', icon: Zap },
-  { id: '@cf/meta/llama-3.1-8b-instruct-fp8-fast', name: 'Flow', description: 'Instant replies for real-time chat', icon: Zap },
-  { id: '@cf/openai/gpt-oss-120b', name: 'Prime', description: 'Deep reasoning, coding and analysis', icon: Brain },
-  { id: '@cf/black-forest-labs/flux-1-schnell', name: 'Canvas', description: 'Turn your words into images', icon: Sparkles },
-  { id: 'gemini-3.8-flash', name: 'Sight', description: 'Understands images, audio and files', icon: Eye, vision: true, documents: true },
+  {
+    id: '@cf/openai/gpt-oss-20b',
+    name: 'Twinkle Nova 2.0',
+    description: 'Brilliant everyday intelligence. Fast, sharp and dependable for any task',
+    icon: Zap,
+  },
+  {
+    id: '@cf/meta/llama-3.1-8b-instruct-fp8-fast',
+    name: 'Twinkle Pulse 1.5',
+    description: 'Near-instant answers at lightning speed when every second counts',
+    icon: Zap,
+  },
+  {
+    id: '@cf/openai/gpt-oss-120b',
+    name: 'Twinkle Apex 3.0',
+    description: 'Our flagship. Frontier-level reasoning, expert coding and deep analysis',
+    icon: Brain,
+  },
+  {
+    id: '@cf/black-forest-labs/flux-1-schnell',
+    name: 'Twinkle Muse 1.0',
+    description: 'Studio-quality images and artwork from a single sentence',
+    icon: Sparkles,
+  },
+  {
+    id: 'gemini-3.8-flash',
+    name: 'Twinkle Insight 2.0',
+    description: 'Sees, reads and listens. Understands images, documents and audio in depth',
+    icon: Eye,
+    vision: true,
+    documents: true,
+  },
 ];
 
 const MODEL_STORAGE_KEY = 'Twinkle_selected_model';
@@ -1812,6 +1840,32 @@ ${textToRead}` }] }], turnComplete: true },
   const [chatSearchIndex, setChatSearchIndex] = useState(0);
   const chatSearchInputRef = useRef<HTMLInputElement>(null);
   const [copiedChat, setCopiedChat] = useState(false);
+
+  // "Files in this chat" panel: every image / document attached in the open conversation.
+  const [filesPanelOpen, setFilesPanelOpen] = useState(false);
+  useEffect(() => { setFilesPanelOpen(false); }, [currentSessionId]);
+  const chatFiles = useMemo<ChatFileItem[]>(() => {
+    const items: ChatFileItem[] = [];
+    messages.forEach(message => {
+      const urls = messageAttachments[message.id] || [];
+      urls.filter(isValidAttachmentDataUrl).forEach((url, index) => {
+        const mime = url.match(/^data:([^;,]+)/i)?.[1]?.toLowerCase() || '';
+        const name = getStoredAttachmentName(url) || getAttachmentNameFromDataUrl(url, index);
+        const extension = name.includes('.') ? name.split('.').pop()!.toUpperCase().slice(0, 5) : '';
+        items.push({
+          key: `${message.id}-${index}`,
+          name,
+          mime,
+          url,
+          messageId: message.id,
+          index,
+          badge: extension || mime.split('/')[1]?.toUpperCase().slice(0, 5) || 'FILE',
+          kind: detectFileKind(name, mime),
+        });
+      });
+    });
+    return items;
+  }, [messages, messageAttachments]);
   const [shareLinks, setShareLinks] = useState<Array<{ id: number; url: string; createdAt?: string; expiresAt?: string }>>([]);
   const [shareSuccessVisible, setShareSuccessVisible] = useState(false);
 
@@ -3788,7 +3842,7 @@ const chooseModel = useCallback((modelId: string) => {
   ) => {
     if ((!messageText.trim() && (!filesToSend || filesToSend.length === 0))) return;
 
-    // Image understanding is only supported by Sight. Stop before
+    // Image understanding is only supported by Twinkle Insight 2.0. Stop before
     // creating a user turn or calling the backend with an incompatible model.
     const includesImage = Array.isArray(filesToSend)
       && filesToSend.some(file => file instanceof File && file.type.startsWith('image/'));
@@ -3797,7 +3851,7 @@ const chooseModel = useCallback((modelId: string) => {
         id: `image-model-notice-${Date.now()}`,
         sessionId: currentSessionId || 0,
         role: 'assistant',
-        content: `I can’t read images with ${activeModel.name}. Please switch to Sight and send the image again.`,
+        content: `I can’t read images with ${activeModel.name}. Please switch to Twinkle Insight 2.0 and send the image again.`,
         timestamp: new Date().toISOString(),
       }]);
       return;
@@ -3813,7 +3867,7 @@ const chooseModel = useCallback((modelId: string) => {
           id: `image-model-hint-${now}`,
           sessionId: currentSessionId || 0,
           role: 'assistant',
-          content: `${activeModel.name} can’t generate images. **${imageModel?.name ?? 'Canvas'}** can — it turns your words into images. Switch to ${imageModel?.name ?? 'Canvas'} from the model menu in the message box, then send your prompt again.`,
+          content: `${activeModel.name} can’t generate images. **${imageModel?.name ?? 'Twinkle Muse 1.0'}** can — it turns your words into images. Switch to ${imageModel?.name ?? 'Twinkle Muse 1.0'} from the model menu in the message box, then send your prompt again.`,
           timestamp: new Date().toISOString(),
         },
       ]);
@@ -4487,6 +4541,21 @@ const chooseModel = useCallback((modelId: string) => {
     return () => window.removeEventListener('keydown', onEscape);
   }, [isTyping]);
 
+  // ---- Files in chat ----
+  const openChatFile = (file: ChatFileItem) => {
+    setFilesPanelOpen(false);
+    void openPersistedAttachmentPreview(file.url, file.index);
+  };
+  const goToChatFile = (file: ChatFileItem) => {
+    setFilesPanelOpen(false);
+    setShowAllMessages(true);
+    window.setTimeout(() => {
+      document
+        .querySelector<HTMLElement>(`[data-msg-id="${String(file.messageId).replace(/"/g, '')}"]`)
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 80);
+  };
+
   // ---- Search in chat ----
   const openChatSearch = () => {
     setShowAllMessages(true);
@@ -5122,26 +5191,21 @@ if (isBlankDraft) {
         })()}
         <div className="absolute right-4 top-3 z-[9997] flex items-center gap-2">
           {messages.length > 0 && (
-            <>
-              <button
-                type="button"
-                onClick={() => (chatSearchOpen ? closeChatSearch() : openChatSearch())}
-                aria-label="Search in chat"
-                title="Search in chat (Ctrl+Shift+F)"
-                className="hidden h-9 w-9 items-center justify-center rounded-lg border border-zinc-300/70 bg-white text-zinc-700 transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 sm:inline-flex dark:border-white/15 dark:bg-transparent dark:text-zinc-200 dark:hover:bg-white/5"
-              >
-                <SearchIcon className="h-4 w-4" strokeWidth={1.9} />
-              </button>
-              <button
-                type="button"
-                onClick={() => void copyWholeChat()}
-                aria-label="Copy whole chat"
-                title={copiedChat ? 'Copied!' : 'Copy whole chat as Markdown'}
-                className="hidden h-9 w-9 items-center justify-center rounded-lg border border-zinc-300/70 bg-white text-zinc-700 transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 sm:inline-flex dark:border-white/15 dark:bg-transparent dark:text-zinc-200 dark:hover:bg-white/5"
-              >
-                {copiedChat ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" strokeWidth={1.9} />}
-              </button>
-            </>
+            <button
+              type="button"
+              onClick={() => setFilesPanelOpen(open => !open)}
+              aria-label="Files in this chat"
+              aria-expanded={filesPanelOpen}
+              title="Files in this chat"
+              className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-300/70 bg-white text-zinc-700 transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 dark:border-white/15 dark:bg-[#30302E] dark:text-zinc-200 dark:hover:bg-[#3A3A38]"
+            >
+              <Files className="h-4 w-4" strokeWidth={1.9} />
+              {chatFiles.length > 0 && (
+                <span className="absolute -right-1.5 -top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-zinc-900 px-1 text-[10px] font-semibold leading-none text-white dark:bg-zinc-100 dark:text-zinc-900">
+                  {chatFiles.length > 99 ? '99+' : chatFiles.length}
+                </span>
+              )}
+            </button>
           )}
           <button
             type="button"
@@ -5158,6 +5222,13 @@ if (isBlankDraft) {
           </button>
         </div>
         <OfflineBanner />
+        <ChatFilesPanel
+          open={filesPanelOpen}
+          onClose={() => setFilesPanelOpen(false)}
+          files={chatFiles}
+          onOpenFile={openChatFile}
+          onGoToMessage={goToChatFile}
+        />
         {chatSearchOpen && (
           <div role="search" className="absolute right-4 top-14 z-[9997] flex w-[min(380px,calc(100vw-32px))] items-center gap-1.5 rounded-xl border border-zinc-300/70 bg-white p-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.12)] dark:border-white/15 dark:bg-[#30302E]">
             <SearchIcon className="ml-2 h-4 w-4 shrink-0 text-zinc-400" strokeWidth={1.9} />
@@ -5959,8 +6030,8 @@ if (isBlankDraft) {
                               >
                                 <span className="min-w-0 flex-1">
                                   <span className="block truncate text-[14px] font-medium text-zinc-900 dark:text-zinc-100">{option.name}</span>
-                                  <span className="mt-0.5 block truncate text-[12px] text-zinc-500 dark:text-zinc-400">
-                                    {option.description}{option.vision ? ' · Vision' : ''}
+                                  <span className="mt-0.5 line-clamp-2 block text-[12px] leading-snug text-zinc-500 dark:text-zinc-400">
+                                    {option.description}
                                   </span>
                                 </span>
                                 {selected && <Check className="h-4 w-4 shrink-0 text-zinc-900 dark:text-zinc-100" strokeWidth={2} />}
