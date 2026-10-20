@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { authApi } from '../lib/api';
 import { toast } from '../lib/toast';
+import AuthSpinner from '../components/AuthSpinner';
 import AuthSplitLayout, { authRefBodyClass, authRefLinkClass } from '../components/AuthSplitLayout';
 
 interface EmailLocationState {
@@ -95,7 +96,8 @@ export default function LoginEmail() {
           >
             Enter verification code
           </button>
-          <button type="button" onClick={() => void handleResend()} disabled={resending} className={authRefLinkClass}>
+          <button type="button" onClick={() => void handleResend()} disabled={resending} aria-busy={resending} className={`${authRefLinkClass} inline-flex items-center gap-2 no-underline`}>
+            {resending && <AuthSpinner className="!h-[14px] !w-[14px]" />}
             Resend email
           </button>
           <button type="button" onClick={() => navigate('/login')} className={authRefLinkClass}>
