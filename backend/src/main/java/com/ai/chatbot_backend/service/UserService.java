@@ -496,11 +496,65 @@ public class UserService {
 
 
     // ============================================================
-    // CREATE USER FOR PASSWORDLESS OTP AUTHENTICATION
+    // PASSWORD HASHING (signup keeps the hash in the session until OTP is verified)
+    // ============================================================
+
+    public String encodePassword(String rawPassword) {
+        return passwordEncoder.encode(rawPassword);
+    }
+
+
+    // ============================================================
+    // CREATE VERIFIED USER FROM A PENDING SIGNUP (after OTP success)
     // ============================================================
 
     @Transactional
-    public User createOtpUser(String email) {
+    public User createVerifiedUser(String username, String email, String passwordHash) {
+
+        String normalizedEmail = normalizeEmail(email);
+
+        try {
+            Optional<User> existing = userRepository.findByEmail(normalizedEmail);
+
+            if (existing.isPresent()) {
+                return existing.get();
+            }
+
+            if (userRepository.existsByUsername(username)) {
+                throw new AIServiceException("Username already taken. Please sign up again.");
+            }
+
+            User saved = userRepository.save(
+                    User.builder()
+                            .username(username)
+                            .email(normalizedEmail)
+                            .password(passwordHash)
+                            .verified(true)
+                            .build()
+            );
+
+            log.info("Verified user created - ID: {}, username: {}, email: {}",
+                    saved.getId(), saved.getUsername(), saved.getEmail());
+
+            return saved;
+
+        } catch (DataAccessException e) {
+            log.error("Database error creating verified user: {}", e.getMessage(), e);
+            throw new AIServiceException("Server error, please try again later");
+        }
+    }
+
+
+    // ============================================================
+    // CREATE USER FOR PASSWORDLESS OTP AUTHENTICATION
+    // ============================================================
+
+    /**
+     * Creates the user row ONLY after the email OTP has been verified.
+     * Unverified signups are never written to the users table.
+     */
+    @Transactional
+    public User createVerifiedOtpUser(String email) {
 
         String normalizedEmail = normalizeEmail(email);
 
@@ -557,7 +611,7 @@ public class UserService {
                             .username(username)
                             .email(normalizedEmail)
                             .password(passwordEncoder.encode(generatedPassword))
-                            .verified(false)
+                            .verified(true)
                             .build();
 
             User saved = userRepository.save(user);
