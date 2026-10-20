@@ -17,6 +17,7 @@ import com.ai.chatbot_backend.service.GeminiService;
 import com.ai.chatbot_backend.service.UserService;
 import com.ai.chatbot_backend.service.ChatShareService;
 import com.ai.chatbot_backend.service.RagService;
+import com.ai.chatbot_backend.service.MemoryService;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -76,6 +77,7 @@ public class ChatController {
     private final ObjectMapper objectMapper;
     private final ChatShareService chatShareService;
     private final RagService ragService;
+    private final MemoryService memoryService;
 
     // Dedicated pool: the JVM common pool is tiny on small hosts and would
     // serialize concurrent streams, delaying time-to-first-token.
@@ -305,7 +307,9 @@ public class ChatController {
             final User finalUser = currentUser;
             final String finalMessage = request.getMessage() == null ? "" : request.getMessage().trim();
             final String finalLanguage = request.getLanguage();
-            final String finalPromptMessage = appendLiveContext(finalMessage, sanitizeLiveContext(request.getLiveContext()));
+            final String finalPromptMessage = appendMemory(
+                    appendLiveContext(finalMessage, sanitizeLiveContext(request.getLiveContext())),
+                    currentUser);
 
             emitter.onCompletion(() -> log.debug("Streaming chat completed. sessionId={}", finalSessionId));
             emitter.onTimeout(() -> log.debug("Streaming chat timed out. sessionId={}", finalSessionId));
@@ -373,6 +377,7 @@ public class ChatController {
                                 "AI_RESPONSE_SENT",
                                 finalUser.getId() + ":" + finalSessionId
                         );
+                        memoryService.learnFromTurnAsync(finalUser.getId(), finalMessage, aiResponse);
 
                         emitter.send(SseEmitter.event()
                                 .name("done")
@@ -1175,6 +1180,14 @@ public class ChatController {
         return base + "\n\n" + context + "\n\nUse the verified context above only where relevant. If a requested live fact is absent, say it could not be retrieved; never guess.";
     }
 
+    /** Adds the user's saved memory to the model prompt (never saved to chat history). */
+    private String appendMemory(String prompt, User user) {
+        if (user == null || user.getId() == null) return prompt == null ? "" : prompt;
+        String memory = memoryService.buildPromptContext(user.getId());
+        if (memory.isBlank()) return prompt == null ? "" : prompt;
+        return (prompt == null ? "" : prompt) + "\n\n" + memory;
+    }
+
     // =========================================================
     // MESSAGE PROCESSING
     // =========================================================
@@ -1413,7 +1426,9 @@ public class ChatController {
         // AI RESPONSE (keep live context out of saved chat history)
         // =====================================================
 
-        String promptMessage = appendLiveContext(message, sanitizeLiveContext(liveContext));
+        String promptMessage = appendMemory(
+                appendLiveContext(message, sanitizeLiveContext(liveContext)),
+                currentUser);
         String aiResponse;
 
         /*
@@ -1494,6 +1509,8 @@ public class ChatController {
                             + ":"
                             + sessionId
             );
+
+            memoryService.learnFromTurnAsync(currentUser.getId(), message, aiResponse);
         }
 
 
@@ -2929,6 +2946,8 @@ public class ChatController {
                     "LIVE_TALK_TURN_SAVED",
                     user.getId() + ":" + saved.getId()
             );
+
+            memoryService.learnFromTurnAsync(user.getId(), userTranscript, assistantTranscript);
 
             return ResponseEntity.ok(Map.of(
                     "success", true,
