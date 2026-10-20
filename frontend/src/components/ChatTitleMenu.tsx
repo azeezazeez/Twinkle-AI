@@ -115,6 +115,8 @@ export default function ChatTitleMenu({ sessionId, title, onRename, onShare, onD
 
   const showTip = () => {
     if (menuOpen || renaming || !arrowRef.current) return;
+    // Touch screens have no hover; a tooltip there would only flash on tap.
+    if (typeof window.matchMedia === 'function' && !window.matchMedia('(hover: hover)').matches) return;
     if (tipTimer.current !== null) window.clearTimeout(tipTimer.current);
     const rect = arrowRef.current.getBoundingClientRect();
     tipTimer.current = window.setTimeout(() => {
