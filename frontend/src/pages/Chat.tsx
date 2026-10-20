@@ -21,12 +21,13 @@ import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw';
 
 import {
   Copy, Check, Edit2, Pencil, Upload, Volume2, VolumeX, Share2, CheckCircle2, LoaderCircle,
-  X, RotateCcw, RotateCw, Download, ChevronDown, Eye, Zap, Brain, Sparkles, Plus, FileText, Mic, AudioLines,
-  ThumbsUp, ThumbsDown, Paperclip, Camera, Search as SearchIcon, ChevronUp, Files,
+  X, RotateCcw, RotateCw, Download, ChevronDown, Eye, Zap, Brain, Sparkles, Plus, Mic, AudioLines,
+  ThumbsUp, ThumbsDown, Paperclip, Camera, Search as SearchIcon, ChevronUp,
 } from 'lucide-react';
 
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import AttachmentTile from '../components/AttachmentTile';
+import FileDocIcon from '../components/FileDocIcon';
 import ChatFilesPanel, { detectFileKind, type ChatFileItem } from '../components/ChatFilesPanel';
 import WeatherCard from '../components/WeatherCard';
 import ChatTitleMenu from '../components/ChatTitleMenu';
@@ -354,7 +355,7 @@ const PdfPreview = ({
       {status === 'loading' && (
         <div className="flex min-h-[50vh] items-center justify-center">
           <div className="rounded-2xl bg-white px-5 py-4 text-center shadow-sm dark:bg-zinc-900">
-            <FileText className="mx-auto mb-2 h-8 w-8 text-zinc-400" />
+            <FileDocIcon className="mx-auto mb-2 h-8 w-8 text-zinc-400" />
             <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">Loading PDF preview…</p>
           </div>
         </div>
@@ -362,7 +363,7 @@ const PdfPreview = ({
       {status === 'error' && (
         <div className="flex min-h-[50vh] items-center justify-center">
           <div className="max-w-md rounded-2xl bg-white p-6 text-center shadow-sm dark:bg-zinc-900">
-            <FileText className="mx-auto mb-3 h-10 w-10 text-zinc-400" />
+            <FileDocIcon className="mx-auto mb-3 h-10 w-10 text-zinc-400" />
             <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">PDF preview is unavailable</p>
             <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">The file is still attached and ready for AI analysis.</p>
           </div>
@@ -5189,22 +5190,20 @@ if (isBlankDraft) {
             </>
           );
         })()}
-        <div className="absolute right-4 top-3 z-[9997] flex items-center gap-2">
-          {messages.length > 0 && (
+        <div className="absolute right-[max(1rem,env(safe-area-inset-right))] top-[max(0.75rem,env(safe-area-inset-top))] z-[9997] flex items-center gap-2">
+          {chatFiles.length > 0 && (
             <button
               type="button"
               onClick={() => setFilesPanelOpen(open => !open)}
               aria-label="Files in this chat"
               aria-expanded={filesPanelOpen}
               title="Files in this chat"
-              className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-300/70 bg-white text-zinc-700 transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 dark:border-white/15 dark:bg-[#30302E] dark:text-zinc-200 dark:hover:bg-[#3A3A38]"
+              className="relative inline-flex h-10 w-10 shrink-0 touch-manipulation items-center justify-center rounded-lg border border-zinc-300/70 bg-white text-zinc-700 transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 sm:h-9 sm:w-9 dark:border-white/15 dark:bg-[#30302E] dark:text-zinc-200 dark:hover:bg-[#3A3A38]"
             >
-              <Files className="h-4 w-4" strokeWidth={1.9} />
-              {chatFiles.length > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-zinc-900 px-1 text-[10px] font-semibold leading-none text-white dark:bg-zinc-100 dark:text-zinc-900">
-                  {chatFiles.length > 99 ? '99+' : chatFiles.length}
-                </span>
-              )}
+              <FileDocIcon className="h-[22px] w-[22px] sm:h-5 sm:w-5" strokeWidth={1.8} />
+              <span className="absolute -right-1.5 -top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-zinc-900 px-1 text-[10px] font-semibold leading-none text-white dark:bg-zinc-100 dark:text-zinc-900">
+                {chatFiles.length > 99 ? '99+' : chatFiles.length}
+              </span>
             </button>
           )}
           <button
