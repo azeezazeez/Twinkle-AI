@@ -1,4 +1,5 @@
 import { fetchWithAuth, type WeatherSnapshot } from './api';
+import { getPreciseLocation, isLocationPermissionGranted, describeLocationError } from './geolocation';
 
 export type LiveToolResult = Record<string, unknown>;
 
@@ -33,7 +34,7 @@ export const LIVE_TOOL_DECLARATIONS = [
   {
     name: 'get_user_location',
     description:
-      "Returns the user's real current location from their device (village or locality, " +
+      "Returns the user's live, pinpoint location measured by their device GPS (village or locality, " +
       'mandal / subdistrict, district, state, country). Call it for "where am I", "my location", ' +
       '"near me", "nearby", "nearest", "which district / mandal / village" and similar. ' +
       'The browser asks the user for permission the first time. Do not read out latitude/longitude ' +
@@ -126,7 +127,8 @@ export const LIVE_TOOL_ACTIVITY: Record<string, string> = {
 /* ------------------------------------------------------------------ */
 
 const TOOL_TIMEOUT_MS = 20_000;
-const POSITION_CACHE_MS = 5 * 60_000;
+// Live location: a fix is only reused for a few seconds, never minutes.
+const POSITION_CACHE_MS = 20_000;
 
 // WMO weather codes -> words the model can speak, and an icon for the UI.
 export const describeWeatherCode = (code: number, isDay = true): { label: string; icon: string } => {
@@ -194,54 +196,15 @@ type ResolvedLocation = {
   accuracyMeters: number | null;
   label: string;
   parts: { locality?: string; subdistrict?: string; district?: string; state?: string; country?: string };
-  /** 'gps' = the device position; 'network' = approximate, from the internet connection. */
-  source: 'gps' | 'network';
+  /** Always the device position. IP-based guesses are never used. */
+  source: 'gps';
   at: number;
 };
 
 let cachedLocation: ResolvedLocation | null = null;
-let cachedNetworkLocation: ResolvedLocation | null = null;
 let locationPromise: Promise<ResolvedLocation> | null = null;
 
 class ToolError extends Error {}
-
-const getBrowserPosition = async (): Promise<GeolocationPosition> => {
-  if (typeof navigator === 'undefined' || !navigator.geolocation) {
-    throw new ToolError('This browser does not support location. Do not guess the location.');
-  }
-
-  // Fail fast, with useful advice, when location is already blocked.
-  try {
-    const status = await navigator.permissions?.query({ name: 'geolocation' as PermissionName });
-    if (status?.state === 'denied') {
-      throw new ToolError(
-        'Location permission is blocked for this site. Tell the user to allow location in the browser ' +
-        'address-bar site settings and ask again. Do not guess the location.',
-      );
-    }
-  } catch (error) {
-    if (error instanceof ToolError) throw error;
-    /* The Permissions API is unavailable: just try. */
-  }
-
-  return new Promise<GeolocationPosition>((resolve, reject) => {
-    try {
-      navigator.geolocation.getCurrentPosition(
-        resolve,
-        geoError => {
-          reject(new ToolError(
-            geoError.code === geoError.PERMISSION_DENIED
-              ? 'The user did not allow location access. Tell them to allow location for this site and ask again. Do not guess the location.'
-              : 'The location could not be determined right now. Do not guess the location.',
-          ));
-        },
-        { enableHighAccuracy: false, timeout: 12_000, maximumAge: POSITION_CACHE_MS },
-      );
-    } catch {
-      reject(new ToolError('The location could not be determined right now. Do not guess the location.'));
-    }
-  });
-};
 
 const reverseGeocode = async (latitude: number, longitude: number): Promise<{ label: string; parts: ResolvedLocation['parts'] }> => {
   const parts: ResolvedLocation['parts'] = {};
@@ -265,72 +228,19 @@ const reverseGeocode = async (latitude: number, longitude: number): Promise<{ la
   return { label: ordered.join(', '), parts };
 };
 
-// City-level location from the internet connection. It needs no permission, so
-// "where am I" and local weather still work when device location is blocked.
-const resolveNetworkLocation = async (): Promise<ResolvedLocation | null> => {
-  if (cachedNetworkLocation && Date.now() - cachedNetworkLocation.at < POSITION_CACHE_MS) return cachedNetworkLocation;
-
-  const providers: Array<() => Promise<{ lat: unknown; lon: unknown; city?: string; region?: string; country?: string }>> = [
-    async () => {
-      const d = await fetchJson('https://ipwho.is/', 6000);
-      if (d?.success === false) throw new Error('ipwho failed');
-      return { lat: d.latitude, lon: d.longitude, city: d.city, region: d.region, country: d.country };
-    },
-    async () => {
-      const d = await fetchJson('https://ipapi.co/json/', 6000);
-      if (d?.error) throw new Error('ipapi failed');
-      return { lat: d.latitude, lon: d.longitude, city: d.city, region: d.region, country: d.country_name };
-    },
-    async () => {
-      const d = await fetchJson('https://get.geojs.io/v1/ip/geo.json', 6000);
-      return { lat: Number(d.latitude), lon: Number(d.longitude), city: d.city, region: d.region, country: d.country };
-    },
-  ];
-
-  for (const provider of providers) {
-    try {
-      const found = await provider();
-      const latitude = num(found.lat);
-      const longitude = num(found.lon);
-      if (latitude === null || longitude === null) continue;
-      const parts: ResolvedLocation['parts'] = {
-        locality: found.city || undefined,
-        state: found.region || undefined,
-        country: found.country || undefined,
-      };
-      const label = [parts.locality, parts.state, parts.country]
-        .filter((value, index, all): value is string => Boolean(value) && all.indexOf(value) === index)
-        .join(', ');
-      cachedNetworkLocation = {
-        latitude,
-        longitude,
-        accuracyMeters: null,
-        label: label || 'your area',
-        parts,
-        source: 'network',
-        at: Date.now(),
-      };
-      return cachedNetworkLocation;
-    } catch {
-      /* try the next provider */
-    }
-  }
-  return null;
-};
-
 const resolveCurrentLocation = async (): Promise<ResolvedLocation> => {
   if (cachedLocation && Date.now() - cachedLocation.at < POSITION_CACHE_MS) return cachedLocation;
   if (locationPromise) return locationPromise;
 
   locationPromise = (async () => {
     try {
-      const position = await getBrowserPosition();
-      const { latitude, longitude, accuracy } = position.coords;
-      const { label, parts } = await reverseGeocode(latitude, longitude);
+      // A fresh, high-accuracy device fix. No cached or IP-based fallback exists.
+      const fix = await getPreciseLocation();
+      const { label, parts } = await reverseGeocode(fix.latitude, fix.longitude);
       const resolved: ResolvedLocation = {
-        latitude,
-        longitude,
-        accuracyMeters: roundTo(accuracy),
+        latitude: fix.latitude,
+        longitude: fix.longitude,
+        accuracyMeters: roundTo(fix.accuracy),
         label: label || 'your current location',
         parts,
         source: 'gps',
@@ -338,12 +248,8 @@ const resolveCurrentLocation = async (): Promise<ResolvedLocation> => {
       };
       cachedLocation = resolved;
       return resolved;
-    } catch (gpsError) {
-      // Device location is blocked or unavailable: fall back to the approximate
-      // network location rather than leaving the user without an answer.
-      const approximate = await resolveNetworkLocation();
-      if (approximate) return approximate;
-      throw gpsError;
+    } catch (error) {
+      throw new ToolError(`${describeLocationError(error)} Do not guess the location.`);
     }
   })().finally(() => {
     locationPromise = null;
@@ -356,27 +262,24 @@ const resolveCurrentLocation = async (): Promise<ResolvedLocation> => {
  * Starts resolving the user's location in the background so the voice session
  * already knows roughly where they are on the first question. It never shows a
  * permission prompt: the device position is used only if it was already allowed,
- * otherwise the approximate network location is used.
+ * otherwise nothing is guessed.
  */
 let warmLocation: ResolvedLocation | null = null;
 export const warmLiveContext = async (): Promise<void> => {
   try {
-    let granted = false;
-    try {
-      const status = await navigator.permissions?.query({ name: 'geolocation' as PermissionName });
-      granted = status?.state === 'granted';
-    } catch { /* Permissions API unavailable */ }
-    warmLocation = granted ? await resolveCurrentLocation() : await resolveNetworkLocation();
+    // Only runs silently when permission was already granted; never prompts, never guesses.
+    if (await isLocationPermissionGranted()) warmLocation = await resolveCurrentLocation();
   } catch {
-    warmLocation = (await resolveNetworkLocation().catch(() => null)) ?? null;
+    warmLocation = null;
   }
 };
 
 /** One sentence describing what is already known about the user's whereabouts. */
 export const getLiveContextLine = (): string => {
   if (!warmLocation) return '';
-  const how = warmLocation.source === 'gps' ? 'from the device location' : 'approximate, from the network';
-  return `Known location of the user (${how}): ${warmLocation.label}. Use it for "near me" and local questions; call get_user_location for the exact, current answer.`;
+  const meters = warmLocation.accuracyMeters;
+  const precision = meters !== null ? `accurate to about ${meters} m` : 'from the device';
+  return `Known location of the user (device GPS, ${precision}): ${warmLocation.label}. Use it for "near me" and local questions; call get_user_location for the exact, current answer.`;
 };
 
 /* ------------------------------------------------------------------ */
@@ -441,12 +344,9 @@ const toolGetUserLocation = async (): Promise<LiveToolResult> => {
       longitude: roundTo(location.longitude, 4),
       accuracyMeters: location.accuracyMeters,
     },
-    locationSource: location.source === 'gps' ? 'device GPS (precise)' : 'internet connection (approximate, city level)',
+    locationSource: 'device GPS (live, high accuracy)',
     note:
-      (location.source === 'gps'
-        ? ''
-        : 'Device location is not allowed, so this is the approximate city-level location from the internet connection. ' +
-          'Answer with it confidently, add one short phrase that it is approximate, and mention that allowing location in the browser makes it exact. ') +
+      'This is the live position measured by the device just now. ' +
       'Say the location in ordinary words, from the most local level to the broadest. ' +
       'Never invent a village or mandal that is null here. Do not read coordinates unless asked.',
   };
@@ -487,7 +387,6 @@ const toolGetWeather = async (args: Record<string, unknown>, effects: LiveToolEf
   let latitude: number;
   let longitude: number;
   let label: string;
-  let approximateLocation = false;
 
   if (!usesCurrentLocation) {
     let match: PlaceMatch | null = null;
@@ -510,7 +409,6 @@ const toolGetWeather = async (args: Record<string, unknown>, effects: LiveToolEf
     }
     ({ latitude, longitude } = location);
     label = location.label;
-    approximateLocation = location.source === 'network';
   }
 
   let weather: any;
@@ -544,9 +442,6 @@ const toolGetWeather = async (args: Record<string, unknown>, effects: LiveToolEf
   return {
     location: label,
     isUsersCurrentLocation: usesCurrentLocation,
-    ...(usesCurrentLocation && approximateLocation
-      ? { locationNote: 'The location is approximate (city level, from the internet connection). Mention that briefly.' }
-      : {}),
     timezone: weather.timezone ?? null,
     now: {
       conditions: describeWeatherCode(Number(current.weather_code), isDay).label,
