@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { authApi } from '../lib/api';
 import { toast } from '../lib/toast';
+import AuthSpinner from '../components/AuthSpinner';
 import AuthSplitLayout, {
   authRefBodyClass,
   authRefInputClass,
@@ -168,8 +169,8 @@ export default function VerifyOtp({ onLogin }: Props) {
           </p>
         )}
 
-        <button type="submit" disabled={loading} aria-busy={loading} className={`${authRefPrimaryClass} mt-5`}>
-          Verify email address
+        <button type="submit" disabled={loading} aria-busy={loading} className={`${authRefPrimaryClass} mt-5 flex items-center justify-center`}>
+          {loading ? <AuthSpinner /> : 'Verify email address'}
         </button>
       </form>
     </AuthSplitLayout>
