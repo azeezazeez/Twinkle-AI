@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { authApi } from '../lib/api';
 import { toast } from '../lib/toast';
+import AuthSpinner from '../components/AuthSpinner';
 import AuthShell, {
   authInputClass,
   authLinkClass,
@@ -109,7 +110,8 @@ export default function ForgotPassword() {
             </p>
           )}
 
-          <button type="submit" disabled={loading || !email.trim()} className={authPrimaryButtonClass}>
+          <button type="submit" disabled={loading || !email.trim()} aria-busy={loading} className={`${authPrimaryButtonClass} flex items-center justify-center gap-2`}>
+            {loading && <AuthSpinner />}
             {loading ? 'Sending...' : 'Send reset code'}
           </button>
 
@@ -160,8 +162,10 @@ export default function ForgotPassword() {
           <button
             type="submit"
             disabled={loading || otp.length !== 6 || !newPassword}
-            className={authPrimaryButtonClass}
+            aria-busy={loading}
+            className={`${authPrimaryButtonClass} flex items-center justify-center gap-2`}
           >
+            {loading && <AuthSpinner />}
             {loading ? 'Resetting...' : 'Reset password'}
           </button>
 
