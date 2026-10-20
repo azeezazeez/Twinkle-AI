@@ -5,6 +5,7 @@ import App from './App.tsx';
 import './index.css';
 import { applyPreferences, loadPrefs, PREFS_EVENT } from './lib/preferences';
 import GlobalTooltip from './components/GlobalTooltip';
+import ClickCircle from './components/ClickCircle';
 
 applyPreferences();
 
@@ -21,6 +22,7 @@ function Root() {
     <MotionConfig reducedMotion={reduce ? 'always' : 'user'}>
       <App />
       <GlobalTooltip />
+      <ClickCircle />
     </MotionConfig>
   );
 }
