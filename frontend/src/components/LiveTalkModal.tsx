@@ -181,7 +181,10 @@ const saveBasicSetupFlag = () => {
 //   0 = no tools
 // The reduced level is remembered for a few hours so later sessions do not
 // repeat the failed attempt.
-const ENABLE_GOOGLE_SEARCH = true;
+// Off: Google Search grounding has its own quota that the free Gemini tier
+// exceeds, which made every Live Talk start fail once before reconnecting.
+// Set to true again once billing is enabled on the Gemini project.
+const ENABLE_GOOGLE_SEARCH = false;
 const MAX_TOOLS_LEVEL = ENABLE_GOOGLE_SEARCH ? 2 : 1;
 const TOOLS_LEVEL_KEY = 'twinkle_live_tools_level';
 const TOOLS_LEVEL_TTL_MS = 3 * 60 * 60 * 1000;
@@ -1189,6 +1192,8 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
             toolsLevelRef.current -= 1;
             saveToolsLevel(toolsLevelRef.current);
             console.warn(`Live Talk: quota rejection during setup; retrying with tools level ${toolsLevelRef.current}.`);
+            // Do not reuse the token that was just rejected.
+            reportLiveSocketFailure(apiVersion, token);
             scheduleRetry(retryIndex);
             return;
           }
