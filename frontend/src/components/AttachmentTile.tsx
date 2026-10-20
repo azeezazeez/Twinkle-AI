@@ -1,6 +1,7 @@
 import { AlertTriangle, X } from 'lucide-react';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
+import FileDocIcon from './FileDocIcon';
 
 
 export const ATTACHMENT_TILE_SIZE = 120;
@@ -55,12 +56,18 @@ export default function AttachmentTile({
     />
   ) : (
     <div className="flex h-full w-full flex-col justify-between p-3 text-left">
-      <span
-        className="line-clamp-3 break-words text-[13px] font-normal leading-snug text-zinc-900 dark:text-zinc-100"
-        title={name}
-      >
-        {name}
-      </span>
+      <div className="flex min-h-0 flex-col gap-1.5">
+        <FileDocIcon
+          className="h-5 w-5 shrink-0 text-zinc-700 dark:text-zinc-200"
+          strokeWidth={1.8}
+        />
+        <span
+          className="line-clamp-2 break-words text-[13px] font-normal leading-snug text-zinc-900 dark:text-zinc-100"
+          title={name}
+        >
+          {name}
+        </span>
+      </div>
       <span className="w-fit rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
         {badge || 'FILE'}
       </span>
