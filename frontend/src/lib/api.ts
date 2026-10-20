@@ -3,7 +3,7 @@ import { describeTokenFailure } from './liveErrors';
 const API_BASE = (
   import.meta.env.VITE_API_BASE_URL || '/api'
 ).replace(/\/$/, '');
- 
+
 export type LiveApiVersion = 'v1beta';
 export const LIVE_API_VERSION: LiveApiVersion = 'v1beta';
 
@@ -2281,3 +2281,28 @@ export const memoryApi = {
   clear: () =>
     fetchWithAuth(`${API_BASE}/memory`, { method: 'DELETE' }) as Promise<MemorySnapshot>,
 };
+
+
+/* =======================================================
+   AI AUTOCORRECT (chat composer)
+======================================================= */
+
+export async function requestAutocorrect(
+  text: string,
+  signal?: AbortSignal
+): Promise<string | null> {
+  const response = await fetch(`${API_BASE}/autocorrect`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Autocorrect failed (${response.status})`);
+  }
+
+  const data = (await response.json()) as { corrected?: unknown };
+  return typeof data.corrected === 'string' ? data.corrected : null;
+}
