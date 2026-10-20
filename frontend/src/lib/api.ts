@@ -1971,7 +1971,10 @@ export async function createLiveToken(
   for (let pass = 0; pass < 2; pass += 1) {
     const cached = cachedLiveToken;
     if (cached && isLiveTokenUsable(cached, LIVE_TOKEN_REUSE_BUFFER_MS)) {
-      cached.usesRemaining -= 1;
+      // Every Live session gets its own token. Reusing a token that already
+      // served (or failed) a session can be refused by Google, which showed up
+      // as a failed first connection followed by "Reconnecting".
+      cachedLiveToken = null;
       return { ...cached };
     }
     cachedLiveToken = null;
@@ -2036,11 +2039,8 @@ export async function prefetchGeminiVoice(
   _text?: string,
   language = 'auto'
 ): Promise<void> {
-  try {
-    await createLiveToken(voiceName, language);
-  } catch {
-    /* best effort: the preview itself will report a real error */
-  }
+  // Only warm the cache; do not consume the token that the preview will use.
+  warmLiveToken();
 }
 
 /**
