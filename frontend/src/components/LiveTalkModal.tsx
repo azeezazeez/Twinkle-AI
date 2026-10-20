@@ -881,8 +881,13 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
       connectAttemptRef.current += 1;
     });
 
+    // True once this Live Talk call has been ready at least once. Before that,
+    // a retry is just part of starting up, so the screen keeps saying
+    // "Connecting" instead of "Reconnecting".
+    let sessionWasReady = false;
+
     const scheduleRetry = (nextIndex: number) => {
-      setStatus('Reconnecting');
+      setStatus(sessionWasReady ? 'Reconnecting' : 'Connecting');
       window.setTimeout(() => {
         if (!isStale()) void openSocket(nextIndex);
       }, 150 + 150 * nextIndex);
@@ -1011,7 +1016,11 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
                 // ~250 ms before detected speech so the whole first word is sent.
                 prefixPaddingMs: 250,
                 silenceDurationMs: 500,
-                startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH',
+                // LOW: the assistant's own voice (speaker echo) and room noise
+                // were being heard as the user speaking, which made the server
+                // interrupt and cut its answer off half-way. Clear speech still
+                // interrupts normally.
+                startOfSpeechSensitivity: 'START_SENSITIVITY_LOW',
                 endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
               },
             },
@@ -1029,6 +1038,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
           if (message.setupComplete) {
             window.clearTimeout(setupTimer);
             setupDone = true;
+            sessionWasReady = true;
             setupAt = Date.now();
             setupDoneRef.current = true;
             setConnected(true);
