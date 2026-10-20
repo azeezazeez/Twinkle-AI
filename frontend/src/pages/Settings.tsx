@@ -10,6 +10,7 @@ import {
 import { useNavigate, useSearchParams } from 'react-router-dom'; 
 import { createPortal } from 'react-dom';
 import SearchBar from '../components/SearchBar';
+import MemorySettings from '../components/MemorySettings';
 import { toast } from '../lib/toast';
 import { useLanguage, type AppLanguage } from '../lib/i18n';
 import {
@@ -1922,6 +1923,7 @@ export default function Settings({
                 </Btn>
               </Row>
             </div>
+            <MemorySettings />
           </>
         )}
 
