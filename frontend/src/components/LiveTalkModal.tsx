@@ -1182,6 +1182,16 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
         // A quota problem cannot be fixed by retrying, so stop right away
         // instead of burning more attempts and showing a raw Google error.
         if (failure.kind === 'quota') {
+          // A quota rejection during setup can come from an optional tool
+          // (for example Google Search grounding has its own, smaller quota).
+          // Step down to fewer tools and retry before reporting a limit.
+          if (!setupDone && opened && toolsLevelRef.current > 0) {
+            toolsLevelRef.current -= 1;
+            saveToolsLevel(toolsLevelRef.current);
+            console.warn(`Live Talk: quota rejection during setup; retrying with tools level ${toolsLevelRef.current}.`);
+            scheduleRetry(retryIndex);
+            return;
+          }
           cleanupAudioInput();
           setError(failure.message);
           setStatus('Usage limit reached');
