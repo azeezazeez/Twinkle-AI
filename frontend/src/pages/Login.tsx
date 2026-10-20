@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { authApi } from '../lib/api';
 import { toast } from '../lib/toast';
+import AuthSpinner from '../components/AuthSpinner';
 import AuthSplitLayout, {
   authRefInputClass,
   authRefPrimaryClass,
@@ -39,12 +40,7 @@ function GoogleIcon() {
 }
 
 function Spinner() {
-  return (
-    <span
-      aria-hidden="true"
-      className="inline-block h-[18px] w-[18px] animate-spin rounded-full border-2 border-black/15 border-t-[var(--text-main)] dark:border-white/20 dark:border-t-white"
-    />
-  );
+  return <AuthSpinner />;
 }
 
 export default function Login({ onLogin: _onLogin }: Props) {
@@ -160,8 +156,8 @@ export default function Login({ onLogin: _onLogin }: Props) {
             </p>
           )}
 
-          <button type="submit" disabled={loading} aria-busy={loading} className={authRefPrimaryClass}>
-            Continue with email
+          <button type="submit" disabled={loading} aria-busy={loading} className={`${authRefPrimaryClass} flex items-center justify-center`}>
+            {loading ? <AuthSpinner /> : 'Continue with email'}
           </button>
         </form>
       </div>
