@@ -1,3 +1,4 @@
+import { getPreciseLocation, describeLocationError } from './geolocation';
 import { describeTokenFailure } from './liveErrors';
 
 const API_BASE = (
@@ -145,40 +146,39 @@ const getVerifiedLiveContext = async (message: string): Promise<string | undefin
       }
     }
     if (!coordinates) {
-      if (!navigator.geolocation) {
-        lines.push('Location: browser geolocation is not supported; do not guess the user location.');
-      } else {
-        const position = await new Promise<GeolocationPosition | null>((resolve) => {
-          try {
-            navigator.geolocation.getCurrentPosition(resolve, () => resolve(null), { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 });
-          } catch { resolve(null); }
-        });
-        if (position) {
-          coordinates = { latitude: position.coords.latitude, longitude: position.coords.longitude, label: 'permission-approved current browser location' };
-          // Reverse-geocode the user's approved coordinates into a useful locality hierarchy.
-          try {
-            const reverseResponse = await fetch(
-              `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(position.coords.latitude)}&lon=${encodeURIComponent(position.coords.longitude)}&zoom=18&addressdetails=1`,
-              { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(7000) }
-            );
-            if (reverseResponse.ok) {
-              const reverse = await reverseResponse.json();
-              const address = reverse?.address || {};
-              const localityParts = [
-                address.village || address.hamlet || address.suburb || address.neighbourhood || address.town || address.city,
-                address.municipality || address.county || address.city_district,
-                address.state_district || address.district,
-                address.state || address.region,
-                address.country
-              ].filter((value, index, all) => Boolean(value) && all.indexOf(value) === index);
-              if (localityParts.length) coordinates.label = localityParts.join(', ');
-              const mandal = address.mandal || address.tehsil || address.subdistrict || address.county;
-              if (mandal && !localityParts.includes(mandal)) coordinates.label = [localityParts[0], mandal, ...localityParts.slice(1)].filter(Boolean).join(', ');
+      try {
+        // Live, high-accuracy device fix. Never cached, never IP-based.
+        const fix = await getPreciseLocation();
+        coordinates = { latitude: fix.latitude, longitude: fix.longitude, label: 'device GPS location' };
+        lines.push(`Device location accuracy: about ${Math.round(fix.accuracy)} metres (live GPS fix).`);
+        // Reverse-geocode the exact coordinates into a useful locality hierarchy.
+        try {
+          const reverseResponse = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(fix.latitude)}&lon=${encodeURIComponent(fix.longitude)}&zoom=18&addressdetails=1&accept-language=en`,
+            { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(7000) }
+          );
+          if (reverseResponse.ok) {
+            const reverse = await reverseResponse.json();
+            const address = reverse?.address || {};
+            const road = address.road || address.pedestrian || address.footway;
+            const localityParts = [
+              road,
+              address.village || address.hamlet || address.suburb || address.neighbourhood || address.town || address.city,
+              address.municipality || address.county || address.city_district,
+              address.state_district || address.district,
+              address.state || address.region,
+              address.postcode,
+              address.country
+            ].filter((value, index, all) => Boolean(value) && all.indexOf(value) === index);
+            if (localityParts.length) coordinates.label = localityParts.join(', ');
+            const mandal = address.mandal || address.tehsil || address.subdistrict || address.county;
+            if (mandal && !localityParts.includes(mandal)) {
+              coordinates.label = [localityParts[0], mandal, ...localityParts.slice(1)].filter(Boolean).join(', ');
             }
-          } catch { /* Keep coordinates private from the answer unless the reverse lookup succeeds. */ }
-        } else {
-          lines.push('Location: unavailable because permission was denied or location could not be determined. Do not guess the user location.');
-        }
+          }
+        } catch { /* Keep the coordinates; the label stays generic if the lookup fails. */ }
+      } catch (locationError) {
+        lines.push(`Location: unavailable. ${describeLocationError(locationError)} Tell the user this and do not guess the location.`);
       }
     }
     if (coordinates) {
@@ -194,7 +194,7 @@ const getVerifiedLiveContext = async (message: string): Promise<string | undefin
           lines.push('Weather code reference: https://open-meteo.com/en/docs');
           if (weather?.current) {
             pendingWeatherSnapshot = {
-              label: /permission-approved/.test(coordinates.label) ? 'Your location' : coordinates.label,
+              label: coordinates.label === 'device GPS location' ? 'Your location' : coordinates.label,
               at: Date.now(),
               current: weather.current,
               daily: weather.daily || {},
