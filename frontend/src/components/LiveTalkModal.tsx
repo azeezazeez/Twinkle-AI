@@ -7,7 +7,7 @@ import { VOICES, DEFAULT_VOICE } from '../lib/voices';
 import {
   chatApi,
   createLiveToken, 
-  assistantNameContext, 
+  assistantNameContext,
   ASSISTANT_NAME_RULES,
   learnAssistantName,
   learnAssistantNameFromReply,
@@ -192,7 +192,10 @@ const readToolsLevel = (): number => {
   try {
     const raw = JSON.parse(localStorage.getItem(TOOLS_LEVEL_KEY) || 'null') as { level?: number; at?: number } | null;
     if (raw && Number.isFinite(raw.level) && Number.isFinite(raw.at) && Date.now() - (raw.at as number) < TOOLS_LEVEL_TTL_MS) {
-      return Math.max(0, Math.min(MAX_TOOLS_LEVEL, raw.level as number));
+      // Never reuse a persisted "no tools" session. Level 0 disables every
+      // app tool, which makes Live Talk unable to answer weather/location
+      // questions even though the session itself connects successfully.
+      return Math.max(1, Math.min(MAX_TOOLS_LEVEL, raw.level as number));
     }
   } catch { /* ignore */ }
   return MAX_TOOLS_LEVEL;
