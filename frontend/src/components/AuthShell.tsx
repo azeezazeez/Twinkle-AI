@@ -9,17 +9,14 @@ interface Props {
   footer?: React.ReactNode;
 }
 
-/**
- * Shared layout for the sign-in pages: Claude-style centered card on the
- * warm page background, with the brand in the top-left corner.
- */
+
 export default function AuthShell({ title, subtitle, children, footer }: Props) {
   return (
     <div className="relative flex min-h-screen w-full flex-col bg-[var(--bg-main)] text-[var(--text-main)]">
       <header className="flex items-center gap-2 px-6 pt-6 sm:px-10 sm:pt-8">
         <StormLogo className="h-7 w-7" />
         <span className="font-serif text-[24px] leading-none tracking-tight text-[var(--text-main)]">
-          Twinkle AI
+          Twinkle
         </span>
       </header>
 
