@@ -16,7 +16,7 @@ import {
   reportLiveSocketSuccess,
 } from '../lib/api';
 import type { WeatherSnapshot } from '../lib/api';
-import { LIVE_TOOL_DECLARATIONS, LIVE_TOOL_ACTIVITY, runLiveTool, describeWeatherCode } from '../lib/liveTools';
+import { LIVE_TOOL_DECLARATIONS, LIVE_TOOL_ACTIVITY, runLiveTool, describeWeatherCode, warmLiveContext, getLiveContextLine } from '../lib/liveTools';
 import { APP_LANGUAGE_KEY, getLanguageInstruction, type AppLanguage } from '../lib/i18n';
 import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw';
 import { describeLiveClose, friendlyLiveError } from '../lib/liveErrors';
@@ -209,26 +209,37 @@ const buildSystemInstruction = (language: AppLanguage, toolsLevel: number): stri
   const clock = `Current local date and time for the user: ${new Intl.DateTimeFormat(undefined, { dateStyle: 'full', timeStyle: 'short' }).format(new Date())} (timezone ${Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown'}).`;
 
   const toolRules = toolsLevel === 0
-    ? 'You do not have live weather, location or lookup tools in this voice session; if asked, say so briefly and suggest asking in the text chat.'
+    ? 'You have no live lookup tools in this voice session, but you still always help. For the time and date, use the clock line below. ' +
+      'For anything else live (weather, location, news, prices), give the most useful answer you can from your own knowledge, ' +
+      'say in a few words that it may not be the very latest, and offer a quick next step. Never answer with just "I don\'t know" or "I can\'t".'
     : 'LIVE TOOLS: You are connected to live tools, so you CAN answer live questions. ' +
-      'Never say you lack real-time, location, weather or clock access, and never guess or invent these values. Use the right tool:\n' +
+      'Never say you lack real-time, location, weather, date or clock access, and never guess or invent these values. Use the right tool:\n' +
       '- get_weather: ANY question about weather, temperature, rain, umbrella, wind, humidity, forecast, sunrise or sunset, or how hot or cold it is. If the user names a place, pass it as `place`; otherwise omit `place` to use their current location.\n' +
       '- get_user_location: "where am I", "my location", "near me", "nearby", "nearest", or which village, mandal, district, state or country they are in.\n' +
-      '- get_current_datetime: ANY question about the time, date, day, month or year (the clock line below can be out of date in a long conversation).\n' +
+      '- get_current_datetime: ANY question about the time, date, day, month or year (the clock line below can be out of date in a long conversation). For the time in another city or country, pass it as `place`.\n' +
+      '- get_exchange_rate: currency conversion and exchange rates.\n' +
+      '- search_web: any factual question about people, places, companies, events, science, sports or history that you are not completely sure about or that may have changed recently.\n' +
       '- search_knowledge_base: questions about the user\'s own uploaded documents, files, notes or knowledge base.\n' +
       (toolsLevel >= 2
         ? '- Google Search: current events, news, sports scores, prices, schedules, and any fact that may have changed recently or that you are not sure about.\n'
         : '') +
       'You may say a very short natural phrase such as "one moment" before using a tool. Then answer in one or two natural spoken sentences. ' +
-      'Never read out JSON, field names, weather codes or coordinates (unless the user asks for coordinates). ' +
-      'If a tool returns an error, explain it simply in words (for example that location permission must be allowed in the browser) and offer to try again; never make up an answer.';
+      'Never read out JSON, field names, weather codes or coordinates (unless the user asks for coordinates).\n' +
+      'NEVER REFUSE A LIVE QUESTION: do not answer with "I don\'t know", "I can\'t access that" or "I don\'t have real-time data". ' +
+      'If a tool returns an error or approximate data, still give the best helpful answer: use another tool, the clock line, the known location, or your own knowledge, ' +
+      'state any limit in a few natural words (for example "that is approximate" or "that may not be the very latest"), and offer the next step ' +
+      '(for example asking which city they mean). Never make up live values such as temperatures, scores or prices.';
+
+  const knownLocation = getLiveContextLine();
 
   return (
     `You are Twinkle AI, a polished professional voice assistant. Speak naturally, concisely, confidently, and warmly. Answer the user directly and keep the conversation conversational. ` +
     `${languageRule}` +
     `\n\n${ASSISTANT_NAME_RULES}` +
     (assistantNameContext() ? `\n\n${assistantNameContext()}` : '') +
-    `\n\n${clock}\n\n${toolRules}`
+    `\n\n${clock}` +
+    (knownLocation ? `\n${knownLocation}` : '') +
+    `\n\n${toolRules}`
   );
 };
 
@@ -881,6 +892,10 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
       connectAttemptRef.current += 1;
     });
 
+    // Resolve the user's rough location in the background (no permission
+    // prompt) so the very first "near me" / weather question is already grounded.
+    const contextWarmup = warmLiveContext();
+
     // True once this Live Talk call has been ready at least once. Before that,
     // a retry is just part of starting up, so the screen keeps saying
     // "Connecting" instead of "Reconnecting".
@@ -916,6 +931,11 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
         );
         return;
       }
+      if (isStale()) return;
+
+      // Give the location warm-up a moment (it usually finished during the token
+      // request) so it can be placed in the system instruction.
+      await Promise.race([contextWarmup, new Promise<void>(resolve => window.setTimeout(resolve, 1200))]);
       if (isStale()) return;
 
       const { token, model, apiVersion } = tokenInfo;
