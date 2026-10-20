@@ -496,6 +496,27 @@ const IMAGE_BARE_GENERATE = /^\s*(?:(?:please|can you|could you|would you)\s+)*(
 const IMAGE_WORDS_PATTERN = /\b(image|picture|photo|draw|paint|sketch|illustration|logo|wallpaper|render|portrait|poster|generate|create|make)\b/i;
 
 /** Mirrors the backend: greetings/small talk get a text reply, everything else an image. */
+const THINKING_WORDS = [
+  'Thinking', 'Pondering', 'Reasoning', 'Twinkling', 'Connecting the dots', 'Brewing ideas',
+  'Working it out', 'Digging deeper', 'Mulling it over', 'Piecing it together', 'Almost there',
+];
+
+/** Rotating, shimmering status text shown while the AI is preparing its reply. */
+function ThinkingStatus({ phase }: { phase: 'idle' | 'connecting' | 'thinking' | 'streaming' }) {
+  const [index, setIndex] = useState(() => Math.floor(Math.random() * THINKING_WORDS.length));
+  useEffect(() => {
+    const id = window.setInterval(() => setIndex((i) => (i + 1) % THINKING_WORDS.length), 2400);
+    return () => window.clearInterval(id);
+  }, []);
+  const label = phase === 'connecting' ? 'Connecting' : THINKING_WORDS[index];
+  return (
+    <div className="twinkle-thinking-status" role="status" aria-live="polite">
+      <StormLogo className="twinkle-thinking-status-logo h-5 w-5" />
+      <span key={label} className="twinkle-thinking-shimmer">{label}…</span>
+    </div>
+  );
+}
+
 function shouldShowImageProgress(
   messages: Array<{ role: string; content?: string }>,
   selectedModel: string,
@@ -5741,6 +5762,15 @@ if (isBlankDraft) {
                     </div>
                   );
                 })}
+
+                {isTyping &&
+                  !shouldShowImageProgress(messages, selectedModel, isTyping) &&
+                  (() => {
+                    const last = messages[messages.length - 1];
+                    const replyStarted =
+                      !!last && last.role === 'assistant' && cleanMessageContent(last.content).trim().length > 0;
+                    return !replyStarted;
+                  })() && <ThinkingStatus phase={responsePhase} />}
 
                 {shouldShowImageProgress(messages, selectedModel, isTyping) && (
                   <ImageGenerationProgress
