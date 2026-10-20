@@ -713,7 +713,16 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
       const now = performance.now();
       const hasSpeech = rms >= VAD_THRESHOLD;
 
-      if (hasSpeech) {
+      if (audioSourcesRef.current.size > 0) {
+        // While the assistant is speaking, the microphone mostly hears the
+        // speaker (echo) and room noise. Ending the user's "turn" from that
+        // signal made the server cut the answer off half-way, so the client
+        // VAD stays idle until playback is finished. Real interruptions are
+        // still detected by the server's own voice activity detection.
+        vadSpeechStartedRef.current = false;
+        vadTurnEndedRef.current = false;
+        vadLastSpeechAtRef.current = now;
+      } else if (hasSpeech) {
         vadSpeechStartedRef.current = true;
         vadLastSpeechAtRef.current = now;
         vadTurnEndedRef.current = false;
