@@ -7,7 +7,7 @@ import { VOICES, DEFAULT_VOICE } from '../lib/voices';
 import {
   chatApi,
   createLiveToken, 
-  assistantNameContext,
+  assistantNameContext, 
   ASSISTANT_NAME_RULES,
   learnAssistantName,
   learnAssistantNameFromReply,
