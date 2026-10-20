@@ -39,6 +39,14 @@ public class AuthController {
     private static final String PENDING_REGISTRATION_EMAIL =
             "pending_registration_email";
 
+    // Signup data held in the session until the OTP is verified.
+    // Nothing is written to the users table before that.
+    private static final String PENDING_REGISTRATION_USERNAME =
+            "pending_registration_username";
+
+    private static final String PENDING_REGISTRATION_PASSWORD_HASH =
+            "pending_registration_password_hash";
+
     private final UserService userService;
     private final OTPService otpService;
     private final ChatHistoryService chatHistoryService;
@@ -343,45 +351,25 @@ public class AuthController {
 
 
             // ----------------------------------------------------
-            // CREATE USER
-            // ----------------------------------------------------
-
-            UserResponse userResponse;
-
-            try {
-
-                userResponse =
-                        userService.register(
-                                request
-                        );
-
-            } catch (
-                    DataIntegrityViolationException e
-            ) {
-
-                log.warn(
-                        "Duplicate registration blocked: {}",
-                        email
-                );
-
-
-                return badRequest(
-                        "Email or username already registered"
-                );
-            }
-
-
-            // ----------------------------------------------------
-            // CREATE PENDING REGISTRATION SESSION
+            // HOLD SIGNUP IN SESSION (user row is created only after OTP)
             // ----------------------------------------------------
 
             HttpSession session =
                     httpRequest.getSession(true);
 
-
             session.setAttribute(
                     PENDING_REGISTRATION_EMAIL,
                     email
+            );
+
+            session.setAttribute(
+                    PENDING_REGISTRATION_USERNAME,
+                    username
+            );
+
+            session.setAttribute(
+                    PENDING_REGISTRATION_PASSWORD_HASH,
+                    userService.encodePassword(request.getPassword())
             );
 
 
@@ -405,28 +393,6 @@ public class AuthController {
                         e.getMessage(),
                         e
                 );
-
-
-                /*
-                 * User was created but OTP could not be delivered.
-                 * Remove the incomplete registration.
-                 */
-
-                try {
-
-                    userService.deleteByEmail(
-                            email
-                    );
-
-                } catch (Exception deleteException) {
-
-                    log.error(
-                            "Failed to delete incomplete user {}: {}",
-                            email,
-                            deleteException.getMessage(),
-                            deleteException
-                    );
-                }
 
 
                 clearPendingRegistration(
@@ -528,18 +494,15 @@ public class AuthController {
                 return badRequest("Please enter a valid email address");
             }
 
+            // Do NOT create the user here. A new email only becomes a row in
+            // the users table after its OTP has been verified.
             Optional<User> existingUser = userService.findByEmail(email);
-            User user;
-
-            if (existingUser.isPresent()) {
-                user = existingUser.get();
-            } else {
-                user = userService.createOtpUser(email);
-                createdNewUser = true;
-            }
+            createdNewUser = existingUser.isEmpty();
 
             HttpSession session = httpRequest.getSession(true);
             session.setAttribute(PENDING_REGISTRATION_EMAIL, email);
+            session.removeAttribute(PENDING_REGISTRATION_USERNAME);
+            session.removeAttribute(PENDING_REGISTRATION_PASSWORD_HASH);
 
             try {
                 otpService.generateAndSendOtp(email);
@@ -550,19 +513,6 @@ public class AuthController {
                         e.getMessage(),
                         e
                 );
-
-                if (createdNewUser) {
-                    try {
-                        userService.deleteByEmail(email);
-                    } catch (Exception deleteException) {
-                        log.error(
-                                "Failed to remove incomplete OTP user {}: {}",
-                                email,
-                                deleteException.getMessage(),
-                                deleteException
-                        );
-                    }
-                }
 
                 clearPendingRegistration(session);
 
@@ -578,7 +528,7 @@ public class AuthController {
             response.put("message", "Verification code sent successfully.");
             response.put("email", email);
             response.put("isNewUser", createdNewUser);
-            response.put("verified", user.isVerified());
+            response.put("verified", existingUser.map(User::isVerified).orElse(false));
 
             log.info(
                     "OTP requested successfully for {} (newUser={})",
@@ -669,12 +619,6 @@ public class AuthController {
 
             Optional<User> userOptional = userService.findByEmail(email);
 
-            if (userOptional.isEmpty()) {
-                return badRequest(
-                        "Account could not be found. Please request a new OTP."
-                );
-            }
-
             String otpKey = "otp-fail:" + email;
 
             if (rateLimitService.isBlocked(otpKey, MAX_FAILED_ATTEMPTS)) {
@@ -690,10 +634,26 @@ public class AuthController {
 
             rateLimitService.reset(otpKey);
 
-            User user = userOptional.get();
+            if (userOptional.isPresent()) {
+                if (!userOptional.get().isVerified()) {
+                    userService.markAsVerified(email);
+                }
+            } else {
+                // OTP is valid and no user exists yet: create the verified user now.
+                String pendingUsername =
+                        (String) session.getAttribute(PENDING_REGISTRATION_USERNAME);
+                String pendingPasswordHash =
+                        (String) session.getAttribute(PENDING_REGISTRATION_PASSWORD_HASH);
 
-            if (!user.isVerified()) {
-                userService.markAsVerified(email);
+                if (pendingUsername != null && pendingPasswordHash != null) {
+                    userService.createVerifiedUser(
+                            pendingUsername,
+                            email,
+                            pendingPasswordHash
+                    );
+                } else {
+                    userService.createVerifiedOtpUser(email);
+                }
             }
 
             User authenticatedUser = userService.findByEmail(email)
@@ -717,6 +677,9 @@ public class AuthController {
             );
 
             return ResponseEntity.ok(response);
+
+        } catch (com.ai.chatbot_backend.exception.AIServiceException e) {
+            return badRequest(e.getMessage());
 
         } catch (Exception e) {
             log.error(
@@ -765,9 +728,16 @@ public class AuthController {
             Optional<User> userOptional = userService.findByEmail(email);
 
             if (userOptional.isEmpty()) {
-                return badRequest(
-                        "Account could not be found. Please request a new OTP."
-                );
+                HttpSession existingSession = httpRequest.getSession(false);
+                String pending = existingSession == null
+                        ? null
+                        : (String) existingSession.getAttribute(PENDING_REGISTRATION_EMAIL);
+
+                if (pending == null || !email.equals(normalizeEmail(pending))) {
+                    return badRequest(
+                            "Account could not be found. Please request a new OTP."
+                    );
+                }
             }
 
             otpService.resendOtp(email);
@@ -1744,6 +1714,14 @@ public class AuthController {
 
         session.removeAttribute(
                 PENDING_REGISTRATION_EMAIL
+        );
+
+        session.removeAttribute(
+                PENDING_REGISTRATION_USERNAME
+        );
+
+        session.removeAttribute(
+                PENDING_REGISTRATION_PASSWORD_HASH
         );
     }
 
