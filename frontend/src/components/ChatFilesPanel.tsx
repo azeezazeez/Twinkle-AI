@@ -1,18 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { ComponentType } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   Archive,
   ArrowUpRight,
-  File as FileIcon,
   FileCode2,
   FileImage,
   FileSpreadsheet,
-  FileText,
   Presentation,
   X,
 } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+import FileDocIcon from './FileDocIcon';
 
 /* ------------------------------------------------------------------ */
 /*  File type helpers                                                  */
@@ -52,16 +51,18 @@ export const detectFileKind = (name: string, mime: string): FileKind => {
   return 'other';
 };
 
-const KIND_STYLE: Record<FileKind, { icon: LucideIcon; label: string; tint: string }> = {
+type IconComponent = ComponentType<{ className?: string; strokeWidth?: number | string }>;
+
+const KIND_STYLE: Record<FileKind, { icon: IconComponent; label: string; tint: string }> = {
   image: { icon: FileImage, label: 'Image', tint: 'bg-violet-100 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300' },
-  pdf: { icon: FileText, label: 'PDF', tint: 'bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-300' },
-  word: { icon: FileText, label: 'Document', tint: 'bg-blue-100 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300' },
+  pdf: { icon: FileDocIcon, label: 'PDF', tint: 'bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-300' },
+  word: { icon: FileDocIcon, label: 'Document', tint: 'bg-blue-100 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300' },
   sheet: { icon: FileSpreadsheet, label: 'Spreadsheet', tint: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300' },
   slides: { icon: Presentation, label: 'Presentation', tint: 'bg-orange-100 text-orange-600 dark:bg-orange-500/15 dark:text-orange-300' },
   archive: { icon: Archive, label: 'Archive', tint: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300' },
   code: { icon: FileCode2, label: 'Code', tint: 'bg-sky-100 text-sky-600 dark:bg-sky-500/15 dark:text-sky-300' },
-  text: { icon: FileText, label: 'Text', tint: 'bg-zinc-200 text-zinc-600 dark:bg-zinc-700/60 dark:text-zinc-300' },
-  other: { icon: FileIcon, label: 'File', tint: 'bg-zinc-200 text-zinc-600 dark:bg-zinc-700/60 dark:text-zinc-300' },
+  text: { icon: FileDocIcon, label: 'Text', tint: 'bg-zinc-200 text-zinc-600 dark:bg-zinc-700/60 dark:text-zinc-300' },
+  other: { icon: FileDocIcon, label: 'File', tint: 'bg-zinc-200 text-zinc-600 dark:bg-zinc-700/60 dark:text-zinc-300' },
 };
 
 /** Colour-coded icon tile for a file type (PDF = red, Word = blue, Excel = green, ...). */
@@ -140,7 +141,7 @@ export default function ChatFilesPanel({ open, onClose, files, onOpenFile, onGoT
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: 24, opacity: 0 }}
             transition={{ duration: 0.18, ease: 'easeOut' }}
-            className="fixed bottom-3 right-3 top-3 z-[11991] flex w-[min(400px,calc(100vw-24px))] flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl shadow-black/20 dark:border-white/10 dark:bg-[#262624]"
+            className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-[max(0.75rem,env(safe-area-inset-right))] top-[max(0.75rem,env(safe-area-inset-top))] z-[11991] flex w-[min(400px,calc(100vw-24px))] flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl shadow-black/20 dark:border-white/10 dark:bg-[#262624]"
           >
             <header className="flex items-start justify-between gap-3 px-5 pb-3 pt-4">
               <div className="min-w-0">
