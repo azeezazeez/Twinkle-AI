@@ -2152,3 +2152,52 @@ body {
   .twinkle-message-actions { animation: none; }
   button:not(:disabled):active { transform: none; }
 }
+
+
+/* ---- Click circle: small ring that pulses out from the pressed point ---- */
+.twinkle-click-circle {
+  position: fixed;
+  z-index: 2147483000;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 9999px;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--text-main) 14%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--text-main) 35%, transparent);
+  animation: twinkle-click-circle 520ms cubic-bezier(0.22, 0.8, 0.3, 1) forwards;
+}
+@keyframes twinkle-click-circle {
+  0% { transform: scale(0.4); opacity: 0.9; }
+  100% { transform: scale(3.4); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .twinkle-click-circle { display: none; } }
+:root[data-motion="reduced"] .twinkle-click-circle { display: none; }
+
+/* ---- AI "thinking" status text (rotating words with a soft shimmer) ---- */
+.twinkle-thinking-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 32px;
+  padding-left: 0.25rem;
+  font-size: 0.95rem;
+  line-height: 1.25;
+}
+.twinkle-thinking-status-logo { color: #D97757; animation: twinkle-thinking-spin 2.4s linear infinite; }
+@keyframes twinkle-thinking-spin { to { transform: rotate(360deg); } }
+.twinkle-thinking-shimmer {
+  background: linear-gradient(90deg, var(--text-muted) 0%, var(--text-muted) 38%, var(--text-main) 50%, var(--text-muted) 62%, var(--text-muted) 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: twinkle-thinking-shimmer 1.8s linear infinite, twinkle-thinking-in 260ms ease-out;
+}
+@keyframes twinkle-thinking-shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+@keyframes twinkle-thinking-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .twinkle-thinking-status-logo, .twinkle-thinking-shimmer { animation: none; }
+  .twinkle-thinking-shimmer { -webkit-text-fill-color: currentColor; color: var(--text-muted); background: none; }
+}
