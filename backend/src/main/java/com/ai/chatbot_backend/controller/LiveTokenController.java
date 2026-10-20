@@ -35,7 +35,7 @@ public class LiveTokenController {
     private static final String GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
 
     
-    private static final String API_VERSION = "v1alpha";
+    private static final String API_VERSION = "v1beta";
 
     private static final int TOKEN_USES = 10;
     private static final Duration TOKEN_LIFETIME = Duration.ofMinutes(30);
@@ -44,8 +44,7 @@ public class LiveTokenController {
     private static final int MINT_ATTEMPTS = 2;
 
     private static final String MSG_QUOTA =
-            "Live Talk has reached its usage limit for now, so voice conversations are paused. "
-                    + "This is a limit on our side, not a problem with your device. Please try again later.";
+            "Live Talk has reached its usage limit. Please try again later.";
     private static final String MSG_CONFIG =
             "Live Talk is not available right now because of a service configuration problem. "
                     + "Please try again later.";
