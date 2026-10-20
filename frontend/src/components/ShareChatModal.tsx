@@ -127,7 +127,7 @@ const ShareChatModal: React.FC<ShareChatModalProps> = ({
   return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-5">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] pt-[max(0.75rem,env(safe-area-inset-top,0px))] sm:p-5">
           <motion.button
             type="button"
             aria-label="Close share dialog"
@@ -227,8 +227,8 @@ const ShareChatModal: React.FC<ShareChatModalProps> = ({
                     )}
                    </div>
                      ) : isConversation && !shareUrl && onCreateLink ? (
-              <div className="mt-4 flex flex-wrap items-center justify-end gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800 sm:mt-5 sm:pt-5">
-                <label className="flex items-center gap-2 text-[13px] text-zinc-600 dark:text-zinc-300">
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800 sm:mt-5 sm:pt-5">
+                <label className="flex min-w-0 items-center gap-2 text-[13px] text-zinc-600 dark:text-zinc-300">
                   Link expires
                   <select
                     value={expiryDays}
@@ -250,26 +250,26 @@ const ShareChatModal: React.FC<ShareChatModalProps> = ({
                 </button>
               </div>
                      ) : shareUrl ? (
-              <div className="mt-4 flex flex-wrap items-center justify-center gap-x-8 gap-y-3 border-t border-zinc-100 pt-4 dark:border-zinc-800 sm:mt-5 sm:gap-x-12 sm:pt-5">
-                <button type="button" onClick={handleCopy} className="group flex min-w-[72px] flex-col items-center gap-2 text-sm text-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-100">
+              <div className="mt-4 grid grid-cols-4 items-start justify-items-center gap-2 border-t border-zinc-100 pt-4 dark:border-zinc-800 sm:mt-5 sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-x-12 sm:gap-y-3 sm:pt-5">
+                <button type="button" onClick={handleCopy} className="group flex min-w-0 flex-col items-center gap-2 text-[13px] sm:min-w-[72px] sm:text-sm text-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-100">
                   <span className="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-100 transition-colors group-hover:bg-zinc-200 dark:bg-zinc-800 dark:group-hover:bg-zinc-700">
                     {copied ? <Check className="h-6 w-6 text-emerald-600" /> : <Link2 className="h-6 w-6" strokeWidth={1.8} />}
                   </span>
                   <span>{copied ? 'Copied!' : 'Copy link'}</span>
                 </button>
-                <button type="button" onClick={shareToX} className="group flex min-w-[72px] flex-col items-center gap-2 text-sm text-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-100" aria-label="Share on X">
+                <button type="button" onClick={shareToX} className="group flex min-w-0 flex-col items-center gap-2 text-[13px] sm:min-w-[72px] sm:text-sm text-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-100" aria-label="Share on X">
                   <span className="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-100 transition-colors group-hover:bg-zinc-200 dark:bg-zinc-800 dark:group-hover:bg-zinc-700">
                     <svg viewBox="0 0 24 24" className="h-6 w-6 fill-current" aria-hidden="true"><path d="M18.9 2H22l-6.78 7.75L23.2 22h-6.25l-4.9-7.42L5.56 22H2.43l7.25-8.29L1.8 2h6.4l4.43 6.76L18.9 2Zm-1.1 18h1.73L7.27 3.89H5.41L17.8 20Z" /></svg>
                   </span>
                   <span>X</span>
                 </button>
-                <button type="button" onClick={shareToLinkedIn} className="group flex min-w-[72px] flex-col items-center gap-2 text-sm text-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-100" aria-label="Share on LinkedIn">
+                <button type="button" onClick={shareToLinkedIn} className="group flex min-w-0 flex-col items-center gap-2 text-[13px] sm:min-w-[72px] sm:text-sm text-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-100" aria-label="Share on LinkedIn">
                   <span className="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-100 transition-colors group-hover:bg-zinc-200 dark:bg-zinc-800 dark:group-hover:bg-zinc-700">
                     <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true"><path fill="#0A66C2" d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.35V9h3.414v1.561h.049c.476-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 1 1 .001-4.124 2.062 2.062 0 0 1-.001 4.124zM7.119 20.452H3.554V9h3.565v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.225 0z" /></svg>
                   </span>
                   <span>LinkedIn</span>
                 </button>
-                <button type="button" onClick={shareToReddit} className="group flex min-w-[72px] flex-col items-center gap-2 text-sm text-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-100" aria-label="Share on Reddit">
+                <button type="button" onClick={shareToReddit} className="group flex min-w-0 flex-col items-center gap-2 text-[13px] sm:min-w-[72px] sm:text-sm text-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-100" aria-label="Share on Reddit">
                   <span className="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-100 transition-colors group-hover:bg-zinc-200 dark:bg-zinc-800 dark:group-hover:bg-zinc-700">
                     <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true"><path fill="#FF4500" d="M24 12.25a3.1 3.1 0 0 0-5.27-2.2 15.2 15.2 0 0 0-5.83-1.8l1-4.7 3.27.7a2.1 2.1 0 1 0 .22-1.2l-4-.86a.62.62 0 0 0-.74.47l-1.17 5.5a15.3 15.3 0 0 0-6 1.83A3.1 3.1 0 1 0 1.3 14.8a5.4 5.4 0 0 0-.1 1c0 4.05 4.84 7.33 10.8 7.33s10.8-3.28 10.8-7.33a5.4 5.4 0 0 0-.1-1A3.1 3.1 0 0 0 24 12.25ZM6.6 14.3a1.55 1.55 0 1 1 3.1 0 1.55 1.55 0 0 1-3.1 0Zm8.75 4.3a5.1 5.1 0 0 1-6.7 0 .62.62 0 0 1 .83-.92 3.9 3.9 0 0 0 5.04 0 .62.62 0 0 1 .83.92Zm.5-2.75a1.55 1.55 0 1 1 0-3.1 1.55 1.55 0 0 1 0 3.1Z" /></svg>
                   </span>
