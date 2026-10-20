@@ -91,7 +91,7 @@ export default function AuthSplitLayout({ children, showVideo = true }: Props) {
       <header className="flex items-center gap-2 px-6 pt-7 sm:px-10 lg:pl-[clamp(40px,4.4vw,85px)]">
         <StormLogo className="h-7 w-7" />
         <span className="font-serif text-[26px] leading-none tracking-tight text-[var(--text-main)]">
-          Twinkle AI
+          Twinkle
         </span>
       </header>
 
