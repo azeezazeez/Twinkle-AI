@@ -2242,3 +2242,42 @@ export async function previewGeminiVoice(
     };
   });
 }
+
+
+/* =======================================================
+   MEMORY
+======================================================= */
+
+export type MemoryItem = {
+  id: number;
+  content: string;
+  createdAt: string | null;
+};
+
+export type MemorySnapshot = {
+  enabled: boolean;
+  memories: MemoryItem[];
+};
+
+export const memoryApi = {
+  get: () =>
+    fetchWithAuth(`${API_BASE}/memory`, { method: 'GET' }) as Promise<MemorySnapshot>,
+
+  setEnabled: (enabled: boolean) =>
+    fetchWithAuth(`${API_BASE}/memory/settings`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    }) as Promise<MemorySnapshot>,
+
+  add: (content: string) =>
+    fetchWithAuth(`${API_BASE}/memory`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    }) as Promise<MemorySnapshot>,
+
+  remove: (id: number) =>
+    fetchWithAuth(`${API_BASE}/memory/${id}`, { method: 'DELETE' }) as Promise<MemorySnapshot>,
+
+  clear: () =>
+    fetchWithAuth(`${API_BASE}/memory`, { method: 'DELETE' }) as Promise<MemorySnapshot>,
+};
