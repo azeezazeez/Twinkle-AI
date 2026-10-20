@@ -15,10 +15,7 @@ export interface LiveFailure {
   retryable: boolean;
 }
 
-const QUOTA_MESSAGE =
-  'Live Talk has reached its usage limit for now, so voice conversations are paused. ' +
-  'This is a limit on our side, not a problem with your device or microphone. ' +
-  'Please try again a little later, or keep chatting by typing in the meantime.';
+const QUOTA_MESSAGE = 'Live Talk has reached its usage limit. Please try again later.';
 
 const AUTH_MESSAGE =
   'Live Talk is not available right now because of a service configuration problem on our side. ' +
