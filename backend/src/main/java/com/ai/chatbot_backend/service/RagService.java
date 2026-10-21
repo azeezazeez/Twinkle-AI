@@ -33,7 +33,49 @@ public class RagService {
     @Value("${twinkle.rag.embedding-model:gemini-embedding-001}") private String embeddingModel;
     @Value("${twinkle.rag.chat-model:${gemini.model:gemini-3.8-flash}}") private String chatModel;
 
+    // Background worker for documents attached in chat, so indexing never delays a reply.
+    private final java.util.concurrent.ExecutorService indexer = java.util.concurrent.Executors.newFixedThreadPool(2, r -> {
+        Thread t = new Thread(r, "rag-indexer");
+        t.setDaemon(true);
+        return t;
+    });
+
     public RagService(JdbcTemplate jdbc, ObjectMapper mapper) { this.jdbc = jdbc; this.mapper = mapper; }
+
+    @jakarta.annotation.PreDestroy
+    void shutdownIndexer() { indexer.shutdown(); }
+
+    /**
+     * Adds a document attached in chat to the user's Library. The row is created
+     * immediately (status PROCESSING) so it shows up in the Library at once; the
+     * embeddings are generated in the background. A file with the same name and
+     * size that is already in the Library is not added twice.
+     */
+    public void queueChatAttachment(Long userId, String fileName, String mimeType, long size, String extractedText) {
+        if (userId == null || extractedText == null) return;
+        String name = Optional.ofNullable(fileName).orElse("document").replaceAll("[\\r\\n\\\\/]+", "_");
+        String text = extractedText.replaceAll("\\s+", " ").trim();
+        if (text.length() < 30) {
+            log.info("Chat attachment not added to library (too little text); userId={}, filename={}", userId, name);
+            return;
+        }
+        if (text.length() > 2_000_000) text = text.substring(0, 2_000_000);
+        Integer existing = jdbc.queryForObject(
+                "select count(*) from rag_documents where user_id=? and name=? and byte_size=? and status in ('READY','PROCESSING')",
+                Integer.class, userId, name, size);
+        if (existing != null && existing > 0) return;
+        Long docId = jdbc.queryForObject(
+                "insert into rag_documents(user_id, name, mime_type, byte_size, status, chunk_count, created_at) " +
+                "values(?,?,?,?,?,?,now()) returning id",
+                Long.class, userId, name,
+                Optional.ofNullable(mimeType).orElse("application/octet-stream"), size, "PROCESSING", 0);
+        if (docId == null) throw new IllegalStateException("The database did not return a document ID.");
+        final String indexedText = text;
+        indexer.submit(() -> {
+            try { index(docId, userId, name, indexedText); }
+            catch (Exception e) { log.error("Background library indexing failed; documentId={}, filename={}", docId, name, e); }
+        });
+    }
 
     public Map<String,Object> ingest(Long userId, MultipartFile file) throws Exception {
         if (file == null || file.isEmpty()) throw new IllegalArgumentException("Choose a non-empty document.");
@@ -53,6 +95,14 @@ public class RagService {
                 Optional.ofNullable(file.getContentType()).orElse("application/octet-stream"),
                 file.getSize(), "PROCESSING", 0);
         if (docId == null) throw new IllegalStateException("The database did not return a document ID.");
+        int chunkCount = index(docId, userId, name, text);
+        log.info("RAG document processed successfully; documentId={}, userId={}, chunkCount={}", docId, userId, chunkCount);
+        return Map.of("id", docId, "name", name, "status", "READY", "chunkCount", chunkCount, "size", file.getSize());
+    }
+
+
+    /** Chunks, embeds and stores a document that already has a PROCESSING row. Returns the chunk count. */
+    private int index(Long docId, Long userId, String name, String text) throws Exception {
         List<String> chunks = chunk(text, 1000, 150);
         try {
             // Batch embedding calls drastically reduce latency and provider request pressure
@@ -84,8 +134,7 @@ public class RagService {
                     docId, userId, name, e.getClass().getSimpleName(), safeMessage(e));
             throw e;
         }
-        log.info("RAG document processed successfully; documentId={}, userId={}, chunkCount={}", docId, userId, chunks.size());
-        return Map.of("id", docId, "name", name, "status", "READY", "chunkCount", chunks.size(), "size", file.getSize());
+        return chunks.size();
     }
 
     private String safeMessage(Throwable ex) {
