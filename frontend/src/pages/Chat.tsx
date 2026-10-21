@@ -1976,13 +1976,8 @@ ${textToRead}` }] }], turnComplete: true },
   const [modalType, setModalType] = useState<'none' | 'delete-all' | 'delete-single'>('none');
   const [sessionIdToDelete, setSessionIdToDelete] = useState<number | null>(null);
   const [messageAttachments, setMessageAttachments] = useState<Record<string | number, string[]>>({});
+  // Share popup: null = closed, -1 = open for a chat that is not saved yet, otherwise the session id.
   const [shareSessionId, setShareSessionId] = useState<number | null>(null);
-  const [shareCutoffMessageId, setShareCutoffMessageId] = useState<number | string | null>(null);
-  const [sharePromptText, setSharePromptText] = useState('');
-  const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const [shareLoading, setShareLoading] = useState(false);
-  const [shareMode, setShareMode] = useState<'prompt' | 'conversation'>('prompt');
-  const [shareError, setShareError] = useState<string | null>(null);
   // Long chats: show only the latest messages until the user asks for more.
   const [showAllMessages, setShowAllMessages] = useState(false);
   useEffect(() => { setShowAllMessages(false); }, [currentSessionId]);
@@ -2075,16 +2070,6 @@ ${textToRead}` }] }], turnComplete: true },
     });
     return items;
   }, [messages, messageAttachments]);
-  const [shareLinks, setShareLinks] = useState<Array<{ id: number; url: string; createdAt?: string; expiresAt?: string }>>([]);
-  const [shareSuccessVisible, setShareSuccessVisible] = useState(false);
-
-  // Auto-dismiss the "Public link copied" notification after 5 seconds.
-  useEffect(() => {
-    if (!shareSuccessVisible) return;
-    const timer = window.setTimeout(() => setShareSuccessVisible(false), 5000);
-    return () => window.clearTimeout(timer);
-  }, [shareSuccessVisible]);
-  const [topShareBusy, setTopShareBusy] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const mobileOpenRef = useRef(false);
   mobileOpenRef.current = mobileOpen;
@@ -5060,104 +5045,20 @@ if (isBlankDraft) {
     }
   };
 
-  // Sidebar "Share": opens the same Share chat dialog for the chosen session.
+  // Sidebar "Share": opens the Share session popup for the chosen chat.
   const shareSession = async (sid: number) => {
-    const target = sessions.find(item => item.id === sid);
-    setShareMode('conversation');
-    setShareCutoffMessageId(null);
-    setSharePromptText(target?.sessionName || '');
-    setShareUrl(null);
-    setShareError(null);
-    setShareLoading(false);
-    setShareSessionId(Number.isFinite(sid) ? sid : -1);
+    setShareSessionId(Number.isFinite(sid) && sid > 0 ? sid : -1);
     return null;
   };
 
-  // The top-right Share button opens the share popup; the public link is
-  // created from inside the popup.
+  // The top-right Share button opens the same popup for the open chat. A chat
+  // that has no messages yet shows a friendly "start chatting" state instead.
   const handleTopShare = () => {
-    setShareMode('conversation');
-    setShareUrl(null);
-    setShareLoading(false);
-    setSharePromptText(sessions.find(item => item.id === currentSessionId)?.sessionName || '');
-    if (currentSessionId === null) {
-      // Nothing saved yet: the dialog shows a friendly "start chatting" state.
-      setShareError(null);
-      setShareSessionId(-1);
-      return;
-    }
-    setShareError(null);
-    setShareSessionId(currentSessionId);
-  };
-
-  const createConversationLink = async (expiresInDays?: number) => {
-    const targetSessionId = shareSessionId !== null && shareSessionId > 0 ? shareSessionId : currentSessionId;
-    if (targetSessionId === null || shareLoading) return;
-    setShareLoading(true);
-    setShareError(null);
-    try {
-      const response = await chatApi.shareSession(targetSessionId, expiresInDays) as any;
-      const shareToken = response?.shareToken;
-      if (!response?.success || !shareToken) {
-        throw new Error(response?.error || 'Could not create a public link.');
-      }
-      setShareUrl(`${window.location.origin}/shared/${encodeURIComponent(shareToken)}`);
-      toast.success('Public link created');
-      void loadShareLinks(targetSessionId);
-    } catch (error) {
-      setShareError(error instanceof Error ? error.message : 'Could not create the public link.');
-      toast.error(error instanceof Error ? error.message : 'Could not create the public link.');
-    } finally {
-      setShareLoading(false);
-    }
-  };
-
-  const loadShareLinks = useCallback(async (sid: number) => {
-    try {
-      const response = await chatApi.listShares(sid) as any;
-      const links = Array.isArray(response?.links) ? response.links : [];
-      setShareLinks(links.map((link: any) => ({
-        id: Number(link.id),
-        url: `${window.location.origin}/shared/${encodeURIComponent(link.shareToken)}`,
-        createdAt: link.createdAt ? (parseServerDate(link.createdAt)?.toISOString() ?? undefined) : undefined,
-        expiresAt: link.expiresAt ? (parseServerDate(link.expiresAt)?.toISOString() ?? undefined) : undefined,
-      })));
-    } catch {
-      setShareLinks([]);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (shareMode === 'conversation' && shareSessionId !== null && shareSessionId > 0) {
-      void loadShareLinks(shareSessionId);
-    } else {
-      setShareLinks([]);
-    }
-  }, [shareMode, shareSessionId, loadShareLinks]);
-
-  const revokeShareLink = async (linkId: number) => {
-    if (shareSessionId === null || shareSessionId <= 0) return;
-    const previous = shareLinks;
-    setShareLinks(prev => prev.filter(link => link.id !== linkId));
-    try {
-      const response = await chatApi.revokeShare(shareSessionId, linkId) as any;
-      if (response && response.success === false) throw new Error(response.error || 'failed');
-      toast.success('Public link turned off');
-    } catch {
-      setShareLinks(previous);
-      setShareError('Could not turn off that link. Please try again.');
-      toast.error('Could not turn off that link. Please try again.');
-    }
+    setShareSessionId(currentSessionId !== null && currentSessionId > 0 ? currentSessionId : -1);
   };
 
   const closeShareModal = () => {
     setShareSessionId(null);
-    setShareCutoffMessageId(null);
-    setSharePromptText('');
-    setShareUrl(null);
-    setShareError(null);
-    setShareLoading(false);
-    setShareLinks([]);
   };
 
   const confirmClearAll = () => {
@@ -5448,6 +5349,15 @@ if (isBlankDraft) {
           createNewSession();
           setMobileOpen(false);
         }}
+        onComposeChat={(text) => {
+          // Search dialog, Tab: new chat with the typed text ready to send.
+          createNewSession();
+          setMobileOpen(false);
+          window.setTimeout(() => {
+            setInput(text);
+            inputRef.current?.focus();
+          }, 60);
+        }}
         onDeleteSession={deleteSession}
         onRenameSession={renameSession}
         onShareSession={shareSession}
@@ -5528,15 +5438,23 @@ if (isBlankDraft) {
           <button
             type="button"
             onClick={handleTopShare}
-            disabled={topShareBusy}
-            className="group relative hidden h-9 items-center gap-2 rounded-lg border border-zinc-300/70 bg-white px-3.5 text-sm font-medium text-zinc-900 transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 disabled:cursor-wait disabled:opacity-70 sm:inline-flex dark:border-white/15 dark:bg-transparent dark:text-zinc-100 dark:hover:bg-white/5"
             aria-label="Share"
+            aria-haspopup="dialog"
+            aria-expanded={shareSessionId !== null}
+            className="group relative hidden h-9 items-center gap-2 rounded-lg border border-zinc-300/70 bg-white px-3.5 text-sm font-medium text-zinc-900 transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 sm:inline-flex dark:border-white/15 dark:bg-transparent dark:text-zinc-100 dark:hover:bg-white/5"
           >
-            {topShareBusy && <LoaderCircle className="h-4 w-4 animate-spin" strokeWidth={2} aria-hidden="true" />}
-            <span>{topShareBusy ? 'Creating link…' : 'Share'}</span>
-            <span className="pointer-events-none absolute right-0 top-[calc(100%+8px)] hidden whitespace-nowrap rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white shadow-lg group-hover:block group-focus-visible:block dark:bg-white dark:text-zinc-900">
-              Create a public link
-            </span>
+            <span>Share</span>
+          </button>
+          {/* Phones: the text button is hidden, so an icon button opens the same popup. */}
+          <button
+            type="button"
+            onClick={handleTopShare}
+            aria-label="Share"
+            aria-haspopup="dialog"
+            aria-expanded={shareSessionId !== null}
+            className="inline-flex h-10 w-10 shrink-0 touch-manipulation items-center justify-center rounded-lg border border-zinc-300/70 bg-white text-zinc-700 transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 sm:hidden dark:border-white/15 dark:bg-[#30302E] dark:text-zinc-200 dark:hover:bg-[#3A3A38]"
+          >
+            <Share2 className="h-5 w-5" strokeWidth={1.8} />
           </button>
         </div>
         <OfflineBanner />
@@ -6766,21 +6684,16 @@ if (isBlankDraft) {
 
       <ShareChatModal
         isOpen={shareSessionId !== null}
-        shareUrl={shareUrl}
-        chatName="Share chat"
-        mode={shareMode}
-        onCreateLink={(days) => void createConversationLink(days)}
-        emptyChat={shareMode === 'conversation' && shareSessionId === -1}
+        sessionId={shareSessionId}
+        owner={{
+          name: user?.name || user?.username || '',
+          email: user?.email || '',
+          avatarUrl: user?.avatarUrl,
+        }}
         onStartChat={() => {
           closeShareModal();
           window.setTimeout(() => inputRef.current?.focus(), 60);
         }}
-        promptText={sharePromptText}
-        shareDescription={shareMode === 'prompt' ? 'Anyone with this link can open Twinkle AI with this prompt ready to send.' : undefined}
-        isLoading={shareLoading}
-        error={shareError}
-        links={shareMode === 'conversation' ? shareLinks : []}
-        onRevokeLink={(id) => void revokeShareLink(id)}
         onClose={closeShareModal}
       />
 
