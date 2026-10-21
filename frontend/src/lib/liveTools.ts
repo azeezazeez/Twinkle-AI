@@ -96,9 +96,9 @@ export const LIVE_TOOL_DECLARATIONS = [
   {
     name: 'search_knowledge_base',
     description:
-      "Searches the documents the user has uploaded to their personal knowledge base and returns an " +
+      "Searches the documents the user has uploaded to their personal library and returns an " +
       'answer grounded in them. Call it when the user asks about their own documents, files, notes, ' +
-      'PDFs, resume or knowledge base.',
+      'PDFs, resume or library.',
     parameters: {
       type: 'OBJECT',
       properties: {
@@ -580,7 +580,7 @@ const toolGetExchangeRate = async (args: Record<string, unknown>): Promise<LiveT
 
 const toolSearchKnowledgeBase = async (args: Record<string, unknown>): Promise<LiveToolResult> => {
   const question = typeof args.question === 'string' ? args.question.trim() : '';
-  if (!question) return { error: 'No question was provided for the knowledge base search.' };
+  if (!question) return { error: 'No question was provided for the library search.' };
 
   try {
     const result = (await fetchWithAuth('/api/rag/ask', {
@@ -591,14 +591,14 @@ const toolSearchKnowledgeBase = async (args: Record<string, unknown>): Promise<L
     // Citation markers like [1] are for reading, not for speaking.
     const answer = String(result?.answer ?? '').replace(/\s*\[\d+\]/g, '').trim();
     const sources = Array.from(new Set((result?.sources ?? []).map(s => s?.documentName).filter(Boolean)));
-    if (!answer) return { error: 'The knowledge base returned no answer.' };
+    if (!answer) return { error: 'The library returned no answer.' };
     return {
       answer: answer.length > 1800 ? `${answer.slice(0, 1800)}…` : answer,
       sourceDocuments: sources,
       note: 'Answer only from this. If it says nothing relevant was found, say so.',
     };
   } catch (error) {
-    const message = error instanceof Error && error.message ? error.message : 'The knowledge base could not be searched.';
+    const message = error instanceof Error && error.message ? error.message : 'The library could not be searched.';
     return { error: `${message} Tell the user briefly; do not guess the content of their documents.` };
   }
 };
