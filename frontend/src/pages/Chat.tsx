@@ -8,7 +8,7 @@ import { takeWeatherSnapshot, type WeatherSnapshot, chatApi, authApi, createLive
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react'; 
 import StormLogo from '../components/StormLogo';
 import { toast } from '../lib/toast';
-import ConfirmationModal from '../components/ConfirmationModal';
+import ConfirmationModal from '../components/ConfirmationModal'; 
 import ShareChatModal from '../components/ShareChatModal';
 import UploadFilesModal from '../components/UploadFilesModal';
 import UploadedFilesModal from '../components/UploadedFilesModal';
