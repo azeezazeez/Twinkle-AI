@@ -1083,7 +1083,7 @@ function SessionList({
         </button>
 
         <div className="flex items-center gap-0.5">
-        {/* View all: opens the full "Chats and tasks" page */}
+        {/* View all: opens the full "Chats" page */}
         <Tip label="View all" side="top">
           <button
             type="button"
