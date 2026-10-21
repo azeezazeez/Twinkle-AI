@@ -4886,6 +4886,9 @@ if (isBlankDraft) {
 
   setMobileOpen(false);
   setModalType('none');
+  // From the Chats page (/chats) or any other address, a blank draft still has
+  // to leave that page; otherwise "New chat" / "New" appear to do nothing.
+  if (window.location.pathname !== '/') navigate('/', { replace: true });
   window.setTimeout(() => inputRef.current?.focus(), 0);
   return;
 }
