@@ -5201,12 +5201,12 @@ if (isBlankDraft) {
       >
         {showFirstWelcome && !chatsView && (
           <>
-            <div className="absolute left-[46px] top-[max(0.75rem,env(safe-area-inset-top))] z-[9997] flex h-8 max-w-[calc(100%-10rem)] items-center lg:hidden">
+            <div className="absolute left-[32px] top-[max(0.75rem,env(safe-area-inset-top))] z-[9997] flex h-8 max-w-[calc(100%-10rem)] items-center lg:hidden">
               <span className="truncate text-[15px] font-medium text-zinc-800 dark:text-zinc-100">
                 Your first chat with Twinkle
               </span>
             </div>
-          <div className={`absolute z-[9997] hidden h-9 max-w-[calc(100%-18rem)] items-center lg:flex ${desktopSidebarExpanded ? 'left-4 top-3' : '-left-1 top-4'}`}>
+          <div className={`absolute z-[9997] hidden h-9 max-w-[calc(100%-18rem)] items-center lg:flex ${desktopSidebarExpanded ? 'left-4 top-3' : '-left-5 top-4'}`}>
             <span className="truncate text-[15px] font-medium text-zinc-800 dark:text-zinc-100">
               Your first chat with Twinkle
             </span>
@@ -5220,8 +5220,9 @@ if (isBlankDraft) {
             <>
               <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-[9996] hidden h-16 bg-gradient-to-b from-[var(--bg-main)] via-[var(--bg-main)]/80 to-transparent lg:block" />
               <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-[9996] h-14 bg-gradient-to-b from-[var(--bg-main)] via-[var(--bg-main)]/80 to-transparent lg:hidden" />
-              <div className="absolute left-[46px] top-[max(0.75rem,env(safe-area-inset-top))] z-[9998] flex h-8 max-w-[calc(100%-10rem)] items-center lg:hidden">
+              <div className="absolute left-[32px] top-[max(0.75rem,env(safe-area-inset-top))] z-[9998] flex h-8 max-w-[calc(100%-10rem)] items-center lg:hidden">
                 <ChatTitleMenu
+                  flushLeft
                   sessionId={titledSession.id}
                   title={titledSession.sessionName || 'New Chat'}
                   onRename={renameSession}
@@ -5230,8 +5231,9 @@ if (isBlankDraft) {
                   onDelete={deleteSession}
                 />
               </div>
-              <div className={`absolute z-[9998] hidden h-9 max-w-[calc(100%-18rem)] items-center lg:flex ${desktopSidebarExpanded ? 'left-4 top-3' : '-left-1 top-4'}`}>
+              <div className={`absolute z-[9998] hidden h-9 max-w-[calc(100%-18rem)] items-center lg:flex ${desktopSidebarExpanded ? 'left-4 top-3' : '-left-5 top-4'}`}>
                 <ChatTitleMenu
+                  flushLeft={!desktopSidebarExpanded}
                   sessionId={titledSession.id}
                   title={titledSession.sessionName || 'New Chat'}
                   onRename={renameSession}
@@ -5347,12 +5349,12 @@ if (isBlankDraft) {
           data-tooltip-side="right"
           inert={mobileOpen}
           tabIndex={mobileOpen ? -1 : 0}
-          className={`lg:hidden absolute left-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[9997] flex h-8 w-8 items-center justify-center rounded-lg text-zinc-700 transition-all duration-200 hover:bg-zinc-200/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 dark:text-zinc-200 dark:hover:bg-zinc-800 ${
+          className={`lg:hidden absolute left-[15px] top-[max(0.75rem,env(safe-area-inset-top))] z-[9997] flex h-8 w-[17px] items-center justify-center rounded-lg text-zinc-700 transition-all duration-200 before:pointer-events-none before:absolute before:inset-y-0 before:-inset-x-[3px] before:rounded-lg before:transition-colors hover:before:bg-zinc-200/60 after:absolute after:inset-y-0 after:-left-3 after:w-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 dark:text-zinc-200 dark:hover:before:bg-zinc-800 ${
             mobileOpen ? 'pointer-events-none opacity-0' : 'opacity-100'
           }`}
         >
           <span className="sr-only">Open sidebar</span>
-          <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden="true" className="relative shrink-0">
       <rect x="2.5" y="2.5" width="15" height="15" rx="0.5" stroke="currentColor" strokeWidth="2" />
       <path d="M8 3V17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
           </svg>
