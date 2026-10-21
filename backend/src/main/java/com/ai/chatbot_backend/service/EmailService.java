@@ -29,7 +29,7 @@ public class EmailService {
     @Value("${brevo.sender.email:}")
     private String senderEmail;
 
-    @Value("${brevo.sender.name:Twinkle AI}")
+    @Value("${brevo.sender.name:Twinkle}")
     private String senderName;
 
     @Value("${otp.expiration.minutes:10}")
@@ -82,7 +82,7 @@ public class EmailService {
     ) {
         sendEmail(
                 toEmail,
-                "Welcome to Twinkle AI",
+                "Welcome to Twinkle",
                 buildWelcomeHtmlContent(userName)
         );
     }
@@ -100,19 +100,19 @@ public class EmailService {
         String title = (chatName == null || chatName.isBlank()) ? "a chat" : "&ldquo;" + escapeHtml(chatName.trim()) + "&rdquo;";
 
         String body =
-                paragraph(who + " shared " + title + " with you on Twinkle AI.")
+                paragraph(who + " shared " + title + " with you on Twinkle.")
                 + paragraph("Sign in with this email address to read the conversation.")
                 + button("Open chat", chatUrl)
                 + note("You&rsquo;re receiving this because someone invited this email address. If you don&rsquo;t know them, you can ignore this message.");
 
         sendEmail(
                 toEmail,
-                "A chat was shared with you on Twinkle AI",
+                "A chat was shared with you on Twinkle",
                 buildLayout(
                         "A chat was shared with you",
                         "Shared chat",
                         body,
-                        who + " shared a chat with you on Twinkle AI."
+                        who + " shared a chat with you on Twinkle."
                 )
         );
     }
@@ -290,7 +290,7 @@ public class EmailService {
         }
 
         if (senderName == null || senderName.trim().isEmpty()) {
-            senderName = "Twinkle AI";
+            senderName = "Twinkle";
         }
     }
 
@@ -330,7 +330,7 @@ public class EmailService {
      */
     private String buildOtpHtmlContent(String otp) {
         String body =
-                paragraph("Enter this code on the verification screen to finish creating your Twinkle AI account.")
+                paragraph("Enter this code on the verification screen to finish creating your Twinkle account.")
                 + codeBlock(otp)
                 + paragraph("The code expires in <strong class=\"tw-strong\" style=\"color:#1F1E1D;\">"
                 + otpExpirationMinutes + " minutes</strong> and can only be used once.")
@@ -340,7 +340,7 @@ public class EmailService {
                 "Your verification code",
                 "Confirm your email address",
                 body,
-                "Your Twinkle AI verification code is " + otp
+                "Your Twinkle verification code is " + otp
         );
     }
 
@@ -349,7 +349,7 @@ public class EmailService {
      */
     private String buildPasswordResetHtmlContent(String otp) {
         String body =
-                paragraph("Use this code to choose a new password for your Twinkle AI account.")
+                paragraph("Use this code to choose a new password for your Twinkle account.")
                 + codeBlock(otp)
                 + paragraph("The code expires in <strong class=\"tw-strong\" style=\"color:#1F1E1D;\">"
                 + otpExpirationMinutes + " minutes</strong> and can only be used once.")
@@ -359,7 +359,7 @@ public class EmailService {
                 "Reset your password",
                 "Password reset request",
                 body,
-                "Your Twinkle AI password reset code is " + otp
+                "Your Twinkle password reset code is " + otp
         );
     }
 
@@ -377,10 +377,10 @@ public class EmailService {
                 + note("You&rsquo;re receiving this because an account was created with this email address.");
 
         return buildLayout(
-                "Welcome to Twinkle AI",
+                "Welcome to Twinkle",
                 "Your account is ready",
                 body,
-                "Welcome to Twinkle AI. Your account is ready."
+                "Welcome to Twinkle. Your account is ready."
         );
     }
 
@@ -448,7 +448,7 @@ public class EmailService {
                                      style="display:block;width:28px;height:28px;border:0;outline:none;text-decoration:none;">
                               </td>
                               <td class="tw-brand"
-                                  style="font-family:{{SERIF}};font-size:21px;line-height:1;letter-spacing:-0.01em;color:#1F1E1D;">Twinkle AI</td>
+                                  style="font-family:{{SERIF}};font-size:21px;line-height:1;letter-spacing:-0.01em;color:#1F1E1D;">Twinkle</td>
                             </tr>
                           </table>
 
@@ -464,8 +464,8 @@ public class EmailService {
                           <hr class="tw-rule" style="margin:36px 0 18px 0;border:0;border-top:1px solid #E6E3D8;">
                           <p class="tw-muted"
                              style="margin:0;font-family:{{SANS}};font-size:12px;line-height:1.6;color:#8A867B;">
-                            Twinkle AI &middot; This is an automated message, please don&rsquo;t reply.<br>
-                            &copy; 2026 Twinkle AI. All rights reserved.
+                            Twinkle &middot; This is an automated message, please don&rsquo;t reply.<br>
+                            &copy; 2026 Twinkle. All rights reserved.
                           </p>
 
                         </td>
