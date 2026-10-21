@@ -13,7 +13,7 @@ import { serverTime } from '../lib/time';
 import { dispatchShortcut, isMac } from '../lib/shortcuts';
 
 /**
- * Command-style search dialog (Ctrl/⌘+K). Tabs: All, Chats, Knowledge, Settings.
+ * Command-style search dialog (Ctrl/⌘+K). Tabs: All, Chats, Library, Settings.
  * It only offers things Twinkle really has: chats, knowledge-base documents,
  * settings pages and a few quick actions.
  */
@@ -23,7 +23,7 @@ type TabId = 'all' | 'chats' | 'knowledge' | 'settings';
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'all', label: 'All' },
   { id: 'chats', label: 'Chats' },
-  { id: 'knowledge', label: 'Knowledge' },
+  { id: 'knowledge', label: 'Library' },
   { id: 'settings', label: 'Settings' },
 ];
 
@@ -201,7 +201,7 @@ export default function SearchPalette({
       const actions: Array<PaletteItem & { keywords: string }> = [
         { key: 'a-new', section: 'Actions', label: 'New chat', Icon: Plus, hint: SHORTCUT_NEW_CHAT, keywords: 'new start conversation', run: () => go(onNewSession) },
         { key: 'a-live', section: 'Actions', label: 'Live Talk', Icon: AudioLines, hint: SHORTCUT_LIVE_TALK, keywords: 'voice speak talk', run: () => go(() => dispatchShortcut('live-talk')) },
-        { key: 'a-kb', section: 'Actions', label: 'Knowledge base', Icon: BookOpen, keywords: 'documents upload files rag', run: () => go(() => navigate('/knowledge')) },
+        { key: 'a-kb', section: 'Actions', label: 'Library', Icon: BookOpen, keywords: 'documents upload files rag knowledge', run: () => go(() => navigate('/library')) },
         { key: 'a-chats', section: 'Actions', label: 'All chats', Icon: MessagesSquare, keywords: 'history list view', run: () => go(() => navigate('/chats')) },
         { key: 'a-settings', section: 'Actions', label: 'Settings', Icon: SettingsIcon, hint: SHORTCUT_SETTINGS, keywords: 'preferences options', run: () => go(() => navigate('/settings')) },
         { key: 'a-keys', section: 'Actions', label: 'Keyboard shortcuts', Icon: SlidersHorizontal, hint: SHORTCUT_SHORTCUTS, keywords: 'keys hotkeys', run: () => go(() => navigate('/settings?tab=shortcuts')) },
@@ -242,11 +242,11 @@ export default function SearchPalette({
         .forEach(doc => {
           out.push({
             key: `d-${doc.id}`,
-            section: 'Knowledge',
+            section: 'Library',
             label: doc.name,
             Icon: FileText,
             userContent: true,
-            run: () => go(() => navigate('/knowledge')),
+            run: () => go(() => navigate('/library')),
           });
         });
     }
@@ -430,7 +430,7 @@ export default function SearchPalette({
                 ? 'Searching…'
                 : q
                   ? <>No results for “<span data-twinkle-user-content>{q}</span>”</>
-                  : tab === 'chats' ? 'No chats yet' : tab === 'knowledge' ? 'No documents in your knowledge base yet' : 'Nothing to show'}
+                  : tab === 'chats' ? 'No chats yet' : tab === 'knowledge' ? 'No documents in your library yet' : 'Nothing to show'}
             </p>
           ) : (
             sections.map(section => (
