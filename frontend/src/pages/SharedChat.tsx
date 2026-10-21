@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { AlertCircle, ArrowLeft, Bot, User as UserIcon } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Bot, Lock, User as UserIcon } from 'lucide-react';
 import { chatApi } from '../lib/api';
 import type { SharedChatResponse } from '../types';
 import StormLogo from '../components/StormLogo';
@@ -13,6 +13,8 @@ const SharedChat = () => {
   const [chat, setChat] = useState<SharedChatResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 401 = chat is shared with invited people only and the viewer is not signed in; 403 = signed in but not invited.
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -30,6 +32,8 @@ const SharedChat = () => {
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'This shared chat is no longer available.');
+          const status = (err as { status?: unknown } | null)?.status;
+          setErrorStatus(typeof status === 'number' ? status : null);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -74,9 +78,24 @@ const SharedChat = () => {
           </div>
         ) : error ? (
           <div className="mx-auto mt-12 max-w-lg rounded-3xl border border-zinc-200 bg-white p-8 text-center shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-            <AlertCircle className="mx-auto h-10 w-10 text-zinc-400" strokeWidth={1.6} />
-            <h1 className="mt-4 text-xl font-medium">Shared chat unavailable</h1>
+            {errorStatus === 401 || errorStatus === 403
+              ? <Lock className="mx-auto h-10 w-10 text-zinc-400" strokeWidth={1.6} />
+              : <AlertCircle className="mx-auto h-10 w-10 text-zinc-400" strokeWidth={1.6} />}
+            <h1 className="mt-4 text-xl font-medium">
+              {errorStatus === 401 ? 'Sign in to view this chat' : errorStatus === 403 ? 'You don’t have access' : 'Shared chat unavailable'}
+            </h1>
             <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">{error}</p>
+            {errorStatus === 401 && (
+              <>
+                <Link
+                  to="/login"
+                  className="mt-5 inline-flex h-10 items-center justify-center rounded-xl bg-zinc-900 px-5 text-sm font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+                >
+                  Sign in
+                </Link>
+                <p className="mt-3 text-xs text-zinc-400">After signing in, open this link again.</p>
+              </>
+            )}
           </div>
         ) : chat ? (
           <>
