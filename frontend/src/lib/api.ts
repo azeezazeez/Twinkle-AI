@@ -103,6 +103,10 @@ export const takeWeatherSnapshot = (): WeatherSnapshot | null => {
   return snapshot;
 };
 
+// Set when a weather question could not be answered for lack of a location, so the
+// user's next short reply (for example "Kurnool") is treated as the city they meant.
+let awaitingWeatherPlace = false;
+
 const getLiveContext = async (message: string): Promise<string | undefined> => {
   learnAssistantName(message);
   const persona = assistantNameContext();
@@ -112,9 +116,17 @@ const getLiveContext = async (message: string): Promise<string | undefined> => {
 
 const getVerifiedLiveContext = async (message: string): Promise<string | undefined> => {
   const query = (message || '').toLowerCase();
+  let followUpPlace: string | null = null;
+  if (awaitingWeatherPlace) {
+    awaitingWeatherPlace = false;
+    const reply = (message || '').trim();
+    if (reply && reply.length <= 50 && reply.split(/\s+/).length <= 5 && !/[?]/.test(reply)) {
+      followUpPlace = reply.replace(/^(?:it'?s|it is|i'?m in|i am in|i live in|my city is|in|at|for)\s+/i, '').replace(/[.!]+$/, '').trim() || null;
+    }
+  }
   const asksTime = /\b(time|date|today|current day|what day|timezone|time zone|right now)\b/.test(query);
-  const asksWeather = /\b(weather|temperature|forecast|rain|raining|rainy|umbrella|wind speed|windy|humidity|humid|sunny|cloudy|storm|snowing|sunrise|sunset|how (?:hot|cold|warm)|(?:hot|cold|warm|cool) (?:outside|today|now))\b/.test(query);
-  const asksLocation = /\b(my location|current location|where am i|where do i live|near me|nearby|nearest|closest|my coordinates|location here|which village|which mandal|which district)\b/.test(query);
+  const asksWeather = followUpPlace !== null || /\b(weather|temperature|forecast|rain|raining|rainy|umbrella|wind speed|windy|humidity|humid|sunny|cloudy|storm|snowing|sunrise|sunset|how (?:hot|cold|warm)|(?:hot|cold|warm|cool) (?:outside|today|now))\b/.test(query);
+  const asksLocation = /\b(my location|current location|where am i|where do i live|near me|nearby|nearest|closest|my coordinates|location here|which village|which mandal|which district|my city|my area|am i located)\b/.test(query);
   if (!asksTime && !asksWeather && !asksLocation) return undefined;
 
   const now = new Date();
@@ -128,11 +140,13 @@ const getVerifiedLiveContext = async (message: string): Promise<string | undefin
   ];
   if (asksWeather || asksLocation) {
     let coordinates: { latitude: number; longitude: number; label: string } | null = null;
+    let namedPlaceNotFound = false;
     // Prefer an explicitly named place (for example, "weather in Chennai") over the browser's location.
     if (asksWeather) {
       const placeMatch = (message || '').match(/\b(?:weather|forecast|temperature|rain|raining|rainy|umbrella|humidity|hot|cold|warm)\b.*?\b(?:in|for|at)\s+([A-Za-z][A-Za-z .'-]{1,45}?)(?=\s+(?:today|tomorrow|now|this week|currently)\b|[?!.,]|$)/i);
-      const place = placeMatch?.[1]?.trim();
+      const place = followUpPlace || placeMatch?.[1]?.trim();
       if (place && !/^(here|my location|near me|the area)$/i.test(place)) {
+        namedPlaceNotFound = true;
         try {
           const geoResponse = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(place)}&count=1&language=en&format=json`, { signal: AbortSignal.timeout(8000) });
           if (geoResponse.ok) {
@@ -140,27 +154,36 @@ const getVerifiedLiveContext = async (message: string): Promise<string | undefin
             const result = geo?.results?.[0];
             if (result && Number.isFinite(result.latitude) && Number.isFinite(result.longitude)) {
               coordinates = { latitude: result.latitude, longitude: result.longitude, label: [result.name, result.admin1, result.country].filter(Boolean).join(', ') };
+              namedPlaceNotFound = false;
             }
           }
-        } catch { /* Fall back to permission-based current location below. */ }
+        } catch { /* Handled below: a named place is never replaced by the device location. */ }
+        if (namedPlaceNotFound) {
+          lines.push(`Weather: the place "${place}" could not be found. Ask the user to check the spelling or give a nearby larger city; do not guess and do not substitute another place.`);
+        }
       }
     }
-    if (!coordinates) {
+    if (!coordinates && !namedPlaceNotFound) {
       try {
         // Live, high-accuracy device fix. Never cached, never IP-based.
         const fix = await getPreciseLocation();
         coordinates = { latitude: fix.latitude, longitude: fix.longitude, label: 'device GPS location' };
-        lines.push(`Device location accuracy: about ${Math.round(fix.accuracy)} metres (live GPS fix).`);
+        const coarse = Boolean(fix.approximate) || fix.accuracy > 500;
+        lines.push(
+          coarse
+            ? `Device location accuracy: approximate, about ${Math.round(fix.accuracy)} metres (network-based browser location, no GPS). Describe it as approximate and name only the city/district level; do not claim a street or village.`
+            : `Device location accuracy: about ${Math.round(fix.accuracy)} metres (live GPS fix).`
+        );
         // Reverse-geocode the exact coordinates into a useful locality hierarchy.
         try {
           const reverseResponse = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(fix.latitude)}&lon=${encodeURIComponent(fix.longitude)}&zoom=18&addressdetails=1&accept-language=en`,
+            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(fix.latitude)}&lon=${encodeURIComponent(fix.longitude)}&zoom=${coarse ? 10 : 18}&addressdetails=1&accept-language=en`,
             { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(7000) }
           );
           if (reverseResponse.ok) {
             const reverse = await reverseResponse.json();
             const address = reverse?.address || {};
-            const road = address.road || address.pedestrian || address.footway;
+            const road = coarse ? undefined : (address.road || address.pedestrian || address.footway);
             const localityParts = [
               road,
               address.village || address.hamlet || address.suburb || address.neighbourhood || address.town || address.city,
@@ -178,7 +201,8 @@ const getVerifiedLiveContext = async (message: string): Promise<string | undefin
           }
         } catch { /* Keep the coordinates; the label stays generic if the lookup fails. */ }
       } catch (locationError) {
-        lines.push(`Location: unavailable. ${describeLocationError(locationError)} Tell the user this and do not guess the location.`);
+        lines.push(`Location: unavailable. ${describeLocationError(locationError)} Tell the user this plainly, do not guess the location, and do not say you cannot access live weather in general: ask them to allow location access for this site or to tell you their city.`);
+        if (asksWeather) awaitingWeatherPlace = true;
       }
     }
     if (coordinates) {
