@@ -17,7 +17,7 @@ import { useLanguage, type AppLanguage } from '../lib/i18n';
 import { parseServerDate, serverTime } from '../lib/time';
 import { onShortcut, takePendingShortcut, isMac, type ShortcutAction } from '../lib/shortcuts';
 
-const TOGGLE_SIDEBAR_KEYS = isMac() ? '⌘B' : 'Ctrl+B';
+const TOGGLE_SIDEBAR_KEYS = isMac() ? '⌘.' : 'Ctrl+.';
 const NEW_CHAT_KEYS = isMac() ? '⇧⌘O' : 'Ctrl+Shift+O';
 import { APP_LANGUAGES } from '../pages/Settings';
 
@@ -713,7 +713,7 @@ function TypewriterText({ text, onDone }: { text: string; onDone?: () => void })
 // ─── SidebarHeader ────────────────────────────────────────────────────────────
 // Panel toggle on the left, wordmark next to it. The toggle sits at exactly the
 // same spot as the floating "open sidebar" button shown when the sidebar is closed.
-function SidebarHeader({ onToggle, label }: { onToggle: () => void; label: string }) {
+function SidebarHeader({ onToggle, label, mobile = false }: { onToggle: () => void; label: string; mobile?: boolean }) {
   return (
     <div className="flex shrink-0 items-center gap-2 px-3 pb-1 pt-[18px]">
       <Tip label={label} shortcut={TOGGLE_SIDEBAR_KEYS} side="right">
@@ -723,7 +723,7 @@ function SidebarHeader({ onToggle, label }: { onToggle: () => void; label: strin
           aria-label={label}
           className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-600 transition-colors hover:bg-zinc-200/60 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
         >
-          <SidebarToggleIcon />
+          {mobile ? <X className="h-[20px] w-[20px]" strokeWidth={1.8} aria-hidden="true" /> : <SidebarToggleIcon />}
         </button>
       </Tip>
       <h2 className="font-serif text-[22px] font-medium leading-none tracking-[-0.01em] text-zinc-900 dark:text-zinc-50">
@@ -1231,9 +1231,6 @@ function SessionList({
                         }}
                         onMouseLeave={clearRowTip}
                       >
-                        {isPinned && (
-                          <SidebarPinIcon className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                        )}
                         {isUnread && !isRenaming && (
                           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-800 dark:bg-zinc-100" aria-label="Unread" />
                         )}
@@ -1298,24 +1295,6 @@ function SessionList({
                               <MoreVertical className="h-4 w-4" strokeWidth={1.8} />
                             </button>
 
-                            {/* Portalled tooltip: always paints above the Recents header and the list */}
-                            <Tip label={isPinned ? 'Unpin chat' : 'Pin chat'} side="top">
-                              <button
-                                type="button"
-                                onClick={e => {
-                                  e.stopPropagation();
-                                  togglePin(session.id);
-                                }}
-                                aria-label={isPinned ? 'Unpin chat' : 'Pin chat'}
-                                className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-300/50 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700/70 dark:hover:text-zinc-100"
-                              >
-                                {isPinned ? (
-                                  <PinOff className="h-4 w-4" strokeWidth={1.8} />
-                                ) : (
-                                  <SidebarPinIcon className="h-4 w-4" />
-                                )}
-                              </button>
-                            </Tip>
                           </div>
                         )}
                       </motion.div>
@@ -1989,7 +1968,7 @@ export default function Sidebar({
           }`}
           onClick={e => e.stopPropagation()}
         >
-          <SidebarHeader onToggle={onMobileClose} label="Close sidebar" />
+          <SidebarHeader onToggle={onMobileClose} label="Close sidebar" mobile />
           <SessionList
             {...listProps}
             onClose={onMobileClose}
