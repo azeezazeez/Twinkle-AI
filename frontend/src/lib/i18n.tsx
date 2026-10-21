@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 export type AppLanguage = 'auto'|'en'|'hi'|'te'|'ta'|'kn'|'ml'|'bn'|'mr'|'gu'|'pa'|'ur'|'ar'|'es'|'fr'|'de'|'it'|'pt'|'ru'|'ja'|'ko'|'zh'|'tr'|'vi'|'id'|'th'|'fil';
 export const APP_LANGUAGE_KEY = 'twinkle_app_language';
