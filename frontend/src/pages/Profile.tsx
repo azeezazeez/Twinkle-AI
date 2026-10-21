@@ -1116,7 +1116,7 @@ export default function Profile({
             Log out
           </Btn>
         </Row>
-        <Row title="Delete your account" desc="Permanently delete your account, chats and knowledge-base files. This cannot be undone.">
+        <Row title="Delete your account" desc="Permanently delete your account, chats and library files. This cannot be undone.">
           <Btn variant="primary" onClick={() => setConfirmAccount('delete')} disabled={accountBusy}>
             Delete account
           </Btn>
@@ -1273,7 +1273,7 @@ export default function Profile({
         isLoading={accountBusy}
         closeOnConfirm={false}
         title="Delete your account?"
-        message="This permanently deletes your account, all of your chats and your knowledge-base files. This action cannot be undone."
+        message="This permanently deletes your account, all of your chats and your library files. This action cannot be undone."
         confirmText="Delete account"
       />
 
