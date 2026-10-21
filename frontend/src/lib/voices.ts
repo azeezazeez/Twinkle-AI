@@ -39,45 +39,61 @@ export const VOICES: VoiceOption[] = [
 export const DEFAULT_VOICE = 'Charon';
 export const VOICE_STORAGE_KEY = 'twinkle_live_voice';
 
-// Every voice has its own greeting. Some address the user by name, others
-// introduce Twinkle instead ("{name}" is replaced with the user's name).
+// Every voice has its own greeting, and each one uses the voice's own name
+// instead of the product name. They fall into three styles:
+//   1. introduces itself by its voice name ("I'm Zephyr"),
+//   2. simply greets the user,
+//   3. invites the first question.
+// "{name}" is replaced with the user's name.
 const VOICE_GREETINGS: Record<string, string> = {
-  Zephyr: 'Hi {name}, bright and early, I am Twinkle. Ready when you are!',
-  Puck: 'Hey {name}! Twinkle here, let us make something fun happen.',
-  Charon: 'Hello {name}. I am Twinkle. How can I help you today?',
-  Kore: 'Hi, I am Twinkle. Tell me what you need and we will get it done.',
-  Fenrir: 'Whoa, hi {name}! Twinkle is fired up and ready to go!',
-  Leda: 'Hi there, I am Twinkle! So excited to chat with you.',
-  Orus: 'Good to meet you, {name}. Twinkle at your service.',
-  Aoede: 'Hey {name}, it is Twinkle. Nice and easy, what is on your mind?',
-  Callirrhoe: 'Hi, this is Twinkle. No rush, take your time.',
-  Autonoe: 'Hello {name}! Twinkle here, ready to brighten your day.',
-  Enceladus: 'Hi... I am Twinkle. I am here whenever you want to talk.',
-  Iapetus: 'Hello {name}. Twinkle here, speaking loud and clear.',
-  Umbriel: 'Hey, Twinkle here. What are we up to today?',
-  Algieba: 'Hi {name}, smooth to meet you. I am Twinkle.',
-  Despina: 'Hello, I am Twinkle. Let us have a lovely conversation.',
-  Erinome: 'Hi {name}, this is Twinkle. Ask me anything.',
-  Algenib: 'Well hello there, I am Twinkle. Let us get started.',
-  Rasalgethi: 'Greetings {name}. I am Twinkle, your assistant for answers.',
-  Laomedeia: 'Hi hi! Twinkle here, and I am ready for anything!',
-  Achernar: 'Hello, I am Twinkle. I am listening whenever you are ready.',
-  Alnilam: 'Hi {name}. Twinkle is ready. Let us begin.',
-  Schedar: 'Hello, this is Twinkle. How may I assist you?',
-  Gacrux: 'Hello {name}, I am Twinkle. It is a pleasure to talk with you.',
-  Pulcherrima: 'Hi, Twinkle here. Let us dive right in!',
-  Achird: 'Hey {name}, great to see you! I am Twinkle.',
-  Zubenelgenubi: 'Hey, what is up? Twinkle here, just say the word.',
-  Vindemiatrix: 'Hello {name}, I am Twinkle. I am glad you are here.',
-  Sadachbia: 'Hi {name}! Twinkle is here and feeling lively!',
-  Sadaltager: 'Hello, I am Twinkle. Ask me anything and I will explain.',
-  Sulafat: 'Hi {name}, welcome. I am Twinkle, happy to help.',
+  // Style 1: introduces itself by voice name
+  Zephyr: 'Hi {name}, I am Zephyr. Bright and early, and ready when you are!',
+  Charon: 'Hello {name}. This is Charon, clear and ready to help.',
+  Kore: 'Hi, I am Kore. Tell me what you need and we will get it done.',
+  Orus: 'Good to meet you, {name}. I am Orus, at your service.',
+  Algieba: 'Hi {name}, smooth to meet you. I am Algieba.',
+  Gacrux: 'Hello {name}, I am Gacrux. It is a pleasure to talk with you.',
+  Achird: 'Hey {name}, great to see you! I am Achird.',
+  Vindemiatrix: 'Hello {name}, I am Vindemiatrix. I am glad you are here.',
+  Sulafat: 'Hi {name}, welcome. I am Sulafat, happy to help.',
+  Rasalgethi: 'Greetings {name}. I am Rasalgethi, your guide for clear answers.',
+
+  // Style 2: just a friendly greeting
+  Puck: 'Hey {name}! Let us make something fun happen today.',
+  Fenrir: 'Whoa, hi {name}! I am fired up and ready to go!',
+  Leda: 'Hi there! So excited to chat with you.',
+  Aoede: 'Hey {name}, nice and easy today. Good to hear from you.',
+  Callirrhoe: 'Hi {name}. No rush, take your time.',
+  Autonoe: 'Hello {name}! Ready to brighten your day.',
+  Enceladus: 'Hi... I am here whenever you want to talk.',
+  Umbriel: 'Hey {name}, good to see you. What are we up to today?',
+  Sadachbia: 'Hi {name}! Feeling lively today, and so glad you are here!',
+  Zubenelgenubi: 'Hey {name}, what is up? Good to hear from you.',
+
+  // Style 3: invites the first question
+  Iapetus: 'Hello {name}. Go ahead and ask me your first question.',
+  Despina: 'Hello! What would you like to talk about first?',
+  Erinome: 'Hi {name}. Ask me anything to get started.',
+  Algenib: 'Well hello there. What is the first thing on your mind?',
+  Laomedeia: 'Hi hi! What question can I tackle first?',
+  Achernar: 'Hello. Whenever you are ready, ask me anything.',
+  Alnilam: 'Hi {name}. Ready when you are. What is your first question?',
+  Schedar: 'Hello. How may I assist you today?',
+  Pulcherrima: 'Hi! Let us dive right in. What do you want to know?',
+  Sadaltager: 'Hello {name}. Ask me anything and I will explain it.',
 };
 
 export function getVoiceGreeting(voiceName: string, userName?: string | null): string {
   const name = (userName || '').trim();
-  const template = VOICE_GREETINGS[voiceName] || 'Hi {name}, I am Twinkle.';
+  const template = VOICE_GREETINGS[voiceName] || `Hi {name}, I am ${voiceName}.`;
   if (!template.includes('{name}')) return template;
-  // With no known name, fall back to a greeting that does not need one.
-  return name ? template.replace('{name}', name) : template.replace('Hi {name}', 'Hi').replace('{name}', 'there');
+  // With no known name, drop it gracefully instead of leaving a placeholder.
+  return name
+    ? template.replace(/\{name\}/g, name)
+    : template
+        .replace(/^Hi \{name\}/, 'Hi')
+        .replace(/^Hello \{name\}/, 'Hello')
+        .replace(/^Hey \{name\}/, 'Hey')
+        .replace(/ \{name\}/g, '')
+        .replace(/\{name\}/g, 'there');
 }
