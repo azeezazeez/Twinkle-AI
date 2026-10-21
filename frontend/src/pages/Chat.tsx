@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom'; 
-import { createPortal, flushSync } from 'react-dom';  
+import { createPortal, flushSync } from 'react-dom';   
 import { User, Session, Message } from '../types';
 import Sidebar from '../components/Sidebar'; 
 import { takeWeatherSnapshot, type WeatherSnapshot, chatApi, authApi, createLiveToken, startLiveTokenKeepWarm, warmLiveToken, buildLiveSocketUrl, reportLiveSocketFailure, reportLiveSocketSuccess } from '../lib/api'; 
