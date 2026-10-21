@@ -55,6 +55,8 @@ type Loaded = { key: string; objectUrl: string; file: File; text: string | null 
 
 export default function UploadedFilesModal({ open, onClose, files, renderPdfPreview, readDocxText }: Props) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // Wide screens: the X on the preview pane collapses the dialog to the file list only.
+  const [collapsed, setCollapsed] = useState(false);
   const [wide, setWide] = useState(() => typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   // Kept in a ref so a new function identity from the parent never reloads the preview.
@@ -69,14 +71,23 @@ export default function UploadedFilesModal({ open, onClose, files, renderPdfPrev
     return () => query.removeEventListener('change', update);
   }, []);
 
+  // Every time the dialog opens it starts expanded again.
+  useEffect(() => {
+    if (open) setCollapsed(false);
+  }, [open]);
+
   // Wide screens open with the first file selected; narrow screens open on the list.
   useEffect(() => {
     if (!open) return;
+    if (wide && collapsed) {
+      setSelectedKey(null);
+      return;
+    }
     setSelectedKey(current => {
       if (current && files.some(file => file.key === current)) return current;
       return wide && files.length > 0 ? files[0].key : null;
     });
-  }, [open, wide, files]);
+  }, [open, wide, files, collapsed]);
 
   useEffect(() => {
     if (!open) return;
@@ -136,8 +147,26 @@ export default function UploadedFilesModal({ open, onClose, files, renderPdfPrev
 
   if (typeof document === 'undefined') return null;
 
-  const showList = wide || !selected;
-  const showDetail = wide || !!selected;
+  // `split` = list + preview side by side. Collapsed (or narrow) = one pane at a time.
+  const split = wide && !collapsed;
+  const showList = split || !selected;
+  const showDetail = split || !!selected;
+
+  const selectFile = (key: string) => {
+    setCollapsed(false);
+    setSelectedKey(key);
+  };
+
+  // The X on the preview pane: wide screens fall back to the list-only dialog,
+  // narrow screens already have a Back arrow so X closes the dialog.
+  const collapseOrClose = () => {
+    if (wide) {
+      setCollapsed(true);
+      setSelectedKey(null);
+    } else {
+      onClose();
+    }
+  };
   const ready = loaded && selected && loaded.key === selected.key ? loaded : null;
 
   const renderBody = (file: ChatFileItem): ReactNode => {
@@ -196,16 +225,18 @@ export default function UploadedFilesModal({ open, onClose, files, renderPdfPrev
             exit={{ opacity: 0, scale: 0.98, y: 6 }}
             transition={{ duration: 0.16 }}
             className={`relative flex overflow-hidden rounded-[22px] bg-white shadow-2xl dark:bg-[#262624] ${
-              wide
+              split
                 ? 'h-[min(760px,calc(100vh-32px))] w-[min(1100px,calc(100vw-32px))]'
-                : 'max-h-[calc(100vh-32px)] min-h-[min(480px,calc(100vh-32px))] w-[min(460px,calc(100vw-32px))]'
+                : wide
+                  ? 'h-[min(760px,calc(100vh-32px))] w-[min(640px,calc(100vw-32px))]'
+                  : 'max-h-[calc(100vh-32px)] min-h-[min(480px,calc(100vh-32px))] w-[min(460px,calc(100vw-32px))]'
             }`}
           >
             {showList && (
-              <section className={`flex min-h-0 flex-col ${wide ? 'w-[34%] min-w-[260px] max-w-[380px] border-r border-zinc-200 dark:border-white/10' : 'w-full'}`}>
+              <section className={`flex min-h-0 flex-col ${split ? 'w-[34%] min-w-[260px] max-w-[380px] border-r border-zinc-200 dark:border-white/10' : 'w-full'}`}>
                 <header className="flex items-center justify-between px-7 pb-3 pt-7">
                   <h2 className="text-[26px] font-semibold leading-none tracking-tight text-zinc-900 dark:text-zinc-50">Uploads</h2>
-                  {!wide && (
+                  {!split && (
                     <button
                       type="button"
                       onClick={onClose}
@@ -223,12 +254,12 @@ export default function UploadedFilesModal({ open, onClose, files, renderPdfPrev
                   )}
                   {files.map(file => {
                     const Icon = KIND_ICON[file.kind];
-                    const active = wide && selectedKey === file.key;
+                    const active = split && selectedKey === file.key;
                     return (
                       <li key={file.key} className="group/row relative">
                         <button
                           type="button"
-                          onClick={() => setSelectedKey(file.key)}
+                          onClick={() => selectFile(file.key)}
                           title={file.name}
                           aria-current={active ? 'true' : undefined}
                           className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 pr-12 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 ${
@@ -291,9 +322,9 @@ export default function UploadedFilesModal({ open, onClose, files, renderPdfPrev
                     )}
                     <button
                       type="button"
-                      onClick={onClose}
-                      aria-label="Close uploads"
-                      data-tooltip="Close"
+                      onClick={collapseOrClose}
+                      aria-label={wide ? 'Collapse preview' : 'Close uploads'}
+                      data-tooltip={wide ? 'Collapse' : 'Close'}
                       className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-700 transition-colors hover:bg-zinc-200/70 dark:text-zinc-300 dark:hover:bg-white/10"
                     >
                       <X className="h-5 w-5" strokeWidth={1.8} />
