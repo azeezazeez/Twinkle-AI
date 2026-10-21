@@ -161,7 +161,10 @@ public class EmailService {
                     "subject",
                     subject,
                     "htmlContent",
-                    htmlContent
+                    htmlContent,
+                    // Plain-text twin for clients that block HTML or buttons.
+                    "textContent",
+                    htmlToText(htmlContent)
             );
 
             String requestBody =
@@ -530,7 +533,39 @@ public class EmailService {
             </table>
             """.replace("{{URL}}", escapeHtml(url))
                .replace("{{LABEL}}", escapeHtml(label))
-               .replace("{{SANS}}", SANS);
+               .replace("{{SANS}}", SANS)
+               + note("If the button doesn&rsquo;t work, copy and paste this link into your browser:<br>"
+                    + "<a href=\"" + escapeHtml(url) + "\" target=\"_blank\" style=\"color:#6B6860;word-break:break-all;\">"
+                    + escapeHtml(url) + "</a>");
+    }
+
+    /** Builds the plain-text version of an email from its HTML (links kept as "label: url"). */
+    private static String htmlToText(String html) {
+        if (html == null) return "";
+        String text = html
+                .replaceAll("(?is)<head.*?</head>", "")
+                .replaceAll("(?is)<style.*?</style>", "")
+                .replaceAll("(?is)<a\\s[^>]*href=\"([^\"]*)\"[^>]*>(.*?)</a>", "$2: $1")
+                .replaceAll("(?i)<br\\s*/?>", "\n")
+                .replaceAll("(?i)</(p|tr|h1|h2|h3|div|table)>", "\n\n")
+                .replaceAll("(?s)<[^>]+>", "");
+        text = text
+                .replace("&nbsp;", " ")
+                .replace("&middot;", "\u00B7")
+                .replace("&copy;", "\u00A9")
+                .replace("&ldquo;", "\u201C")
+                .replace("&rdquo;", "\u201D")
+                .replace("&lsquo;", "\u2018")
+                .replace("&rsquo;", "\u2019")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", "\"")
+                .replace("&#39;", "'")
+                .replace("&amp;", "&");
+        return text
+                .replaceAll("[ \\t]+\\n", "\n")
+                .replaceAll("\\n{3,}", "\n\n")
+                .trim();
     }
 
     private String paragraph(String html) {
