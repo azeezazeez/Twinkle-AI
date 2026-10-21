@@ -326,7 +326,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [voiceName, setVoiceName] = useState(getSavedVoice);
-  const [appLanguage, setAppLanguage] = useState<AppLanguage>(() => {
+  const [, setAppLanguage] = useState<AppLanguage>(() => {
     try {
       const saved = localStorage.getItem(APP_LANGUAGE_KEY) || 'auto';
       return saved as AppLanguage;
