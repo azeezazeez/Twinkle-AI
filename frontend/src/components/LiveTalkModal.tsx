@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Mic, MicOff, RotateCw, X } from 'lucide-react';
 import VoiceRing from './VoiceRing';
 import { getVoiceOrbPalette } from '../lib/voiceThemes'; 
-import { VOICES, DEFAULT_VOICE } from '../lib/voices';
+import { VOICES, DEFAULT_VOICE, getVoiceGreeting } from '../lib/voices';
 import {
   chatApi,
   createLiveToken, 
@@ -27,6 +27,8 @@ export type LiveWeatherEntry = { assistantIndex: number; snapshot: WeatherSnapsh
 type Props = {
   open: boolean;
   onClose: () => void; 
+  /** Name used when the voice greets the user at the start of a session. */
+  userName?: string | null;
   /** Called after the final Live Talk data has been persisted. */
   onSessionComplete?: (sessionId: number, sessionName?: string, publicId?: string, weather?: LiveWeatherEntry[]) => void;
   /** Fired the instant Live Talk ends, with the local transcript, so the chat can be shown before saving finishes. */
@@ -208,7 +210,7 @@ const saveToolsLevel = (level: number) => {
   try { localStorage.setItem(TOOLS_LEVEL_KEY, JSON.stringify({ level, at: Date.now() })); } catch { /* storage unavailable */ }
 };
 
-const buildSystemInstruction = (language: AppLanguage, toolsLevel: number): string => {
+const buildSystemInstruction = (language: AppLanguage, toolsLevel: number, voiceName: string): string => {
   const languageRule = language === 'auto'
     ? 'At the beginning of this conversation, identify the language of the user’s first clearly spoken sentence. Use that as the conversation language and keep speaking and transcribing naturally in that language for the rest of this Live Talk session. Do not switch languages just because later words or phrases are mixed-language. Switch only if the user explicitly asks you to change language. If the first sentence is genuinely ambiguous, use the next clearly spoken sentence to identify the language.'
     : `${getLanguageInstruction(language)} Continue using the selected language consistently, while following an explicit request from the user to switch languages.`;
@@ -240,7 +242,7 @@ const buildSystemInstruction = (language: AppLanguage, toolsLevel: number): stri
   const knownLocation = getLiveContextLine();
 
   return (
-    `You are Twinkle, a polished professional voice assistant. Speak naturally, concisely, confidently, and warmly. Answer the user directly and keep the conversation conversational. ` +
+    `You are ${voiceName}, a polished professional voice assistant. Use the name ${voiceName} if you introduce yourself. Speak naturally, concisely, confidently, and warmly. Answer the user directly and keep the conversation conversational. ` +
     `${languageRule}` +
     `\n\n${ASSISTANT_NAME_RULES}` +
     (assistantNameContext() ? `\n\n${assistantNameContext()}` : '') +
@@ -264,7 +266,11 @@ const describeMicError = (error: unknown): string => {
   return error instanceof Error && error.message ? error.message : 'Microphone access failed.';
 };
 
-export default function LiveTalkModal({ open, onClose, onSessionComplete, onSessionPreview }: Props) {
+export default function LiveTalkModal({ open, onClose, userName, onSessionComplete, onSessionPreview }: Props) {
+  // The voice greets the user once per session (not again after a reconnect).
+  const greetedRef = useRef(false);
+  const userNameRef = useRef<string | null | undefined>(userName);
+  userNameRef.current = userName;
   const socketRef = useRef<WebSocket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -1034,7 +1040,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
               },
             },
             systemInstruction: {
-              parts: [{ text: buildSystemInstruction(language, toolsLevel) }],
+              parts: [{ text: buildSystemInstruction(language, toolsLevel, voice) }],
             },
             ...(tools ? { tools } : {}),
             inputAudioTranscription: inputTranscription,
@@ -1079,6 +1085,23 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
             vadSpeechStartedRef.current = false;
             vadLastSpeechAtRef.current = performance.now();
             vadTurnEndedRef.current = false;
+
+            // Fresh session only: the voice opens with its own greeting.
+            if (!greetedRef.current && !resumeHandleRef.current) {
+              greetedRef.current = true;
+              try {
+                const greeting = getVoiceGreeting(voice, userNameRef.current);
+                socket.send(JSON.stringify({
+                  clientContent: {
+                    turns: [{
+                      role: 'user',
+                      parts: [{ text: `Greet me now by saying this aloud in your own voice, word for word, with nothing added: "${greeting}"` }],
+                    }],
+                    turnComplete: true,
+                  },
+                }));
+              } catch { /* the greeting is optional */ }
+            }
 
             // Send any speech captured while authentication/WebSocket setup
             // was in progress. This is what makes Live Talk feel immediate
@@ -1310,6 +1333,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
     setConnected(false);
     setStatus('Connecting');
     endingRef.current = false;
+    greetedRef.current = false;
     userTurnRef.current = '';
     assistantTurnRef.current = '';
     liveSessionIdRef.current = null;
