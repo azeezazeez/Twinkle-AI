@@ -189,16 +189,26 @@ function RowMenu({
       else if (key === 'r') { event.preventDefault(); actions.current.onRename(); }
       else if (key === 'd') { event.preventDefault(); actions.current.onDelete(); }
     };
-    const dismiss = () => actions.current.onClose();
+    // Only a real window resize or a scroll of this page's own list closes the menu.
+    // Scroll/resize noise from other parts of the app (for example the open sidebar)
+    // used to close it the instant it appeared.
+    const startSize = { w: window.innerWidth, h: window.innerHeight };
+    const onResize = () => {
+      if (window.innerWidth !== startSize.w || window.innerHeight !== startSize.h) actions.current.onClose();
+    };
+    const onScroll = (event: Event) => {
+      const target = event.target as HTMLElement | Document | null;
+      if (target instanceof HTMLElement && target.closest?.('[data-chats-page]')) actions.current.onClose();
+    };
     document.addEventListener('pointerdown', onPointerDown, true);
     document.addEventListener('keydown', onKeyDown);
-    window.addEventListener('resize', dismiss);
-    window.addEventListener('scroll', dismiss, true);
+    window.addEventListener('resize', onResize);
+    window.addEventListener('scroll', onScroll, true);
     return () => {
       document.removeEventListener('pointerdown', onPointerDown, true);
       document.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('resize', dismiss);
-      window.removeEventListener('scroll', dismiss, true);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('scroll', onScroll, true);
     };
   }, []);
 
