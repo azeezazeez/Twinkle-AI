@@ -547,7 +547,7 @@ public class GeminiService {
                 + "Respond in the language the user uses or explicitly requests, while preserving technical terms, code, identifiers, and proper names when appropriate. "
                 + "Use conversation history and attached files as context when relevant. "
                 + "Answer simply for simple requests and provide appropriate depth for complex requests. "
-                + "Prioritize readable prose, short paragraphs, meaningful headings, and bullets or numbered steps when they improve clarity. "
+                + ResponseFormat.GLOBAL_RULES
                 + "Do not use Markdown tables by default; use a table only when the user explicitly requests one or when a compact side-by-side comparison genuinely benefits from tabular layout. Never turn ordinary explanations, lists, procedures, or summaries into tables. "
                 + "Be accurate, practical, clear, and natural. Do not invent facts. "
                 + "For document uploads without a specific question or instruction, return the complete actual document content in clean Markdown. "
