@@ -1744,6 +1744,32 @@ export const chatApi = {
   revokeShare: (sessionId: number, shareId: number) =>
     fetchWithAuth(`${API_BASE}/chat/session/${sessionId}/share/${shareId}`, { method: 'DELETE' }),
 
+  /* ---- Share popup: access mode + invited people ---- */
+
+  /** Who can open the chat, its link (if any) and the invited emails. */
+  getSharing: (sessionId: number) =>
+    fetchWithAuth(`${API_BASE}/chat/session/${sessionId}/sharing`, { method: 'GET' }),
+
+  /** Makes sure the chat has a link (used by "Copy link"). */
+  createShareLink: (sessionId: number) =>
+    fetchWithAuth(`${API_BASE}/chat/session/${sessionId}/sharing/link`, { method: 'POST' }),
+
+  /** 'INVITED' = only people invited, 'LINK' = anyone with the link. */
+  setShareAccess: (sessionId: number, accessMode: 'INVITED' | 'LINK') =>
+    fetchWithAuth(`${API_BASE}/chat/session/${sessionId}/sharing/access`, {
+      method: 'PUT',
+      body: JSON.stringify({ accessMode }),
+    }),
+
+  inviteToChat: (sessionId: number, email: string) =>
+    fetchWithAuth(`${API_BASE}/chat/session/${sessionId}/sharing/invites`, {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+
+  removeChatInvite: (sessionId: number, inviteId: number) =>
+    fetchWithAuth(`${API_BASE}/chat/session/${sessionId}/sharing/invites/${inviteId}`, { method: 'DELETE' }),
+
   /* =======================================================
      PUBLIC SHARED SESSION
      ======================================================= */
@@ -1760,7 +1786,8 @@ export const chatApi = {
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        throw new Error(data?.error || 'This shared chat is no longer available.');
+        // `status` lets the page offer "Sign in" (401) for chats shared with invited people only.
+        throw Object.assign(new Error(data?.error || 'This shared chat is no longer available.'), { status: response.status });
       }
 
       return data;
