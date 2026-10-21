@@ -4,13 +4,12 @@ import { createPortal } from 'react-dom';
 import { Session, User } from '../types'; 
 import {
   LogOut, Trash2, X, Search, Plus, MoreVertical, PinOff,
-  MessageCircle, Pencil, Upload, Eye, EyeOff,
-  Settings2, Settings as SettingsGear, UserCircle2, ChevronDown, ChevronRight, SlidersHorizontal, Check,
+  Pencil, Upload, Eye, EyeOff,
+  Settings as SettingsGear, ChevronDown, ChevronRight, SlidersHorizontal, Check,
   Globe, Info, FolderInput, ArrowUpRight,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import UserAvatar from './UserAvatar';
-import { chatApi } from '../lib/api';
 import SearchPalette from './SearchPalette';
 import BottomSheet, { RenameSheet, SheetItem, SheetDivider } from './BottomSheet';
 import { haptic, useIsMobile, useBackClose, useFocusTrap } from '../lib/mobileUi';
@@ -21,7 +20,6 @@ import { onShortcut, takePendingShortcut, isMac, type ShortcutAction } from '../
 
 const TOGGLE_SIDEBAR_KEYS = isMac() ? '⌘.' : 'Ctrl+B';
 const NEW_CHAT_KEYS = isMac() ? '⇧⌘O' : 'Ctrl+Shift+O';
-import { APP_LANGUAGES } from '../pages/Settings';
 
 // Small page-with-folded-corner icon shown at the end of a chat row once the
 // reply is complete (same look as Claude's sidebar).
@@ -59,10 +57,8 @@ interface Props {
   onDeleteSession: (id: number) => void;
   onRenameSession: (id: number, name: string) => void;
   onShareSession: (id: number) => void;
-  onClearAll: () => void;
   onLogout: () => void;
   onClose?: () => void;
-  onProfile?: () => void;
   onSettings?: () => void;
   onDesktopStateChange?: (expanded: boolean) => void;
   onDesktopWidthChange?: (width: number) => void;
@@ -771,10 +767,8 @@ interface SessionListProps {
   onDeleteSession: (id: number) => void;
   onRenameSession: (id: number, name: string) => void;
   onShareSession: (id: number) => void;
-  onClearAll: () => void;
   onLogout: () => void;
   onClose: () => void;
-  onProfile?: () => void;
   onSettings?: () => void;
   onOpenSearch: () => void;
 }
@@ -794,10 +788,8 @@ function SessionList({
   onDeleteSession,
   onRenameSession,
   onShareSession,
-  onClearAll,
   onLogout,
   onClose,
-  onProfile,
   onSettings,
   onOpenSearch,
 }: SessionListProps) {
@@ -1278,7 +1270,6 @@ function SessionList({
                 <div className="space-y-px">
                   {group.items.map(session => {
                     const isActive = currentSessionId === session.id;
-                    const isPinned = pinnedIds.includes(session.id);
                     const isUnread = unreadIds.includes(session.id);
                     const isMenuOpen = menu?.id === session.id;
                     const isRenaming = renamingId === session.id;
@@ -1540,7 +1531,6 @@ function AccountMenu({
   const [languageOpen, setLanguageOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const currentLanguage = APP_LANGUAGES.find(item => item.code === language) ?? APP_LANGUAGES[0];
 
   const closeMenu = useCallback(() => setOpen(false), []);
 
@@ -1693,9 +1683,7 @@ export default function Sidebar({
   onDeleteSession,
   onRenameSession,
   onShareSession,
-  onClearAll,
   onLogout,
-  onProfile,
   onSettings,
   onDesktopStateChange,
   onDesktopWidthChange,
@@ -1854,14 +1842,6 @@ export default function Sidebar({
     else collapseDesktop();
   }, [desktopCollapsed, expandDesktop, collapseDesktop]);
 
-  const handleProfile = useCallback(() => {
-    if (onProfile) {
-      onProfile();
-      return;
-    }
-    window.location.assign('/profile');
-  }, [onProfile]);
-
   const handleSettings = useCallback(() => {
     if (onSettings) {
       onSettings();
@@ -1921,9 +1901,7 @@ export default function Sidebar({
     onDeleteSession,
     onRenameSession,
     onShareSession,
-    onClearAll,
-    onLogout,
-    onProfile: handleProfile,
+      onLogout,
     onSettings: handleSettings,
     onOpenSearch: openSearch,
   };
