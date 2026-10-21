@@ -1,316 +1,552 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { toast } from '../lib/toast';
 import { AnimatePresence, motion } from 'motion/react';
-import { Check, X, Link2, Globe, MessageSquarePlus, AlertCircle, Trash2 } from 'lucide-react';
+import {
+  AlertCircle, Check, ChevronDown, ChevronLeft, ChevronRight, Globe, Link2, LoaderCircle, Lock,
+  MessageSquarePlus, Settings as GearIcon, X,
+} from 'lucide-react';
+import { chatApi } from '../lib/api';
+import { toast } from '../lib/toast';
+import { useBackClose, useFocusTrap } from '../lib/mobileUi';
+
+type AccessMode = 'INVITED' | 'LINK';
+
+interface Invite {
+  id: number;
+  email: string;
+}
+
+interface SharingState {
+  accessMode: AccessMode;
+  shareToken: string | null;
+  invites: Invite[];
+}
 
 interface ShareChatModalProps {
   isOpen: boolean;
-  shareUrl: string | null;
-  chatName?: string;
-  shareDescription?: string;
-  promptText?: string;
-  isLoading?: boolean;
-  error?: string | null;
-  /** 'prompt' shares a single prompt; 'conversation' shares the whole chat. */
-  mode?: 'prompt' | 'conversation';
-  /** Conversation mode: creates the public link when the user asks for it. */
-  onCreateLink?: (expiresInDays?: number) => void;
-  /** True when there is no saved conversation yet, so there is nothing to share. */
-  emptyChat?: boolean;
-  /** Empty-chat state: closes the dialog and focuses the message box. */
+  /** Saved chat to share. null / -1 means there is no saved conversation yet. */
+  sessionId: number | null;
+  /** The signed-in user, shown as "Owner". */
+  owner: { name: string; email: string; avatarUrl?: string };
+  /** Empty-chat state: closes the popup and focuses the message box. */
   onStartChat?: () => void;
-  /** Conversation mode: links already created for this chat. */
-  links?: Array<{ id: number; url: string; createdAt?: string; expiresAt?: string }>;
-  onRevokeLink?: (id: number) => void;
   onClose: () => void;
 }
 
-const ShareChatModal: React.FC<ShareChatModalProps> = ({
-  isOpen,
-  shareUrl,
-  chatName,
-  shareDescription,
-  promptText = '',
-  isLoading = false,
-  error = null,
-  mode = 'prompt',
-  onCreateLink,
-  emptyChat = false,
-  onStartChat,
-  links = [],
-  onRevokeLink,
-  onClose,
-}) => {
+const ACCESS_OPTIONS: Array<{ mode: AccessMode; label: string; hint: string }> = [
+  { mode: 'INVITED', label: 'Only people invited', hint: 'Signed-in people on the list below can open it.' },
+  { mode: 'LINK', label: 'Anyone with the link', hint: 'Anyone who has the link can read this chat.' },
+];
+
+const EMAIL_RE = /^[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
+const parseSharing = (response: any): SharingState => ({
+  accessMode: response?.accessMode === 'LINK' ? 'LINK' : 'INVITED',
+  shareToken: typeof response?.shareToken === 'string' && response.shareToken ? response.shareToken : null,
+  invites: Array.isArray(response?.invites)
+    ? response.invites
+        .map((item: any) => ({ id: Number(item?.id), email: String(item?.email ?? '') }))
+        .filter((item: Invite) => Number.isFinite(item.id) && item.email)
+    : [],
+});
+
+const errorText = (error: unknown, fallback: string) =>
+  error instanceof Error && error.message ? error.message : fallback;
+
+const buildShareUrl = (token: string) => `${window.location.origin}/shared/${encodeURIComponent(token)}`;
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // Clipboard API blocked (insecure origin / permissions): fall back to a hidden textarea.
+    try {
+      const area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', '');
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(area);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
+/** Grey circle with the first letter (or the profile picture). */
+function Avatar({ label, imageUrl }: { label: string; imageUrl?: string }) {
+  const letter = (label.trim().charAt(0) || '?').toUpperCase();
+  return (
+    <span
+      aria-hidden="true"
+      className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-zinc-200 text-[15px] font-medium text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100"
+    >
+      {imageUrl ? <img src={imageUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : letter}
+    </span>
+  );
+}
+
+function AccessIcon({ mode, className = 'h-5 w-5' }: { mode: AccessMode; className?: string }) {
+  return mode === 'LINK'
+    ? <Globe className={className} strokeWidth={1.7} aria-hidden="true" />
+    : <Lock className={className} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+const ICON_BUTTON =
+  'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-600 transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 dark:text-zinc-300 dark:hover:bg-zinc-800';
+
+const ShareChatModal: React.FC<ShareChatModalProps> = ({ isOpen, sessionId, owner, onStartChat, onClose }) => {
+  const hasChat = sessionId !== null && sessionId > 0;
+
+  const [view, setView] = useState<'main' | 'settings'>('main');
+  const [sharing, setSharing] = useState<SharingState | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const [email, setEmail] = useState('');
+  const [inviting, setInviting] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<number | null>(null);
+
   const [copied, setCopied] = useState(false);
-  const [copiedLinkId, setCopiedLinkId] = useState<number | null>(null);
-  const [expiryDays, setExpiryDays] = useState<number>(0);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const isConversation = mode === 'conversation';
-  const title = 'Share chat';
-  const description = shareDescription || (isConversation
-    ? 'Anyone with this link can view this conversation. Messages you send afterwards are not shared.'
-    : 'Anyone with this link can open Twinkle AI with this prompt ready to send.');
+  const [copying, setCopying] = useState(false);
+
+  const [draftMode, setDraftMode] = useState<AccessMode>('INVITED');
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+
+  const panelRef = useRef<HTMLDivElement>(null);
+  const loadRequest = useRef(0);
+  const copiedTimer = useRef<number | null>(null);
+
+  // ── Load the current sharing settings every time the popup opens ───────────
+  const load = useCallback(async () => {
+    if (sessionId === null || sessionId <= 0) return;
+    const requestId = ++loadRequest.current;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const response = await chatApi.getSharing(sessionId);
+      if (requestId !== loadRequest.current) return;
+      const next = parseSharing(response);
+      setSharing(next);
+      setDraftMode(next.accessMode);
+    } catch (error) {
+      if (requestId !== loadRequest.current) return;
+      setLoadError(errorText(error, 'Could not load the sharing settings.'));
+    } finally {
+      if (requestId === loadRequest.current) setLoading(false);
+    }
+  }, [sessionId]);
 
   useEffect(() => {
     if (!isOpen) {
-      setCopied(false);
+      loadRequest.current += 1;
       return;
     }
+    setView('main');
+    setSharing(null);
+    setLoadError(null);
+    setEmail('');
+    setInviteError(null);
+    setSettingsError(null);
+    setDropdownOpen(false);
+    setCopied(false);
+    void load();
+  }, [isOpen, load]);
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onClose();
+  useEffect(() => () => {
+    if (copiedTimer.current !== null) window.clearTimeout(copiedTimer.current);
+  }, []);
+
+  // Escape closes the open dropdown first, then the popup. Tab stays inside.
+  const handleEscape = useCallback(() => {
+    if (dropdownOpen) setDropdownOpen(false);
+    else onClose();
+  }, [dropdownOpen, onClose]);
+  useFocusTrap(panelRef, isOpen, handleEscape);
+  useBackClose(isOpen, onClose);
+
+  // ── Actions ────────────────────────────────────────────────────────────────
+  const emailValue = email.trim();
+  const canInvite = hasChat && !!sharing && !inviting && EMAIL_RE.test(emailValue);
+
+  const submitInvite = async (event?: React.FormEvent) => {
+    event?.preventDefault();
+    if (!canInvite || sessionId === null) return;
+    setInviting(true);
+    setInviteError(null);
+    try {
+      const response = await chatApi.inviteToChat(sessionId, emailValue);
+      setSharing(parseSharing(response));
+      setEmail('');
+      toast.success(`Invited ${emailValue}`);
+    } catch (error) {
+      setInviteError(errorText(error, 'Could not send the invite. Please try again.'));
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  const removeInvite = async (invite: Invite) => {
+    if (sessionId === null || removingId !== null) return;
+    setRemovingId(invite.id);
+    try {
+      const response = await chatApi.removeChatInvite(sessionId, invite.id);
+      setSharing(parseSharing(response));
+      toast.success(`Removed ${invite.email}`);
+    } catch (error) {
+      toast.error(errorText(error, 'Could not remove that person. Please try again.'));
+    } finally {
+      setRemovingId(null);
+    }
+  };
+
+  const copyLink = async () => {
+    if (sessionId === null || sessionId <= 0 || copying) return;
+    setCopying(true);
+    try {
+      let state = sharing;
+      let token = state?.shareToken ?? null;
+      if (!token) {
+        // First time: create the link, then copy it.
+        state = parseSharing(await chatApi.createShareLink(sessionId));
+        setSharing(state);
+        setDraftMode(state.accessMode);
+        token = state.shareToken;
       }
-    };
-
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    document.addEventListener('keydown', handleKeyDown);
-    requestAnimationFrame(() => closeButtonRef.current?.focus());
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isOpen, onClose]);
-
-  const handleCopy = async () => {
-    if (!shareUrl) return;
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      toast.success('Public link copied');
+      if (!token) throw new Error('Could not create the link.');
+      const ok = await copyText(buildShareUrl(token));
+      if (!ok) throw new Error('Could not copy the link. Please copy it from the address bar after opening it.');
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
-    } catch (copyError) {
-      console.error('Could not copy share link:', copyError);
-      // Fallback for browsers where Clipboard API is unavailable.
-      const input = document.querySelector<HTMLInputElement>('[data-share-url-input="true"]');
-      input?.focus();
-      input?.select();
-      toast.error('Could not copy automatically. Press Ctrl+C to copy the selected link.');
+      toast.success(state?.accessMode === 'LINK' ? 'Link copied' : 'Link copied — only invited people can open it');
+      if (copiedTimer.current !== null) window.clearTimeout(copiedTimer.current);
+      copiedTimer.current = window.setTimeout(() => setCopied(false), 1800);
+    } catch (error) {
+      toast.error(errorText(error, 'Could not copy the link. Please try again.'));
+    } finally {
+      setCopying(false);
     }
   };
 
-  const copyExistingLink = async (id: number, url: string) => {
+  const openSettings = () => {
+    setDraftMode(sharing?.accessMode ?? 'INVITED');
+    setSettingsError(null);
+    setDropdownOpen(false);
+    setView('settings');
+  };
+
+  const closeSettings = () => {
+    setDropdownOpen(false);
+    setView('main');
+  };
+
+  const saveSettings = async () => {
+    if (sessionId === null || sessionId <= 0 || saving) return;
+    setSaving(true);
+    setSettingsError(null);
     try {
-      await navigator.clipboard.writeText(url);
-      toast.success('Link copied');
-      setCopiedLinkId(id);
-      window.setTimeout(() => setCopiedLinkId(current => (current === id ? null : current)), 1800);
-    } catch (copyError) {
-      console.error('Could not copy share link:', copyError);
-      toast.error('Could not copy the link. Please try again.');
+      const response = await chatApi.setShareAccess(sessionId, draftMode);
+      const next = parseSharing(response);
+      setSharing(next);
+      toast.success(next.accessMode === 'LINK' ? 'Anyone with the link can now view this chat' : 'Only invited people can view this chat');
+      setView('main');
+    } catch (error) {
+      setSettingsError(errorText(error, 'Could not save. Please try again.'));
+    } finally {
+      setSaving(false);
     }
   };
 
-  const openShareUrl = (url: string) => {
-    window.open(url, '_blank', 'noopener,noreferrer');
-  };
+  const settingsChanged = !!sharing && draftMode !== sharing.accessMode;
+  const currentMode: AccessMode = sharing?.accessMode ?? 'INVITED';
+  const currentLabel = ACCESS_OPTIONS.find(option => option.mode === currentMode)!.label;
+  const draftLabel = ACCESS_OPTIONS.find(option => option.mode === draftMode)!.label;
+  const ownerName = owner.name || owner.email || 'You';
 
-  const shareToX = () => {
-    if (!shareUrl) return;
-    openShareUrl(`https://twitter.com/intent/tweet?text=${encodeURIComponent(promptText.trim() || title)}&url=${encodeURIComponent(shareUrl)}`);
-  };
+  const closeButton = (
+    <button type="button" onClick={onClose} aria-label="Close" className={ICON_BUTTON}>
+      <X className="h-5 w-5" strokeWidth={1.8} />
+    </button>
+  );
 
-  const shareToLinkedIn = () => {
-    if (!shareUrl) return;
-    openShareUrl(`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl)}`);
-  };
+  // ── Views ──────────────────────────────────────────────────────────────────
+  const mainView = !hasChat ? (
+    <div key="empty">
+      <div className="flex items-start justify-between gap-3">
+        <h2 id="share-session-title" className="text-[20px] font-semibold leading-8 tracking-[-0.01em] text-zinc-900 dark:text-zinc-100">Share session</h2>
+        {closeButton}
+      </div>
+      <div className="mt-3 flex items-start gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-4 dark:border-zinc-700 dark:bg-zinc-800/60" role="status">
+        <MessageSquarePlus className="mt-0.5 h-5 w-5 shrink-0 text-zinc-500 dark:text-zinc-400" strokeWidth={1.8} />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Nothing to share yet</p>
+          <p className="mt-0.5 text-sm leading-5 text-zinc-600 dark:text-zinc-400">Send a message first, then come back to share this chat.</p>
+        </div>
+      </div>
+      <div className="mt-4 flex justify-end">
+        <button
+          type="button"
+          onClick={onStartChat ?? onClose}
+          className="inline-flex h-10 items-center justify-center rounded-xl bg-zinc-900 px-4 text-[15px] font-medium text-white transition-colors hover:bg-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+        >
+          Start chatting
+        </button>
+      </div>
+    </div>
+  ) : (
+    <div key="main">
+      <div className="flex items-start justify-between gap-3">
+        <h2 id="share-session-title" className="text-[20px] font-semibold leading-8 tracking-[-0.01em] text-zinc-900 dark:text-zinc-100">Share session</h2>
+        {closeButton}
+      </div>
+      <p className="-mt-0.5 text-[14px] text-zinc-500 dark:text-zinc-400">Only messages up until now will be shared</p>
 
-  const shareToReddit = () => {
-    if (!shareUrl) return;
-    openShareUrl(`https://www.reddit.com/submit?url=${encodeURIComponent(shareUrl)}&title=${encodeURIComponent(promptText.trim() || title)}`);
-  };
+      <form onSubmit={event => void submitInvite(event)} className="mt-4 flex items-center gap-2" noValidate>
+        <input
+          type="email"
+          value={email}
+          onChange={event => { setEmail(event.target.value); if (inviteError) setInviteError(null); }}
+          placeholder="Add people by email"
+          aria-label="Add people by email"
+          aria-invalid={!!inviteError}
+          autoComplete="off"
+          spellCheck={false}
+          disabled={!sharing}
+          className="h-11 min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white px-3.5 text-[15px] text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-zinc-400 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-500"
+        />
+        <button
+          type="submit"
+          disabled={!canInvite}
+          className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-zinc-900 px-4 text-[15px] font-medium text-white transition-colors hover:bg-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/60 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white dark:disabled:bg-zinc-800 dark:disabled:text-zinc-500"
+        >
+          {inviting && <LoaderCircle className="h-4 w-4 animate-spin" strokeWidth={2} aria-hidden="true" />}
+          Invite
+        </button>
+      </form>
+      {inviteError && <p role="alert" className="mt-2 flex items-start gap-1.5 text-[13px] leading-5 text-zinc-700 dark:text-zinc-300"><AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={2} aria-hidden="true" />{inviteError}</p>}
+
+      <p className="mt-5 text-[14px] text-zinc-500 dark:text-zinc-400">Who has access</p>
+
+      {loading && !sharing ? (
+        <div className="mt-3 flex items-center gap-3 py-2 text-[14px] text-zinc-500 dark:text-zinc-400" role="status">
+          <LoaderCircle className="h-4 w-4 animate-spin" strokeWidth={2} aria-hidden="true" />
+          Loading…
+        </div>
+      ) : loadError && !sharing ? (
+        <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-800 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-200" role="alert">
+          <p>{loadError}</p>
+          <button type="button" onClick={() => void load()} className="mt-2 text-[13px] font-medium underline underline-offset-2">Try again</button>
+        </div>
+      ) : (
+        <ul className="mt-2 max-h-[240px] space-y-0.5 overflow-y-auto">
+          <li>
+            <button
+              type="button"
+              onClick={openSettings}
+              aria-label={`${currentLabel}. Change who has access`}
+              className="flex w-full items-center gap-3 rounded-xl px-1.5 py-1.5 text-left transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 dark:hover:bg-zinc-800/70"
+            >
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100">
+                <AccessIcon mode={currentMode} />
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[16px] font-medium text-zinc-900 dark:text-zinc-100">{currentLabel}</span>
+              <ChevronRight className="h-5 w-5 shrink-0 text-zinc-400" strokeWidth={1.8} aria-hidden="true" />
+            </button>
+          </li>
+          <li className="flex items-center gap-3 px-1.5 py-1.5">
+            <Avatar label={ownerName} imageUrl={owner.avatarUrl} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px] font-medium text-zinc-900 dark:text-zinc-100">
+                <span data-no-translate>{ownerName}</span> <span className="font-normal text-zinc-500 dark:text-zinc-400">(you)</span>
+              </span>
+              {owner.email && <span className="block truncate text-[14px] text-zinc-500 dark:text-zinc-400" data-no-translate>{owner.email}</span>}
+            </span>
+            <span className="shrink-0 text-[14px] text-zinc-500 dark:text-zinc-400">Owner</span>
+          </li>
+          {sharing?.invites.map(invite => (
+            <li key={invite.id} className="flex items-center gap-3 px-1.5 py-1.5">
+              <Avatar label={invite.email} />
+              <span className="min-w-0 flex-1 truncate text-[16px] text-zinc-900 dark:text-zinc-100" data-no-translate title={invite.email}>{invite.email}</span>
+              <span className="shrink-0 text-[14px] text-zinc-500 dark:text-zinc-400">Viewer</span>
+              <button
+                type="button"
+                onClick={() => void removeInvite(invite)}
+                disabled={removingId !== null}
+                aria-label={`Remove ${invite.email}`}
+                title="Remove"
+                className="-mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 disabled:opacity-50 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+              >
+                {removingId === invite.id
+                  ? <LoaderCircle className="h-4 w-4 animate-spin" strokeWidth={2} />
+                  : <X className="h-4 w-4" strokeWidth={1.8} />}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <p className="mt-4 text-[13px] leading-5 text-zinc-500 dark:text-zinc-400">
+        Don’t share personal information or third-party content without permission.{' '}
+        <a href="/learn-more" target="_blank" rel="noopener noreferrer" className="text-zinc-900 underline underline-offset-2 hover:text-zinc-600 dark:text-zinc-100 dark:hover:text-zinc-300">Learn more</a>
+      </p>
+
+      <div className="mt-4 flex items-center justify-between gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800">
+        <button
+          type="button"
+          onClick={openSettings}
+          disabled={!sharing}
+          aria-label="Share settings"
+          title="Share settings"
+          className="flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 bg-white text-zinc-800 transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 disabled:opacity-50 dark:border-zinc-700 dark:bg-transparent dark:text-zinc-100 dark:hover:bg-zinc-800"
+        >
+          <GearIcon className="h-[18px] w-[18px]" strokeWidth={1.7} />
+        </button>
+        <button
+          type="button"
+          onClick={() => void copyLink()}
+          disabled={copying || (loading && !sharing)}
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-zinc-900 px-4 text-[15px] font-medium text-white transition-colors hover:bg-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/60 disabled:cursor-wait disabled:opacity-70 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+        >
+          {copying
+            ? <LoaderCircle className="h-4 w-4 animate-spin" strokeWidth={2} aria-hidden="true" />
+            : copied
+              ? <Check className="h-4 w-4" strokeWidth={2.2} aria-hidden="true" />
+              : <Link2 className="h-4 w-4" strokeWidth={2} aria-hidden="true" />}
+          {copied ? 'Copied!' : 'Copy link'}
+        </button>
+      </div>
+    </div>
+  );
+
+  const settingsView = (
+    <div key="settings">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <button type="button" onClick={closeSettings} aria-label="Back" className={`${ICON_BUTTON} -ml-1.5`}>
+            <ChevronLeft className="h-5 w-5" strokeWidth={1.8} />
+          </button>
+          <h2 id="share-session-title" className="truncate text-[18px] font-semibold leading-8 tracking-[-0.01em] text-zinc-900 dark:text-zinc-100">Share chat settings</h2>
+        </div>
+        {closeButton}
+      </div>
+
+      <p className="mt-4 text-[14px] text-zinc-500 dark:text-zinc-400">Who has access</p>
+      <div className="relative mt-2">
+        <button
+          type="button"
+          onClick={() => setDropdownOpen(open => !open)}
+          aria-haspopup="listbox"
+          aria-expanded={dropdownOpen}
+          className="flex h-11 w-full items-center gap-2.5 rounded-xl border border-zinc-200 bg-zinc-100/80 px-3 text-left text-[15px] text-zinc-900 transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-800"
+        >
+          <AccessIcon mode={draftMode} className="h-[18px] w-[18px] shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{draftLabel}</span>
+          <ChevronDown className={`h-4 w-4 shrink-0 text-zinc-500 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} strokeWidth={1.8} aria-hidden="true" />
+        </button>
+
+        <AnimatePresence>
+          {dropdownOpen && (
+            <>
+              <button type="button" aria-label="Close menu" tabIndex={-1} onClick={() => setDropdownOpen(false)} className="fixed inset-0 z-10 cursor-default" />
+              <motion.div
+                role="listbox"
+                aria-label="Who has access"
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.12 }}
+                className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 rounded-2xl border border-zinc-200 bg-white p-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.12)] dark:border-zinc-700 dark:bg-zinc-900"
+              >
+                {ACCESS_OPTIONS.map(option => {
+                  const selected = option.mode === draftMode;
+                  return (
+                    <button
+                      key={option.mode}
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      onClick={() => { setDraftMode(option.mode); setDropdownOpen(false); }}
+                      className="flex h-10 w-full items-center gap-2.5 rounded-xl px-2.5 text-left text-[15px] text-zinc-900 transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:bg-zinc-800"
+                    >
+                      <AccessIcon mode={option.mode} className="h-[18px] w-[18px] shrink-0" />
+                      <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                      {selected && <Check className="h-[18px] w-[18px] shrink-0 text-zinc-900 dark:text-zinc-100" strokeWidth={2} aria-hidden="true" />}
+                    </button>
+                  );
+                })}
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
+      </div>
+
+      <p className="mt-3 text-[13px] leading-5 text-zinc-500 dark:text-zinc-400">
+        {ACCESS_OPTIONS.find(option => option.mode === draftMode)!.hint}
+      </p>
+      {settingsError && <p role="alert" className="mt-2 flex items-start gap-1.5 text-[13px] leading-5 text-zinc-700 dark:text-zinc-300"><AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={2} aria-hidden="true" />{settingsError}</p>}
+
+      <div className="mt-6 flex items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={closeSettings}
+          className="inline-flex h-10 items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 text-[15px] font-medium text-zinc-900 transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 dark:border-zinc-700 dark:bg-transparent dark:text-zinc-100 dark:hover:bg-zinc-800"
+        >
+          Back
+        </button>
+        <button
+          type="button"
+          onClick={() => void saveSettings()}
+          disabled={!settingsChanged || saving}
+          className="inline-flex h-10 min-w-[76px] items-center justify-center gap-2 rounded-xl bg-zinc-900 px-4 text-[15px] font-medium text-white transition-colors hover:bg-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/60 disabled:cursor-not-allowed disabled:bg-zinc-400 disabled:text-white dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white dark:disabled:bg-zinc-600 dark:disabled:text-zinc-300"
+        >
+          {saving && <LoaderCircle className="h-4 w-4 animate-spin" strokeWidth={2} aria-hidden="true" />}
+          Save
+        </button>
+      </div>
+    </div>
+  );
+
+  const content = view === 'settings' && hasChat ? settingsView : mainView;
+
+  if (typeof document === 'undefined') return null;
 
   return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] pt-[max(0.75rem,env(safe-area-inset-top,0px))] sm:p-5">
-          <motion.button
+        <div className="fixed inset-0 z-[9999]">
+          {/* Transparent click-catcher: clicking outside the popup closes it. */}
+          <button
             type="button"
             aria-label="Close share dialog"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            tabIndex={-1}
             onClick={onClose}
-            className="absolute inset-0 cursor-default border-0 bg-white/30 backdrop-blur-[2px]"
+            className="absolute inset-0 cursor-default border-0 bg-transparent"
           />
 
-          <motion.div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="share-chat-title"
-            initial={{ opacity: 0, scale: 0.985, y: 6 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.985, y: 6 }}
-            transition={{ duration: 0.16, ease: 'easeOut' }}
-            className="relative flex max-h-[min(90dvh,760px)] w-full max-w-[760px] flex-col overflow-hidden rounded-[24px] border border-zinc-200 bg-white p-4 shadow-[0_18px_50px_rgba(0,0,0,0.14)] dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-[0_18px_50px_rgba(0,0,0,0.45)] sm:rounded-[28px] sm:p-6 md:p-7"
-          >
-            <button
-              ref={closeButtonRef}
-              type="button"
-              onClick={onClose}
-              aria-label="Close"
-              className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full text-zinc-700 transition-colors hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-400/40 dark:text-zinc-200 dark:hover:bg-zinc-800 sm:right-5 sm:top-5"
+          <div className="pointer-events-none absolute right-[max(1rem,env(safe-area-inset-right,0px))] top-[calc(max(0.75rem,env(safe-area-inset-top,0px))+46px)] max-sm:left-3 max-sm:right-3 sm:w-[480px]">
+            <motion.div
+              ref={panelRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="share-session-title"
+              tabIndex={-1}
+              initial={{ opacity: 0, scale: 0.98, y: -6 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.98, y: -6 }}
+              transition={{ duration: 0.14, ease: 'easeOut' }}
+              style={{ transformOrigin: 'top right' }}
+              className="pointer-events-auto max-h-[calc(100dvh-72px)] w-full overflow-y-auto rounded-[20px] border border-zinc-200 bg-white p-5 shadow-[0_12px_40px_rgba(0,0,0,0.14)] outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-[0_12px_40px_rgba(0,0,0,0.5)]"
             >
-              <X className="h-5 w-5" strokeWidth={1.8} />
-            </button>
-
-            <h2 id="share-chat-title" className="pr-12 text-[24px] font-semibold leading-tight tracking-[-0.025em] text-zinc-900 dark:text-zinc-100 sm:text-[26px]">
-              {title}
-            </h2>
-
-            {/* Prompt preview, styled like the requested ChatGPT share dialog. */}
-            <div className="mt-4 min-h-[150px] max-h-[42dvh] flex-1 overflow-y-auto rounded-xl border border-zinc-200 bg-[#fcfcfc] p-3 dark:border-zinc-700 dark:bg-zinc-950/30 sm:mt-5 sm:min-h-[230px] sm:p-5">
-              <div className="ml-auto max-w-[min(100%,560px)] rounded-[22px] bg-[#f0f0f0] px-4 py-3 text-[14px] leading-6 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100 sm:px-5 sm:text-[15px] sm:leading-7">
-                <p className="whitespace-pre-wrap break-words">{promptText.trim() || 'Untitled chat'}</p>
-              </div>
-            </div>
-
-            <div className="mt-4 flex items-start gap-3 sm:mt-5">
-              <Globe className="mt-0.5 h-5 w-5 shrink-0 text-zinc-900 dark:text-zinc-100" strokeWidth={1.8} />
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Share a public link to this chat</p>
-                <p className="mt-1 text-sm leading-5 text-zinc-500 dark:text-zinc-400">{description}</p>
-              </div>
-            </div>
-
-            {isLoading ? (
-              <div className="mt-5 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-400" role="status">
-                Creating share link…
-              </div>
-                  ) : emptyChat ? (
-              <div className="mt-5">
-                <div
-                  className="flex items-start gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-4 dark:border-zinc-700 dark:bg-zinc-800/60"
-                  role="status"
-                >
-                  <MessageSquarePlus className="mt-0.5 h-5 w-5 shrink-0 text-zinc-500 dark:text-zinc-400" strokeWidth={1.8} />
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Nothing to share yet</p>
-                    <p className="mt-0.5 text-sm leading-5 text-zinc-600 dark:text-zinc-400">
-                      Send a message first, then come back to create a public link.
-                    </p>
-                  </div>
-                </div>
-                <div className="mt-3 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={onStartChat ?? onClose}
-                    className="inline-flex h-9 items-center justify-center rounded-lg bg-zinc-900 px-4 text-[14px] font-medium text-white transition-colors hover:bg-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
-                  >
-                    Start chatting
-                  </button>
-                </div>
-              </div>
-                  ) : error ? (
-                   <div className="mt-5">
-                    <div
-                      className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3.5 text-sm leading-5 text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300"
-                      role="alert"
-                    >
-                      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.9} />
-                      <span className="min-w-0">{error}</span>
-                    </div>
-                    {isConversation && onCreateLink && (
-                      <div className="mt-3 flex justify-end">
-                        <button
-                          type="button"
-                          onClick={() => onCreateLink(expiryDays || undefined)}
-                          className="inline-flex h-9 items-center justify-center rounded-lg bg-zinc-900 px-4 text-[14px] font-medium text-white transition-colors hover:bg-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
-                        >
-                          Create link again
-                        </button>
-                      </div>
-                    )}
-                   </div>
-                     ) : isConversation && !shareUrl && onCreateLink ? (
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800 sm:mt-5 sm:pt-5">
-                <label className="flex min-w-0 items-center gap-2 text-[13px] text-zinc-600 dark:text-zinc-300">
-                  Link expires
-                  <select
-                    value={expiryDays}
-                    onChange={event => setExpiryDays(Number(event.target.value))}
-                    className="h-9 rounded-lg border border-zinc-200 bg-white px-2 text-[13px] text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                  >
-                    <option value={0}>Never</option>
-                    <option value={1}>After 1 day</option>
-                    <option value={7}>After 7 days</option>
-                    <option value={30}>After 30 days</option>
-                  </select>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => onCreateLink(expiryDays || undefined)}
-                  className="inline-flex h-9 items-center justify-center rounded-lg bg-zinc-900 px-4 text-[14px] font-medium text-white transition-colors hover:bg-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
-                >
-                  Create public link
-                </button>
-              </div>
-                     ) : shareUrl ? (
-              <div className="mt-4 grid grid-cols-4 items-start justify-items-center gap-2 border-t border-zinc-100 pt-4 dark:border-zinc-800 sm:mt-5 sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-x-12 sm:gap-y-3 sm:pt-5">
-                <button type="button" onClick={handleCopy} className="group flex min-w-0 flex-col items-center gap-2 text-[13px] sm:min-w-[72px] sm:text-sm text-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-100">
-                  <span className="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-100 transition-colors group-hover:bg-zinc-200 dark:bg-zinc-800 dark:group-hover:bg-zinc-700">
-                    {copied ? <Check className="h-6 w-6 text-emerald-600" /> : <Link2 className="h-6 w-6" strokeWidth={1.8} />}
-                  </span>
-                  <span>{copied ? 'Copied!' : 'Copy link'}</span>
-                </button>
-                <button type="button" onClick={shareToX} className="group flex min-w-0 flex-col items-center gap-2 text-[13px] sm:min-w-[72px] sm:text-sm text-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-100" aria-label="Share on X">
-                  <span className="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-100 transition-colors group-hover:bg-zinc-200 dark:bg-zinc-800 dark:group-hover:bg-zinc-700">
-                    <svg viewBox="0 0 24 24" className="h-6 w-6 fill-current" aria-hidden="true"><path d="M18.9 2H22l-6.78 7.75L23.2 22h-6.25l-4.9-7.42L5.56 22H2.43l7.25-8.29L1.8 2h6.4l4.43 6.76L18.9 2Zm-1.1 18h1.73L7.27 3.89H5.41L17.8 20Z" /></svg>
-                  </span>
-                  <span>X</span>
-                </button>
-                <button type="button" onClick={shareToLinkedIn} className="group flex min-w-0 flex-col items-center gap-2 text-[13px] sm:min-w-[72px] sm:text-sm text-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-100" aria-label="Share on LinkedIn">
-                  <span className="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-100 transition-colors group-hover:bg-zinc-200 dark:bg-zinc-800 dark:group-hover:bg-zinc-700">
-                    <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true"><path fill="#0A66C2" d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.35V9h3.414v1.561h.049c.476-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 1 1 .001-4.124 2.062 2.062 0 0 1-.001 4.124zM7.119 20.452H3.554V9h3.565v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.225 0z" /></svg>
-                  </span>
-                  <span>LinkedIn</span>
-                </button>
-                <button type="button" onClick={shareToReddit} className="group flex min-w-0 flex-col items-center gap-2 text-[13px] sm:min-w-[72px] sm:text-sm text-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-100" aria-label="Share on Reddit">
-                  <span className="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-100 transition-colors group-hover:bg-zinc-200 dark:bg-zinc-800 dark:group-hover:bg-zinc-700">
-                    <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true"><path fill="#FF4500" d="M24 12.25a3.1 3.1 0 0 0-5.27-2.2 15.2 15.2 0 0 0-5.83-1.8l1-4.7 3.27.7a2.1 2.1 0 1 0 .22-1.2l-4-.86a.62.62 0 0 0-.74.47l-1.17 5.5a15.3 15.3 0 0 0-6 1.83A3.1 3.1 0 1 0 1.3 14.8a5.4 5.4 0 0 0-.1 1c0 4.05 4.84 7.33 10.8 7.33s10.8-3.28 10.8-7.33a5.4 5.4 0 0 0-.1-1A3.1 3.1 0 0 0 24 12.25ZM6.6 14.3a1.55 1.55 0 1 1 3.1 0 1.55 1.55 0 0 1-3.1 0Zm8.75 4.3a5.1 5.1 0 0 1-6.7 0 .62.62 0 0 1 .83-.92 3.9 3.9 0 0 0 5.04 0 .62.62 0 0 1 .83.92Zm.5-2.75a1.55 1.55 0 1 1 0-3.1 1.55 1.55 0 0 1 0 3.1Z" /></svg>
-                  </span>
-                  <span>Reddit</span>
-                </button>
-              </div>
-            ) : null}
-
-            {isConversation && !emptyChat && links.length > 0 && (
-              <div className="mt-4 border-t border-zinc-100 pt-4 dark:border-zinc-800">
-                <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Your public links</p>
-                <ul className="mt-2 max-h-[160px] space-y-1.5 overflow-y-auto">
-                  {links.map(link => (
-                    <li key={link.id} className="flex items-center gap-2 rounded-lg bg-zinc-50 px-3 py-2 dark:bg-zinc-800/60">
-                      <span className="min-w-0 flex-1 truncate text-[13px] text-zinc-600 dark:text-zinc-300" title={link.url}>
-                        {link.createdAt ? `Created ${new Date(link.createdAt).toLocaleDateString()} · ` : ''}{link.expiresAt ? `Expires ${new Date(link.expiresAt).toLocaleDateString()} · ` : ''}{link.url.replace(/^https?:\/\//, '')}
-                      </span>
-                      <button type="button" onClick={() => void copyExistingLink(link.id, link.url)} className="shrink-0 rounded-md px-2 py-1 text-[13px] font-medium text-zinc-800 hover:bg-zinc-200 dark:text-zinc-100 dark:hover:bg-zinc-700">
-                        {copiedLinkId === link.id ? 'Copied!' : 'Copy'}
-                      </button>
-                      {onRevokeLink && (
-                        <button type="button" onClick={() => onRevokeLink(link.id)} aria-label="Turn off this link" title="Turn off this link" className="shrink-0 rounded-md p-1.5 text-zinc-500 hover:bg-red-50 hover:text-red-600 dark:text-zinc-400 dark:hover:bg-red-950/30 dark:hover:text-red-400">
-                          <Trash2 className="h-4 w-4" strokeWidth={1.8} />
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            <input
-              data-share-url-input="true"
-              aria-label="Shared chat URL"
-              readOnly
-              value={shareUrl || ''}
-              tabIndex={shareUrl ? 0 : -1}
-              onFocus={event => event.currentTarget.select()}
-              className="sr-only"
-            />
-          </motion.div>
+              {content}
+            </motion.div>
+          </div>
         </div>
       )}
     </AnimatePresence>,
