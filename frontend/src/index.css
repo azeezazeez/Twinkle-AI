@@ -2099,6 +2099,18 @@ body {
     transform: scale(0.97);
   }
 
+  /* A row that merely contains a smaller control (for example the 3-dots button)
+     must not shrink while that control is pressed: the shrink moves the control
+     out from under the pointer and the click lands on the row instead. */
+  button:has(button:active, [data-row-actions]:active, [data-chats-menu-trigger]:active),
+  [role="button"]:has(button:active, [data-row-actions]:active, [data-chats-menu-trigger]:active) {
+    transform: none;
+  }
+  [data-chats-menu-trigger]:active,
+  [data-row-actions] button:active {
+    transform: none;
+  }
+
   /* Code blocks and inline code. */
   pre {
     border-radius: 14px;
