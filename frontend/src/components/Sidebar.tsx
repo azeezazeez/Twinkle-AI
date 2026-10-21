@@ -6,7 +6,7 @@ import {
   LogOut, Trash2, X, Search, Plus, MoreVertical, PinOff, Loader2,
   MessageCircle, Pencil, Upload, Eye, EyeOff,
   Settings2, Settings as SettingsGear, UserCircle2, ChevronDown, ChevronRight, SlidersHorizontal, Check,
-  Globe, Info, FolderInput,
+  Globe, Info, FolderInput, ArrowUpRight,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import UserAvatar from './UserAvatar';
@@ -510,7 +510,6 @@ function ListOptionsMenu({
   sortBy,
   onGroupBy,
   onSortBy,
-  onClearAll,
   onDismiss,
 }: {
   anchorEl: HTMLElement;
@@ -518,7 +517,6 @@ function ListOptionsMenu({
   sortBy: SortBy;
   onGroupBy: (value: GroupBy) => void;
   onSortBy: (value: SortBy) => void;
-  onClearAll: () => void;
   onDismiss: () => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -638,15 +636,6 @@ function ListOptionsMenu({
             <ChevronRight className="h-4 w-4 shrink-0 text-zinc-400 dark:text-zinc-500" strokeWidth={1.8} />
           </button>
         ))}
-        <div onMouseEnter={() => setSub(null)}>
-          <MenuDivider />
-          <MenuItem
-            icon={<Trash2 className="h-4 w-4" strokeWidth={1.7} />}
-            label="Clear all chats"
-            danger
-            onClick={() => { onDismiss(); onClearAll(); }}
-          />
-        </div>
       </motion.div>
 
       {sub && (
@@ -787,6 +776,7 @@ function SessionList({
   onSettings,
   onOpenSearch,
 }: SessionListProps) {
+  const navigate = useNavigate();
   const [recentsCollapsed, setRecentsCollapsed] = useState(false);
   const [menu, setMenu] = useState<{ id: number; anchor: MenuAnchor } | null>(null);
   // Hover tooltip with the full chat name, shown beside the row like Claude.
@@ -1092,6 +1082,19 @@ function SessionList({
           />
         </button>
 
+        <div className="flex items-center gap-0.5">
+        {/* View all: opens the full "Chats and tasks" page */}
+        <Tip label="View all" side="top">
+          <button
+            type="button"
+            onClick={() => { onClose(); navigate('/chats'); }}
+            aria-label="View all chats"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-200/60 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          >
+            <ArrowUpRight className="h-4 w-4" strokeWidth={1.7} />
+          </button>
+        </Tip>
+
         {sessions.length > 0 && (
           <div ref={optionsRef} className="relative">
             <Tip label="Sort & manage" side="top">
@@ -1119,13 +1122,13 @@ function SessionList({
                   sortBy={sortBy}
                   onGroupBy={setGroupBy}
                   onSortBy={setSortBy}
-                  onClearAll={() => { onClose(); onClearAll(); }}
                   onDismiss={() => setOptionsOpen(false)}
                 />
               )}
             </AnimatePresence>
           </div>
         )}
+        </div>
       </div>
 
       {/* Chat list */}
