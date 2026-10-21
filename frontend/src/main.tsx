@@ -9,6 +9,16 @@ import ClickCircle from './components/ClickCircle';
 
 applyPreferences();
 
+// A new deployment removes old hashed chunks; reload once so the fresh build loads.
+window.addEventListener('vite:preloadError', (event) => {
+  try {
+    if (sessionStorage.getItem('twinkle:chunk-reload') === '1') return;
+    sessionStorage.setItem('twinkle:chunk-reload', '1');
+  } catch { /* storage unavailable */ }
+  event.preventDefault();
+  window.location.reload();
+});
+
 // Motion setting: "Reduced" forces reduced animation everywhere (including the
 // JS animations); "System" follows the device's own reduced-motion setting.
 function Root() {
