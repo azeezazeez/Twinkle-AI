@@ -11,7 +11,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import UserAvatar from './UserAvatar';
 import { chatApi } from '../lib/api';
-import SearchBar from './SearchBar';
+import SearchPalette from './SearchPalette';
 import BottomSheet, { RenameSheet, SheetItem, SheetDivider } from './BottomSheet';
 import { haptic, useIsMobile, useBackClose, useFocusTrap } from '../lib/mobileUi';
 import LanguageModal from './LanguageModal';
@@ -33,6 +33,8 @@ interface Props {
   onTypingDone?: () => void;
   onSelectSession: (id: number) => void;
   onNewSession: () => void;
+  /** Search dialog, Tab: start a new chat with this text ready to send. */
+  onComposeChat?: (text: string) => void;
   onDeleteSession: (id: number) => void;
   onRenameSession: (id: number, name: string) => void;
   onShareSession: (id: number) => void;
@@ -1632,178 +1634,6 @@ function AccountMenu({
 
 
 
-// ─── ChatSearchModal ───────────────────────────────────────────────────────────
-function ChatSearchModal({
-  open,
-  sessions,
-  onClose,
-  onSelectSession,
-}: {
-  open: boolean;
-  sessions: Session[];
-  onClose: () => void;
-  onSelectSession: (id: number) => void;
-}) {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<Session[]>([]);
-  const [loading, setLoading] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const requestRef = useRef(0);
-
-  useEffect(() => {
-    if (!open) return;
-    setQuery('');
-    setResults(sessions);
-    const timer = window.setTimeout(() => inputRef.current?.focus(), 60);
-    return () => window.clearTimeout(timer);
-  }, [open, sessions]);
-
-  useEffect(() => {
-    if (!open) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [open, onClose]);
-
-  useEffect(() => {
-    if (!open) return;
-    const q = query.trim();
-    const requestId = ++requestRef.current;
-
-    if (!q) {
-      setLoading(false);
-      setResults(sessions);
-      return;
-    }
-
-    const timer = window.setTimeout(async () => {
-      setLoading(true);
-      try {
-        const response = await chatApi.searchSessions(q);
-        if (requestId !== requestRef.current) return;
-        const raw = Array.isArray((response as any)?.sessions)
-          ? (response as any).sessions
-          : [];
-        const normalized = raw
-          .map((item: any) => ({
-            ...item,
-            id: Number(item.id ?? item.sessionId ?? item.session_id),
-            sessionName: String(item.sessionName ?? item.name ?? item.title ?? 'New Chat'),
-          }))
-          .filter((item: any) => Number.isFinite(item.id));
-        setResults(normalized);
-      } catch {
-        if (requestId !== requestRef.current) return;
-        const lower = q.toLowerCase();
-        setResults(
-          sessions.filter(session =>
-            String(session.sessionName ?? '').toLowerCase().includes(lower)
-          )
-        );
-      } finally {
-        if (requestId === requestRef.current) setLoading(false);
-      }
-    }, 220);
-
-    return () => window.clearTimeout(timer);
-  }, [open, query, sessions]);
-
-  if (!open) return null;
-
-  const recentChats = [...results]
-    .sort((a: any, b: any) => {
-      const aDate = serverTime((a as any).updatedAt ?? (a as any).updated_at ?? (a as any).createdAt ?? (a as any).created_at);
-      const bDate = serverTime((b as any).updatedAt ?? (b as any).updated_at ?? (b as any).createdAt ?? (b as any).created_at);
-      return bDate - aDate;
-    })
-    .slice(0, 20);
-
-  return (
-    <div className="fixed inset-0 z-[10020] flex items-start justify-center bg-black/20 px-4 pt-[12vh] backdrop-blur-[2px] sm:px-6">
-      <button
-        type="button"
-        aria-label="Close search"
-        onClick={onClose}
-        className="absolute inset-0 cursor-default"
-      />
-
-      <motion.div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Search chats"
-        initial={{ opacity: 0, scale: 0.985, y: -6 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.985, y: -6 }}
-        className="relative z-10 flex h-[min(620px,76vh)] w-full max-w-[720px] flex-col overflow-hidden rounded-[24px] border border-zinc-200 bg-white shadow-[0_24px_70px_rgba(0,0,0,0.16)] dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-[0_24px_70px_rgba(0,0,0,0.45)]"
-      >
-        <div className="flex shrink-0 items-center gap-3 px-5 pb-1 pt-5 sm:px-7">
-          <SearchBar
-            ref={inputRef}
-            value={query}
-            onChange={setQuery}
-            placeholder="Search..."
-            type="search"
-            size="lg"
-            className="flex-1"
-          />
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close search"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-          >
-            <X className="h-[20px] w-[20px]" strokeWidth={1.8} />
-          </button>
-        </div>
-
-        <div className="shrink-0 px-7 pb-3 pt-6 text-[17px] font-medium text-zinc-500 dark:text-zinc-400">
-          {query.trim() ? 'Search results' : 'Recent chats'}
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-7 sm:px-7">
-          {loading ? (
-            <div className="flex items-center gap-3 px-3 py-5 text-[15px] text-zinc-500">
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700 dark:border-zinc-700 dark:border-t-zinc-200" />
-              Searching chats...
-            </div>
-          ) : recentChats.length === 0 ? (
-            <div className="px-3 py-5 text-[15px] text-zinc-500 dark:text-zinc-400">
-              {query.trim() ? 'No matching chats' : 'No recent chats'}
-            </div>
-          ) : (
-            <div className="space-y-1">
-              {recentChats.map(session => (
-                <button
-                  key={session.id}
-                  type="button"
-                  onClick={() => {
-                    onSelectSession(session.id);
-                    onClose();
-                  }}
-                  onMouseEnter={() => prefetchSession(session.id)}
-                  onTouchStart={() => prefetchSession(session.id)}
-                  className="flex w-full items-center gap-5 rounded-xl px-3 py-3 text-left transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                >
-                  <MessageCircle className="h-[22px] w-[22px] shrink-0 text-zinc-800 dark:text-zinc-200" strokeWidth={1.8} />
-                  <span data-twinkle-user-content className="min-w-0 flex-1 truncate text-[17px] font-normal text-zinc-900 dark:text-zinc-100">
-                    {session.sessionName}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </motion.div>
-    </div>
-  );
-}
-
-
 // ─── Main Sidebar export ──────────────────────────────────────────────────────
 export default function Sidebar({
   user,
@@ -1814,6 +1644,7 @@ export default function Sidebar({
   onTypingDone,
   onSelectSession,
   onNewSession,
+  onComposeChat,
   onDeleteSession,
   onRenameSession,
   onShareSession,
@@ -2056,7 +1887,7 @@ export default function Sidebar({
     <>
       <AnimatePresence>
         {searchModalOpen && (
-          <ChatSearchModal
+          <SearchPalette
             open={searchModalOpen}
             sessions={sessions}
             onClose={() => setSearchModalOpen(false)}
@@ -2064,6 +1895,12 @@ export default function Sidebar({
               onSelectSession(id);
               onClose();
             }}
+            onNewSession={() => {
+              onNewSession();
+              onClose();
+            }}
+            onComposeChat={onComposeChat}
+            onPrefetchSession={prefetchSession}
           />
         )}
       </AnimatePresence>
