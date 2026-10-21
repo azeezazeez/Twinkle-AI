@@ -15,6 +15,7 @@ import {
   useEffect,
   useCallback,
   useRef,
+  type ComponentType,
 } from 'react';
 
 import { authApi } from './lib/api';
@@ -30,12 +31,33 @@ import VerifyOtp from './pages/VerifyOtp';
 import ForgotPassword from './pages/ForgotPassword';
 import Chat from './pages/Chat';
 // Loaded only when the page is opened, so the first load is much smaller.
-const Profile = lazy(() => import('./pages/Profile'));
-const Settings = lazy(() => import('./pages/Settings'));
-const LiveTalkColor = lazy(() => import('./pages/LiveTalkColor'));
-const SharedChat = lazy(() => import('./pages/SharedChat'));
-const KnowledgeBase = lazy(() => import('./pages/KnowledgeBase'));
-const LearnMore = lazy(() => import('./pages/LearnMore'));
+// After a new deployment the old hashed chunk no longer exists on the server,
+// so a lazy import fails. Reload once to pick up the fresh build instead of
+// leaving a blank page.
+function lazyRetry<T extends ComponentType<any>>(load: () => Promise<{ default: T }>) {
+  return lazy(async () => {
+    const KEY = 'twinkle:chunk-reload';
+    try {
+      const mod = await load();
+      try { sessionStorage.removeItem(KEY); } catch { /* storage unavailable */ }
+      return mod;
+    } catch (error) {
+      let alreadyTried = false;
+      try { alreadyTried = sessionStorage.getItem(KEY) === '1'; sessionStorage.setItem(KEY, '1'); } catch { /* storage unavailable */ }
+      if (!alreadyTried) {
+        window.location.reload();
+        return new Promise<never>(() => {});
+      }
+      throw error;
+    }
+  });
+}
+const Profile = lazyRetry(() => import('./pages/Profile'));
+const Settings = lazyRetry(() => import('./pages/Settings'));
+const LiveTalkColor = lazyRetry(() => import('./pages/LiveTalkColor'));
+const SharedChat = lazyRetry(() => import('./pages/SharedChat'));
+const Library = lazyRetry(() => import('./pages/KnowledgeBase'));
+const LearnMore = lazyRetry(() => import('./pages/LearnMore'));
 
 import Toaster from './components/Toaster';
 import { toast } from './lib/toast';
@@ -380,12 +402,13 @@ function AuthenticatedApp({
       />
 
       {/* =====================================================
-          PRIVATE DOCUMENT KNOWLEDGE BASE (RAG)
+          PRIVATE DOCUMENT LIBRARY (RAG)
           ===================================================== */}
       <Route
-        path="/knowledge"
-        element={user ? <KnowledgeBase /> : <Navigate to="/login" replace />}
+        path="/library"
+        element={user ? <Library /> : <Navigate to="/login" replace />}
       />
+      <Route path="/knowledge" element={<Navigate to="/library" replace />} />
 
       {/* =====================================================
           CHAT
