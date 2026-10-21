@@ -675,7 +675,6 @@ export default function ChatsListPage({ sessions, onOpenSession, onNewChat, onDe
           )}
 
           {items.map(session => {
-            const pinned = pinnedIds.includes(session.id);
             const isMenuOpen = menu?.id === session.id;
             const isRenaming = renamingId === session.id;
             const isChecked = selected.includes(session.id);
