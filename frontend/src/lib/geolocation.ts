@@ -34,9 +34,11 @@ const MAX_ACCEPTABLE_ACCURACY_M = 500;
  */
 const MAX_APPROXIMATE_ACCURACY_M = 50_000;
 /** Once any fix arrives, wait this long (ms) for a better one before settling. */
-const SETTLE_AFTER_FIRST_FIX_MS = 6_000;
+const SETTLE_AFTER_FIRST_FIX_MS = 8_000;
 /** Longest we wait for a good fix (ms). */
-const MAX_WAIT_MS = 20_000;
+const MAX_WAIT_MS = 25_000;
+/** Wait for the network-based fallback request (ms). */
+const FALLBACK_WAIT_MS = 12_000;
 /** Fixes measured earlier than this many ms ago are treated as stale. */
 const MAX_FIX_AGE_MS = 15_000;
 /** The same fix is reused for this long so one answer does not trigger two scans. */
@@ -151,12 +153,70 @@ const requestFix = (): Promise<PreciseFix> =>
     }
   });
 
+/**
+ * Second chance for devices (mostly desktops) where the high-accuracy request times out or
+ * is unavailable: ask for a network-based position instead. It is always flagged approximate.
+ */
+const requestNetworkFix = (): Promise<PreciseFix> =>
+  new Promise<PreciseFix>((resolve, reject) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      reject(new LocationError('unsupported', 'This browser does not support device location.'));
+      return;
+    }
+    try {
+      navigator.geolocation.getCurrentPosition(
+        position => {
+          const fix = toFix(position);
+          if (!isValid(fix)) {
+            reject(new LocationError('unavailable', 'The device could not determine its position right now.'));
+            return;
+          }
+          if (fix.accuracy > MAX_APPROXIMATE_ACCURACY_M) {
+            reject(new LocationError(
+              'imprecise',
+              `The device could only locate you within about ${Math.round(fix.accuracy)} m, which is not precise enough. ` +
+              'Turn on GPS / precise location and try again.',
+            ));
+            return;
+          }
+          resolve({ ...fix, approximate: fix.accuracy > MAX_ACCEPTABLE_ACCURACY_M });
+        },
+        geoError => {
+          if (geoError.code === geoError.PERMISSION_DENIED) {
+            reject(new LocationError(
+              'denied',
+              'Location permission is blocked for this site. Allow location in the browser site settings and try again.',
+            ));
+          } else if (geoError.code === geoError.TIMEOUT) {
+            reject(new LocationError('timeout', 'The device did not return a location in time.'));
+          } else {
+            reject(new LocationError('unavailable', 'The device could not determine its position right now.'));
+          }
+        },
+        { enableHighAccuracy: false, maximumAge: 0, timeout: FALLBACK_WAIT_MS },
+      );
+    } catch {
+      reject(new LocationError('unavailable', 'The device could not determine its position right now.'));
+    }
+  });
+
+const requestFixWithFallback = async (): Promise<PreciseFix> => {
+  try {
+    return await requestFix();
+  } catch (error) {
+    if (error instanceof LocationError && (error.code === 'timeout' || error.code === 'unavailable')) {
+      return requestNetworkFix().catch(() => { throw error; });
+    }
+    throw error;
+  }
+};
+
 /** Returns a fresh, accurate device fix, or throws a LocationError. */
 export const getPreciseLocation = async (options: { forceFresh?: boolean } = {}): Promise<PreciseFix> => {
   if (!options.forceFresh && lastFix && Date.now() - lastFix.timestamp < REUSE_MS) return lastFix;
   if (inFlight) return inFlight;
 
-  inFlight = requestFix()
+  inFlight = requestFixWithFallback()
     .then(fix => {
       lastFix = fix;
       return fix;
@@ -175,4 +235,17 @@ export const isLocationPermissionGranted = async (): Promise<boolean> => {
   } catch {
     return false;
   }
+};
+
+/**
+ * How detailed a reverse-geocoded address may be for a fix of the given accuracy.
+ * A 3 km network guess must never be described as one specific street or village.
+ */
+export const reverseGeocodeZoomFor = (accuracyMeters: number | null | undefined): number => {
+  const accuracy = typeof accuracyMeters === 'number' && Number.isFinite(accuracyMeters) ? accuracyMeters : 5000;
+  if (accuracy <= 100) return 18;
+  if (accuracy <= 500) return 17;
+  if (accuracy <= 2_000) return 15;
+  if (accuracy <= 10_000) return 13;
+  return 10;
 };
