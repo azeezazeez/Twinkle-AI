@@ -1345,7 +1345,7 @@ export default function Settings({
         let content: string;
         if (format === 'json') {
           content = JSON.stringify({
-            app: 'Twinkle AI',
+            app: 'Twinkle',
             exportedAt: new Date().toISOString(),
             account: { email: user.email, username: user.username },
             id: session.id,
@@ -1926,7 +1926,7 @@ export default function Settings({
         {/* ABOUT */}
         {active === 'about' && (
           <Section title="About" first>
-            <Row title="Twinkle AI" desc="Multi-model AI chat with Live Talk voice conversations.">
+            <Row title="Twinkle" desc="Multi-model AI chat with Live Talk voice conversations.">
               <span className="text-[14px] text-zinc-800 dark:text-zinc-200">v{APP_VERSION}</span>
             </Row>
             <Row title="Signed in as" desc={user.email}>
