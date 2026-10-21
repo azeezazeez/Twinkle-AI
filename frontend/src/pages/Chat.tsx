@@ -3,7 +3,7 @@ import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom'; 
 import { createPortal, flushSync } from 'react-dom';   
 import { User, Session, Message } from '../types';
-import Sidebar from '../components/Sidebar'; 
+import Sidebar from '../components/Sidebar';  
 import { takeWeatherSnapshot, type WeatherSnapshot, chatApi, authApi, createLiveToken, startLiveTokenKeepWarm, warmLiveToken, buildLiveSocketUrl, reportLiveSocketFailure, reportLiveSocketSuccess } from '../lib/api'; 
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react'; 
 import StormLogo from '../components/StormLogo';
