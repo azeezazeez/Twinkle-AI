@@ -5197,7 +5197,7 @@ if (isBlankDraft) {
       />
       <main
         className="relative ml-0 flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent transition-[margin] duration-300 ease-out lg:ml-[var(--desktop-sidebar-offset)]"
-        style={{ '--desktop-sidebar-offset': `${desktopSidebarExpanded ? desktopSidebarWidth : 52}px` } as React.CSSProperties}
+        style={{ '--desktop-sidebar-offset': `${desktopSidebarExpanded ? desktopSidebarWidth : 32}px` } as React.CSSProperties}
       >
         {showFirstWelcome && !chatsView && (
           <>
@@ -5206,7 +5206,7 @@ if (isBlankDraft) {
                 Your first chat with Twinkle
               </span>
             </div>
-          <div className={`absolute z-[9997] hidden h-9 max-w-[calc(100%-18rem)] items-center lg:flex ${desktopSidebarExpanded ? 'left-4 top-3' : '-left-5 top-4'}`}>
+          <div className={`absolute z-[9997] hidden h-9 max-w-[calc(100%-18rem)] items-center lg:flex ${desktopSidebarExpanded ? 'left-4 top-3' : 'left-0 top-4'}`}>
             <span className="truncate text-[15px] font-medium text-zinc-800 dark:text-zinc-100">
               Your first chat with Twinkle
             </span>
@@ -5231,7 +5231,7 @@ if (isBlankDraft) {
                   onDelete={deleteSession}
                 />
               </div>
-              <div className={`absolute z-[9998] hidden h-9 max-w-[calc(100%-18rem)] items-center lg:flex ${desktopSidebarExpanded ? 'left-4 top-3' : '-left-5 top-4'}`}>
+              <div className={`absolute z-[9998] hidden h-9 max-w-[calc(100%-18rem)] items-center lg:flex ${desktopSidebarExpanded ? 'left-4 top-3' : 'left-0 top-4'}`}>
                 <ChatTitleMenu
                   flushLeft={!desktopSidebarExpanded}
                   sessionId={titledSession.id}
