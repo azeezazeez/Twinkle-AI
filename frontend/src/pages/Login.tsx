@@ -14,6 +14,33 @@ interface Props {
 }
 
 const GOOGLE_OAUTH_URL = '/api/auth/oauth/google';
+const LAST_METHOD_KEY = 'Twinkle_last_login_method';
+
+type LoginMethod = 'google' | 'email';
+
+const readLastMethod = (): LoginMethod | null => {
+  try {
+    const value = localStorage.getItem(LAST_METHOD_KEY);
+    return value === 'google' || value === 'email' ? value : null;
+  } catch {
+    return null;
+  }
+};
+
+const rememberMethod = (method: LoginMethod) => {
+  try { localStorage.setItem(LAST_METHOD_KEY, method); } catch { /* storage unavailable */ }
+};
+
+/** Dark "Last used" tooltip pinned to the left of the method that was used last. */
+function LastUsedBadge() {
+  return (
+    <span
+      className="pointer-events-none absolute -top-2.5 right-3 z-10 select-none whitespace-nowrap rounded-md bg-[#0B0B0B] px-2 py-[3px] text-[12px] font-medium leading-none text-white shadow-sm dark:bg-[#F5F4EE] dark:text-[#141413] md:right-[calc(100%+6px)] md:top-1/2 md:-translate-y-1/2 md:px-2.5 md:py-1.5 md:text-[14px] md:shadow-none"
+    >
+      Last used
+    </span>
+  );
+}
 
 const getErrorMessage = (error: unknown): string => {
   if (error instanceof Error && error.message) return error.message;
@@ -51,6 +78,7 @@ export default function Login({ onLogin: _onLogin }: Props) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(false);
+  const [lastMethod] = useState<LoginMethod | null>(readLastMethod);
 
   const notice =
     typeof (location.state as { message?: unknown } | null)?.message === 'string'
@@ -90,6 +118,7 @@ export default function Login({ onLogin: _onLogin }: Props) {
 
     try {
       await authApi.requestOtp(normalizedEmail);
+      rememberMethod('email');
       toast.success(`Verification code sent to ${normalizedEmail}`);
       navigate('/login/email', { state: { email: normalizedEmail } });
     } catch (err: unknown) {
@@ -105,33 +134,39 @@ export default function Login({ onLogin: _onLogin }: Props) {
     if (oauthLoading) return;
     setOauthLoading(true);
     setError('');
+    rememberMethod('google');
     window.location.assign(GOOGLE_OAUTH_URL);
   };
 
   return (
     <AuthSplitLayout showVideo>
       <div className="flex flex-col gap-3">
-        <button
-          type="button"
-          onClick={() => handleGoogle()}
-          disabled={oauthLoading}
-          aria-busy={oauthLoading}
-          aria-label="Continue with Google"
-          className={`${authRefSecondaryClass} justify-center`}
-        >
-          {oauthLoading ? (
-            <Spinner />
-          ) : (
-            <>
-              <GoogleIcon />
-              Continue with Google
-            </>
-          )}
-        </button>
+        <div className="relative">
+          {lastMethod === 'google' && <LastUsedBadge />}
+          <button
+            type="button"
+            onClick={() => handleGoogle()}
+            disabled={oauthLoading}
+            aria-busy={oauthLoading}
+            aria-label="Continue with Google"
+            className={`${authRefSecondaryClass} justify-center`}
+          >
+            {oauthLoading ? (
+              <Spinner />
+            ) : (
+              <>
+                <GoogleIcon />
+                Continue with Google
+              </>
+            )}
+          </button>
+        </div>
 
         <div className="text-center text-[14px] text-[var(--text-muted)]">OR</div>
 
         <form onSubmit={handleContinue} className="flex flex-col gap-5" noValidate>
+          <div className="relative">
+          {lastMethod === 'email' && <LastUsedBadge />}
           <input
             type="email"
             value={email}
@@ -143,6 +178,7 @@ export default function Login({ onLogin: _onLogin }: Props) {
             disabled={loading}
             className={authRefInputClass}
           />
+          </div>
 
           {notice && !error && (
             <p role="status" className="-mt-2 text-[13px] text-emerald-700 dark:text-emerald-400">
