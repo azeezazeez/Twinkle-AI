@@ -4,10 +4,12 @@ import {MotionConfig} from 'motion/react';
 import App from './App.tsx';
 import './index.css';
 import { applyPreferences, loadPrefs, PREFS_EVENT } from './lib/preferences';
+import { startBackendWake } from './lib/backendWake';
 import GlobalTooltip from './components/GlobalTooltip';
 import ClickCircle from './components/ClickCircle';
 
 applyPreferences();
+startBackendWake();
 
 // A new deployment removes old hashed chunks; reload once so the fresh build loads.
 window.addEventListener('vite:preloadError', (event) => {
