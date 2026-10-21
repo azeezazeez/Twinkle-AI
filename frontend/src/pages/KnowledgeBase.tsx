@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, BookOpen, FileText, LoaderCircle, Plus, Send, Trash2, UploadCloud } from 'lucide-react';
+import { ArrowLeft, BookOpen, FileText, LoaderCircle, Send, Trash2, UploadCloud } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { fetchWithAuth } from '../lib/api';
 import { toast } from '../lib/toast';
