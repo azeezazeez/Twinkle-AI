@@ -5,7 +5,7 @@ const FEATURES = [
   { icon: MessageCircle, title: 'Smart conversations', text: 'Chat with fast, capable models, edit and regenerate replies, and keep every conversation organised in your sidebar.' },
   { icon: AudioLines, title: 'Voice & Live Talk', text: 'Dictate with the microphone, hear replies read aloud, or hold a hands-free Live Talk conversation.' },
   { icon: FileText, title: 'Files & knowledge', text: 'Attach files to a message or build a private document knowledge base the assistant can search.' },
-  { icon: Share2, title: 'Share chats', text: 'Create a public link to a conversation and share it anywhere. Only messages up to that moment are shared.' },
+  { icon: Share2, title: 'Share chats', text: 'Invite people by email or share a link to a conversation. Only messages up to that moment are shared.' },
 ];
 
 const LINKS = [
