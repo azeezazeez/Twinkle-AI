@@ -23,7 +23,6 @@ import {
   Download,
   FileJson,
   FileText,
-  Globe2,
   HardDrive,
   Info,
   Keyboard,
@@ -40,10 +39,9 @@ import {
   Trash2,
   Upload,
   UserRound,
-  Volume2,
   X,
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { createZip, readZip } from '../lib/zip';
 import { parseServerDate } from '../lib/time';
 import { markdownToPrintHtml } from '../lib/printHtml';
@@ -924,7 +922,6 @@ export default function Settings({
   const tabParam = searchParams.get('tab');
   const active: SettingsSection = isSection(tabParam) ? tabParam : 'general'; // old ?tab=appearance links fall back to General
   const setActive = (id: SettingsSection) => setSearchParams({ tab: id }, { replace: true });
-  const activeMeta = ALL_SECTIONS.find(item => item.id === active) ?? ALL_SECTIONS[0];
 
   // ── Toast (global notification system) ───────────────────────────────────
   const showToast = useCallback((message: string, tone: 'ok' | 'error' = 'ok') => {
@@ -1430,7 +1427,6 @@ export default function Settings({
   };
 
   const modKey = isMac() ? '⌘' : 'Ctrl';
-  const accountInitial = (user.username || user.name || user.email || '?').trim().charAt(0).toUpperCase();
   const providerLabel =
     user.authProvider === 'GOOGLE' ? 'Google' : user.authProvider === 'APPLE' ? 'Apple' : 'Email & password';
   const memberSince = user.createdAt ? new Date(user.createdAt) : null;
