@@ -1532,31 +1532,31 @@ interface ModelOption {
 const MODEL_OPTIONS: ModelOption[] = [
   {
     id: '@cf/openai/gpt-oss-20b',
-    name: 'Twinkle Nova 2.0',
+    name: 'Aurora 2.0',
     description: 'Brilliant everyday intelligence. Fast, sharp and dependable for any task',
     icon: Zap,
   },
   {
     id: '@cf/meta/llama-3.1-8b-instruct-fp8-fast',
-    name: 'Twinkle Pulse 1.5',
+    name: 'Lumen 1.5',
     description: 'Near-instant answers at lightning speed when every second counts',
     icon: Zap,
   },
   {
     id: '@cf/openai/gpt-oss-120b',
-    name: 'Twinkle Apex 3.0',
+    name: 'Zenith 3.0',
     description: 'Our flagship. Frontier-level reasoning, expert coding and deep analysis',
     icon: Brain,
   },
   {
     id: '@cf/black-forest-labs/flux-1-schnell',
-    name: 'Twinkle Muse 1.0',
+    name: 'Atelier 1.0',
     description: 'Studio-quality images and artwork from a single sentence',
     icon: Sparkles,
   },
   {
     id: 'gemini-3.8-flash',
-    name: 'Twinkle Insight 2.0',
+    name: 'Oracle 2.0',
     description: 'Sees, reads and listens. Understands images, documents and audio in depth',
     icon: Eye,
     vision: true,
@@ -3939,7 +3939,7 @@ const chooseModel = useCallback((modelId: string) => {
   ) => {
     if ((!messageText.trim() && (!filesToSend || filesToSend.length === 0))) return;
 
-    // Image understanding is only supported by Twinkle Insight 2.0. Stop before
+    // Image understanding is only supported by Oracle 2.0. Stop before
     // creating a user turn or calling the backend with an incompatible model.
     const includesImage = Array.isArray(filesToSend)
       && filesToSend.some(file => file instanceof File && file.type.startsWith('image/'));
@@ -3948,7 +3948,7 @@ const chooseModel = useCallback((modelId: string) => {
         id: `image-model-notice-${Date.now()}`,
         sessionId: currentSessionId || 0,
         role: 'assistant',
-        content: `I can’t read images with ${activeModel.name}. Please switch to Twinkle Insight 2.0 and send the image again.`,
+        content: `I can’t read images with ${activeModel.name}. Please switch to Oracle 2.0 and send the image again.`,
         timestamp: new Date().toISOString(),
       }]);
       return;
@@ -3964,7 +3964,7 @@ const chooseModel = useCallback((modelId: string) => {
           id: `image-model-hint-${now}`,
           sessionId: currentSessionId || 0,
           role: 'assistant',
-          content: `${activeModel.name} can’t generate images. **${imageModel?.name ?? 'Twinkle Muse 1.0'}** can — it turns your words into images. Switch to ${imageModel?.name ?? 'Twinkle Muse 1.0'} from the model menu in the message box, then send your prompt again.`,
+          content: `${activeModel.name} can’t generate images. **${imageModel?.name ?? 'Atelier 1.0'}** can — it turns your words into images. Switch to ${imageModel?.name ?? 'Atelier 1.0'} from the model menu in the message box, then send your prompt again.`,
           timestamp: new Date().toISOString(),
         },
       ]);
