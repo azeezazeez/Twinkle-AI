@@ -1,4 +1,4 @@
-import { getPreciseLocation, describeLocationError } from './geolocation';
+import { getPreciseLocation, describeLocationError, reverseGeocodeZoomFor } from './geolocation';
 import { describeTokenFailure } from './liveErrors';
 
 const API_BASE = (
@@ -94,6 +94,8 @@ export interface WeatherSnapshot {
   label: string;
   at: number;
   current: Record<string, number>;
+  /** True when the place came from a coarse network location rather than GPS. */
+  approximate?: boolean;
   daily: { time?: string[]; temperature_2m_max?: number[]; temperature_2m_min?: number[]; precipitation_probability_max?: number[] };
 }
 let pendingWeatherSnapshot: WeatherSnapshot | null = null;
@@ -140,6 +142,9 @@ const getVerifiedLiveContext = async (message: string): Promise<string | undefin
   ];
   if (asksWeather || asksLocation) {
     let coordinates: { latitude: number; longitude: number; label: string } | null = null;
+    // Short, readable place name for the weather card (for example "Kurnool, Andhra Pradesh").
+    let cardPlace = '';
+    let approximateFix = false;
     let namedPlaceNotFound = false;
     // Prefer an explicitly named place (for example, "weather in Chennai") over the browser's location.
     if (asksWeather) {
@@ -169,6 +174,7 @@ const getVerifiedLiveContext = async (message: string): Promise<string | undefin
         const fix = await getPreciseLocation();
         coordinates = { latitude: fix.latitude, longitude: fix.longitude, label: 'device GPS location' };
         const coarse = Boolean(fix.approximate) || fix.accuracy > 500;
+        approximateFix = coarse;
         lines.push(
           coarse
             ? `Device location accuracy: approximate, about ${Math.round(fix.accuracy)} metres (network-based browser location, no GPS). Describe it as approximate and name only the city/district level; do not claim a street or village.`
@@ -177,7 +183,7 @@ const getVerifiedLiveContext = async (message: string): Promise<string | undefin
         // Reverse-geocode the exact coordinates into a useful locality hierarchy.
         try {
           const reverseResponse = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(fix.latitude)}&lon=${encodeURIComponent(fix.longitude)}&zoom=${coarse ? 10 : 18}&addressdetails=1&accept-language=en`,
+            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(fix.latitude)}&lon=${encodeURIComponent(fix.longitude)}&zoom=${reverseGeocodeZoomFor(fix.accuracy)}&addressdetails=1&accept-language=en`,
             { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(7000) }
           );
           if (reverseResponse.ok) {
@@ -194,6 +200,11 @@ const getVerifiedLiveContext = async (message: string): Promise<string | undefin
               address.country
             ].filter((value, index, all) => Boolean(value) && all.indexOf(value) === index);
             if (localityParts.length) coordinates.label = localityParts.join(', ');
+            cardPlace = [
+              address.village || address.hamlet || address.suburb || address.neighbourhood || address.town || address.city,
+              address.state_district || address.district || address.county,
+              address.state || address.region,
+            ].filter((value, index, all) => Boolean(value) && all.indexOf(value) === index).slice(0, 2).join(', ');
             const mandal = address.mandal || address.tehsil || address.subdistrict || address.county;
             if (mandal && !localityParts.includes(mandal)) {
               coordinates.label = [localityParts[0], mandal, ...localityParts.slice(1)].filter(Boolean).join(', ');
@@ -210,7 +221,7 @@ const getVerifiedLiveContext = async (message: string): Promise<string | undefin
       lines.push('For location answers, state the available locality hierarchy in ordinary words (village/locality, mandal or subdistrict if available, district, state, country). Do not display latitude/longitude unless the user explicitly asks for coordinates. Reverse-geocoding providers may not expose every administrative level; never invent a missing village or mandal.');
       if (asksWeather) {
         try {
-          const url = `https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(coordinates.latitude)}&longitude=${encodeURIComponent(coordinates.longitude)}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,showers,snowfall,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset&timezone=${encodeURIComponent(timezone)}&forecast_days=3`;
+          const url = `https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(coordinates.latitude)}&longitude=${encodeURIComponent(coordinates.longitude)}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,showers,snowfall,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset&timezone=${encodeURIComponent(timezone)}&forecast_days=3&cell_selection=nearest`;
           const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
           if (!response.ok) throw new Error(`weather provider returned ${response.status}`);
           const weather = await response.json();
@@ -218,10 +229,11 @@ const getVerifiedLiveContext = async (message: string): Promise<string | undefin
           lines.push('Weather code reference: https://open-meteo.com/en/docs');
           if (weather?.current) {
             pendingWeatherSnapshot = {
-              label: coordinates.label === 'device GPS location' ? 'Your location' : coordinates.label,
+              label: cardPlace || (coordinates.label === 'device GPS location' ? 'Your location' : coordinates.label),
               at: Date.now(),
               current: weather.current,
               daily: weather.daily || {},
+              approximate: approximateFix,
             };
           }
         } catch {
