@@ -1177,7 +1177,7 @@ public class ChatController {
     private String appendLiveContext(String message, String context) {
         String base = message == null ? "" : message;
         if (context == null || context.isBlank()) return base;
-        return base + "\n\n" + context + "\n\nUse the verified context above only where relevant. If a requested live fact is absent, say it could not be retrieved; never guess.";
+        return base + "\n\n" + context + "\n\nUse the verified context above only where relevant. Answer weather, location, date and time questions strictly from it, in plain friendly language. If a requested live fact is absent or marked unavailable, say briefly why (for example, location access was not allowed) and ask the user for their city; never claim you have no access to live data in general, and never guess or invent weather or location.";
     }
 
     /** Adds the user's saved memory to the model prompt (never saved to chat history). */
