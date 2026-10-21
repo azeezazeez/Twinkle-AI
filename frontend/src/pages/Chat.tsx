@@ -900,9 +900,18 @@ function cleanMessageContent(content: unknown): string {
     // formatting prompt as the user's message. It is an implementation
     // detail and must never be rendered as chat content, including after
     // the conversation is refreshed and messages are loaded from the API.
-    if (/^The user uploaded document\(s\) but did not provide a question or instruction\./i.test(cleaned)) {
+    if (
+      /^The user uploaded (?:document\(s\) but did not provide a question or instruction|one or more documents)\./i.test(cleaned)
+      || /^Analyze the uploaded media carefully\./i.test(cleaned)
+    ) {
       return '';
     }
+
+    // Older chats saved the extracted document text inside the user's message.
+    // Show only what the person typed; the document itself is the attachment.
+    cleaned = cleaned
+      .replace(/\n*(?:Attached|Uploaded) document content:\n[\s\S]*$/i, '')
+      .trim();
 
     // Remove generated helper sections that are not part of the document
     // itself. This is intentionally done on the client too so old persisted
@@ -4473,6 +4482,11 @@ const chooseModel = useCallback((modelId: string) => {
         previewUrls
       );
 
+      // Documents attached in chat are indexed into the Library in the background.
+      if (filesToSend && filesToSend.length > 0) {
+        window.dispatchEvent(new CustomEvent('twinkle-library-updated'));
+      }
+
       // Notify Profile immediately so the activity heatmap updates as soon
       // as a conversation is persisted, without waiting for the 30s poll.
       window.dispatchEvent(new CustomEvent('twinkle-chat-activity-updated', {
@@ -5462,12 +5476,12 @@ if (isBlankDraft) {
                       <div
                         className={`flex min-w-0 w-full ${
                           msg.role === 'user'
-                            ? 'flex-col items-end'
+                            ? 'flex-col items-end gap-3'
                             : 'items-start'
                         }`}
                       >
                         {msg.role === 'user' && attachedImages.length > 0 && (
-                          <div className="w-full flex justify-end -mt-1">
+                          <div className="w-full flex justify-end">
                             <div className="flex flex-wrap justify-end gap-2.5 max-w-[92%] sm:max-w-[88%]">
                               {attachedImages.filter(isValidAttachmentDataUrl).map((url, i) => {
                                 const mimeMatch = url.match(/^data:([^;,]+)/i);
