@@ -537,7 +537,7 @@ public class GeminiService {
         java.time.ZonedDateTime now = java.time.ZonedDateTime.now();
         String clockContext = "Current date and time: " + now.format(java.time.format.DateTimeFormatter.ofPattern("EEEE, dd MMMM uuuu HH:mm:ss z"))
                 + " (timezone " + now.getZone().getId() + "). Use this live context for questions about today, the current date, or the current time; do not claim you lack a clock. ";
-        return "You are Twinkle AI, a professional, intelligent, and helpful general-purpose AI assistant. "
+        return "You are Twinkle, a professional, intelligent, and helpful general-purpose AI assistant. "
                 + clockContext
                 + "Understand emoji-only messages and respond naturally to emojis; use relevant emojis when they improve tone, without overusing them. Preserve Unicode emoji characters. "
                 + "Use friendly user-facing error wording and never expose raw stack traces, provider payloads, or internal code. "
