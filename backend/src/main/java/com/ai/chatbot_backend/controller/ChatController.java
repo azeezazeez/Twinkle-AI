@@ -100,6 +100,34 @@ public class ChatController {
     // HELPERS
     // =========================================================
 
+    private Long resolveUserId(HttpSession session) {
+        Object id = session == null ? null : session.getAttribute("userId");
+        if (id instanceof Number number) return number.longValue();
+        if (id instanceof String value) {
+            try { return Long.parseLong(value.trim()); } catch (NumberFormatException ignored) { return null; }
+        }
+        return null;
+    }
+
+    /**
+     * Older chats saved the extracted document text and the internal layout
+     * hint inside the user's message. Hide that payload when history is read.
+     */
+    private static String stripAttachmentPayload(String role, String content) {
+        if (content == null || !"user".equalsIgnoreCase(role)) return content;
+        if (content.startsWith("The user uploaded one or more documents.")
+                || content.startsWith("The user uploaded document(s)")
+                || content.startsWith("Analyze the uploaded media carefully.")) {
+            return "";
+        }
+        int cut = -1;
+        for (String marker : new String[]{"\n\nReply layout for this file:", "\n\nReply layout for this image:"}) {
+            int i = content.indexOf(marker);
+            if (i >= 0 && (cut < 0 || i < cut)) cut = i;
+        }
+        return cut >= 0 ? content.substring(0, cut).trim() : content;
+    }
+
     private User getCurrentUser(HttpSession session) {
 
         Long userId = (Long) session.getAttribute("userId");
@@ -143,7 +171,7 @@ public class ChatController {
         dto.setId(message.getId());
         dto.setSessionId(message.getSessionId());
         dto.setRole(message.getRole());
-        dto.setContent(message.getContent());
+        dto.setContent(stripAttachmentPayload(message.getRole(), message.getContent()));
         dto.setTimestamp(message.getTimestamp());
 
         String raw = message.getAttachmentData();
@@ -631,42 +659,21 @@ public class ChatController {
                                 .append(" =====\n")
                                 .append(text);
 
-                        // Chat attachments were previously extracted for the model but
-                        // never sent to the RAG ingestion pipeline. Ingest readable
-                        // documents into rag_documents/rag_chunks as well, without
-                        // allowing an embedding/provider failure to block the chat.
-                        Object sessionUserId = session.getAttribute("userId");
-                        Long ragUserId = null;
-                        if (sessionUserId instanceof Number number) {
-                            ragUserId = number.longValue();
-                        } else if (sessionUserId instanceof String value) {
-                            try { ragUserId = Long.parseLong(value.trim()); }
-                            catch (NumberFormatException ignored) { /* logged below */ }
-                        }
+                        // Add every readable chat document to the user's Library.
+                        // Indexing (embeddings) runs in the background so the chat
+                        // reply is never delayed, and the Library row appears at once.
+                        Long ragUserId = resolveUserId(session);
                         if (ragUserId != null && ragUserId > 0) {
                             try {
-                                Map<String, Object> ingested = ragService.ingest(ragUserId, file);
-                                log.info("Chat attachment added to RAG; userId={}, filename={}, documentId={}, chunkCount={}",
-                                        ragUserId, filename, ingested.get("id"), ingested.get("chunkCount"));
+                                ragService.queueChatAttachment(
+                                        ragUserId, filename, mime, file.getSize(), text);
                             } catch (Exception ragError) {
-                                // Keep chat available, but make the indexing failure diagnosable.
-                                // The stack trace identifies whether the failure is SQL, extraction,
-                                // configuration, or the Gemini embedding request.
                                 log.error(
-                                        "RAG_INDEXING_FAILED: source=chat_attachment, userId={}, filename={}, " +
-                                                "fileSizeBytes={}, mimeType={}, exceptionType={}, message={}",
-                                        ragUserId,
-                                        filename,
-                                        file.getSize(),
-                                        mime,
-                                        ragError.getClass().getName(),
-                                        ragError.getMessage() == null ? "(no message)" : ragError.getMessage(),
-                                        ragError
-                                );
+                                        "RAG_QUEUE_FAILED: source=chat_attachment, userId={}, filename={}, message={}",
+                                        ragUserId, filename, ragError.getMessage(), ragError);
                             }
                         } else {
-                            log.warn("Skipping chat attachment RAG ingestion because session userId is missing or invalid; filename={}, sessionUserIdType={}",
-                                    filename, sessionUserId == null ? "null" : sessionUserId.getClass().getSimpleName());
+                            log.warn("Skipping chat attachment library ingestion: no signed-in user; filename={}", filename);
                         }
                     }
                 }
@@ -674,6 +681,12 @@ public class ChatController {
 
             String userMessage =
                     message == null ? "" : message.trim();
+
+            // Only what the person actually typed is saved to the chat. The
+            // extracted document text and layout hints are for the model only;
+            // saving them made the whole document reappear as the user's
+            // message after a refresh.
+            final String persistedMessage = userMessage;
 
             if (extractedText.length() > 0) {
 
@@ -717,6 +730,7 @@ public class ChatController {
 
             return processMessageWithFiles(
                     userMessage,
+                    persistedMessage,
                     sessionId,
                     model,
                     language,
@@ -1219,6 +1233,7 @@ public class ChatController {
 
         return processMessageWithFiles(
                 message,
+                message,
                 sessionId,
                 model,
                 language,
@@ -1232,6 +1247,7 @@ public class ChatController {
 
     private ResponseEntity<?> processMessageWithFiles(
             String message,
+            String persistedMessage,
             Long sessionId,
             String model,
             String language,
@@ -1385,7 +1401,7 @@ public class ChatController {
                     chatHistoryService.saveMessage(
                             sessionId,
                             "user",
-                            message,
+                            persistedMessage == null ? message : persistedMessage,
                             attachmentData
                     );
 
