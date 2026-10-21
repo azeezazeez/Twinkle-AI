@@ -77,12 +77,12 @@ export const ASSISTANT_NAME_RULES =
   'Always accept it warmly and immediately, answer to it from then on, and never refuse, ' +
   'deflect, or say you prefer a different name. If the user asks to rename you but does not say the ' +
   'name yet, ask what name they would like. If they ask you to go back to your original name, ' +
-  'you are Twinkle AI again.';
+  'you are Twinkle again.';
 
 export const assistantNameContext = (): string => {
   const name = getAssistantName();
   if (!name) return '';
-  return `ASSISTANT NAME SET BY THE USER: The user has chosen to call you "${name}". Use "${name}" as your own name from now on: when you introduce yourself or are asked your name, say you are ${name}. If the user has just asked you to take this name, accept it briefly and warmly (for example: "Got it, you can call me ${name}."). Do not call yourself Twinkle AI unless the user asks about the product.`;
+  return `ASSISTANT NAME SET BY THE USER: The user has chosen to call you "${name}". Use "${name}" as your own name from now on: when you introduce yourself or are asked your name, say you are ${name}. If the user has just asked you to take this name, accept it briefly and warmly (for example: "Got it, you can call me ${name}."). Do not call yourself Twinkle unless the user asks about the product.`;
 };
 
 const getAppLanguageCode = (): string => {
@@ -1923,8 +1923,8 @@ const requestLiveToken = async (): Promise<CachedLiveToken> => {
     console.error('Live token network error:', error);
     throw new LiveTokenError(
       controller.signal.aborted
-        ? 'The Twinkle AI backend took too long to create a Live Talk session. Please try again.'
-        : 'Could not reach the Twinkle AI backend. Check that it is running and reachable.',
+        ? 'The Twinkle backend took too long to create a Live Talk session. Please try again.'
+        : 'Could not reach the Twinkle backend. Check that it is running and reachable.',
       false
     );
   } finally {
@@ -2211,7 +2211,7 @@ export async function previewGeminiVoice(
           systemInstruction: {
             parts: [{
               text:
-                `You are Twinkle AI. Say the user's message aloud word for word, in your own voice and style. ` +
+                `You are Twinkle. Say the user's message aloud word for word, in your own voice and style. ` +
                 `Do not change, add or remove any words, do not add an introduction, and stop immediately after saying it.` +
                 languageInstruction,
             }],
