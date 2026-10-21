@@ -2098,9 +2098,9 @@ export function stopGeminiVoicePreview(): void {
 
 /** Warms the Live token so the first voice preview starts quickly. */
 export async function prefetchGeminiVoice(
-  voiceName: string,
+  _voiceName: string,
   _text?: string,
-  language = 'auto'
+  _language = 'auto'
 ): Promise<void> {
   // Only warm the cache; do not consume the token that the preview will use.
   warmLiveToken();
