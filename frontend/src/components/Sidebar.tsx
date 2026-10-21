@@ -1985,7 +1985,7 @@ export default function Sidebar({
       ═══════════════════════════════════════════════════ */}
       {desktopCollapsed && !peek && (
         <motion.div
-          className="fixed left-3 top-[18px] z-[10000] hidden lg:block"
+          className="fixed left-[15px] top-[18px] z-[10000] hidden lg:block"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.15, duration: 0.15 }}
@@ -1997,9 +1997,9 @@ export default function Sidebar({
               onPointerEnter={event => { if (event.pointerType === 'mouse') openPeek(); }}
               onPointerLeave={event => { if (event.pointerType === 'mouse') schedulePeekClose(); }}
               aria-label="Open sidebar"
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-600 transition-colors hover:bg-zinc-200/60 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
+              className="relative flex h-8 w-[17px] items-center justify-center rounded-lg text-zinc-600 transition-colors before:pointer-events-none before:absolute before:inset-y-0 before:-inset-x-[3px] before:rounded-lg before:transition-colors hover:before:bg-zinc-200/60 after:absolute after:inset-y-0 after:-left-3 after:w-3 hover:text-zinc-900 dark:text-zinc-300 dark:hover:before:bg-zinc-800 dark:hover:text-zinc-50"
             >
-              <SidebarToggleIcon />
+              <SidebarToggleIcon className="relative shrink-0" />
             </button>
           </Tip>
         </motion.div>
