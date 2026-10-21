@@ -16,6 +16,14 @@ const describe = (code: number, isDay: boolean): { label: string; icon: string }
   return { label: 'Weather', icon: '🌡️' };
 };
 
+// Open-Meteo reports "current.time" as local time of the place, e.g. "2026-10-21T15:45".
+const clockFromIso = (iso: unknown): string | null => {
+  const match = /T(\d{2}):(\d{2})/.exec(String(iso ?? ''));
+  if (!match) return null;
+  const hours = Number(match[1]);
+  return `${hours % 12 === 0 ? 12 : hours % 12}:${match[2]} ${hours >= 12 ? 'PM' : 'AM'}`;
+};
+
 const round = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : null);
 
 const WeatherCard: React.FC<{ data: WeatherSnapshot }> = ({ data }) => {
@@ -24,6 +32,7 @@ const WeatherCard: React.FC<{ data: WeatherSnapshot }> = ({ data }) => {
   if (temperature === null) return null;
   const { label, icon } = describe(Number(current.weather_code), Number(current.is_day) !== 0);
   const days = (data.daily?.time || []).slice(0, 3);
+  const observedAt = clockFromIso((current as Record<string, unknown>).time);
 
   return (
     <div className="my-2 w-full max-w-[420px] rounded-2xl border border-zinc-200 bg-white p-4 text-zinc-900 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100" aria-label={`Weather for ${data.label}`}>
@@ -55,7 +64,11 @@ const WeatherCard: React.FC<{ data: WeatherSnapshot }> = ({ data }) => {
           ))}
         </ul>
       )}
-      <p className="mt-2 text-[11px] text-zinc-400 dark:text-zinc-500">Live data from Open-Meteo</p>
+      <p className="mt-2 text-[11px] text-zinc-400 dark:text-zinc-500">
+        Live data from Open-Meteo
+        {observedAt ? ` · updated ${observedAt} local time` : ''}
+        {data.approximate ? ' · approximate location' : ''}
+      </p>
     </div>
   );
 };
