@@ -213,7 +213,7 @@ public class ChatController {
     public ResponseEntity<Map<String, Object>> root() {
         Map<String, Object> response = new HashMap<>();
         response.put("status", "UP");
-        response.put("service", "Twinkle AI Backend");
+        response.put("service", "Twinkle Backend");
         response.put("message", "Backend is running");
         return ResponseEntity.ok(response);
     }
