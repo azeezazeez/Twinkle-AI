@@ -47,6 +47,29 @@ export default function Library() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
+  // Keep the list fresh: documents attached in chat are indexed in the background,
+  // so reload when the tab regains focus, when chat reports an upload, and every
+  // few seconds while anything is still being processed.
+  useEffect(() => {
+    const refresh = () => { void load(); };
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
+    window.addEventListener('focus', refresh);
+    window.addEventListener('twinkle-library-updated', refresh);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('twinkle-library-updated', refresh);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [load]);
+
+  const hasProcessing = useMemo(() => docs.some(d => d.status === 'PROCESSING'), [docs]);
+  useEffect(() => {
+    if (!hasProcessing) return;
+    const timer = window.setInterval(() => { void load(); }, 3000);
+    return () => window.clearInterval(timer);
+  }, [hasProcessing, load]);
+
   // Copies of the same file are shown as "Name (1)", "Name (2)", ...
   const displayNames = useMemo(() => numberDuplicateNames(docs), [docs]);
   const nameOf = (doc: Doc) => displayNames.get(doc.id) ?? doc.name;
