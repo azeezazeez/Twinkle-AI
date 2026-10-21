@@ -8,6 +8,8 @@ export type PreciseFix = {
   speed: number | null;
   /** Time the device measured the fix (ms since epoch). */
   timestamp: number;
+  /** True when the browser could only give a coarse (Wi-Fi / network) position. */
+  approximate?: boolean;
 };
 
 export type LocationErrorCode = 'unsupported' | 'denied' | 'unavailable' | 'imprecise' | 'timeout' | 'insecure';
@@ -25,6 +27,14 @@ export class LocationError extends Error {
 const TARGET_ACCURACY_M = 25;
 /** Never accept a fix worse than this (metres). Worse = IP / cell-tower guess. */
 const MAX_ACCEPTABLE_ACCURACY_M = 500;
+/**
+ * Desktop browsers have no GPS and report a network-based position (typically
+ * 100 m - 5 km). That is real device data and is good enough for weather and
+ * "which city am I in", so it is accepted as an approximate fix up to this size.
+ */
+const MAX_APPROXIMATE_ACCURACY_M = 50_000;
+/** Once any fix arrives, wait this long (ms) for a better one before settling. */
+const SETTLE_AFTER_FIRST_FIX_MS = 6_000;
 /** Longest we wait for a good fix (ms). */
 const MAX_WAIT_MS = 20_000;
 /** Fixes measured earlier than this many ms ago are treated as stale. */
@@ -74,18 +84,23 @@ const requestFix = (): Promise<PreciseFix> =>
     let finished = false;
     let watchId: number | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let settleTimer: ReturnType<typeof setTimeout> | null = null;
 
     const finish = (done: () => void) => {
       if (finished) return;
       finished = true;
       if (watchId !== null) navigator.geolocation.clearWatch(watchId);
       if (timer) clearTimeout(timer);
+      if (settleTimer) clearTimeout(settleTimer);
       done();
     };
 
     const settleWithBest = () => {
       if (best && best.accuracy <= MAX_ACCEPTABLE_ACCURACY_M) {
         const fix = best;
+        finish(() => resolve(fix));
+      } else if (best && best.accuracy <= MAX_APPROXIMATE_ACCURACY_M) {
+        const fix: PreciseFix = { ...best, approximate: true };
         finish(() => resolve(fix));
       } else if (best) {
         const metres = Math.round(best.accuracy);
@@ -111,6 +126,8 @@ const requestFix = (): Promise<PreciseFix> =>
           if (fix.accuracy <= TARGET_ACCURACY_M) {
             const done = fix;
             finish(() => resolve(done));
+          } else if (!settleTimer) {
+            settleTimer = setTimeout(settleWithBest, SETTLE_AFTER_FIRST_FIX_MS);
           }
         },
         geoError => {
