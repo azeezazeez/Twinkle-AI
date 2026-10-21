@@ -734,7 +734,6 @@ export default function ChatsListPage({ sessions, onOpenSession, onNewChat, onDe
                       />
                     ) : (
                       <div className="flex min-w-0 items-center gap-2">
-                        {pinned && <Pin className="h-3.5 w-3.5 shrink-0 text-zinc-500 dark:text-zinc-400" strokeWidth={1.8} aria-label="Pinned" />}
                         <span data-twinkle-user-content className="min-w-0 truncate text-[16px] text-zinc-900 dark:text-zinc-100">
                           {session.sessionName}
                         </span>
