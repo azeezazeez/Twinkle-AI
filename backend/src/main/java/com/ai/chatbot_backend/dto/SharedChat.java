@@ -39,4 +39,11 @@ public class SharedChat {
 
     @Column(name = "revoked", nullable = false)
     private boolean revoked = false;
+
+    /**
+     * Who may open the link: "INVITED" (signed-in people on the invite list and the owner)
+     * or "LINK" (anyone who has the link). Links created before this column existed are "LINK".
+     */
+    @Column(name = "access_mode", nullable = false, length = 16)
+    private String accessMode = "LINK";
 }
