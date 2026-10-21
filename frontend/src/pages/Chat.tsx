@@ -22,7 +22,7 @@ import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw';
 
 import {
   Copy, Check, Edit2, Pencil, Upload, Volume2, VolumeX, Share2, CheckCircle2, LoaderCircle,
-  X, RotateCcw, RotateCw, Download, ChevronDown, Eye, Zap, Brain, Sparkles, Plus, Mic, AudioLines,
+  X, RotateCcw, RotateCw, Download, CircleArrowDown, ChevronDown, Eye, Zap, Brain, Sparkles, Plus, Mic, AudioLines,
   ThumbsUp, ThumbsDown, Paperclip, Camera, Search as SearchIcon, ChevronUp,
 } from 'lucide-react';
 
@@ -499,19 +499,143 @@ const IMAGE_BARE_GENERATE = /^\s*(?:(?:please|can you|could you|would you)\s+)*(
 const IMAGE_WORDS_PATTERN = /\b(image|picture|photo|draw|paint|sketch|illustration|logo|wallpaper|render|portrait|poster|generate|create|make)\b/i;
 
 /** Mirrors the backend: greetings/small talk get a text reply, everything else an image. */
-const THINKING_WORDS = [
-  'Thinking', 'Pondering', 'Reasoning', 'Twinkling', 'Connecting the dots', 'Brewing ideas',
-  'Working it out', 'Digging deeper', 'Mulling it over', 'Piecing it together', 'Almost there',
-];
+type ThinkingFile = { name: string; type: string };
+type ThinkingContext = { question: string; files: ThinkingFile[] };
 
-/** Rotating, shimmering status text shown while the AI is preparing its reply. */
-function ThinkingStatus({ phase }: { phase: 'idle' | 'connecting' | 'thinking' | 'streaming' }) {
-  const [index, setIndex] = useState(() => Math.floor(Math.random() * THINKING_WORDS.length));
+const shortFileName = (name: string): string => {
+  const clean = name.trim();
+  if (clean.length <= 28) return clean;
+  const dot = clean.lastIndexOf('.');
+  const ext = dot > 0 && clean.length - dot <= 6 ? clean.slice(dot) : '';
+  return `${clean.slice(0, 24).trimEnd()}…${ext}`;
+};
+
+function fileKind(file: ThinkingFile): 'image' | 'pdf' | 'word' | 'sheet' | 'slides' | 'code' | 'text' | 'other' {
+  const n = file.name.toLowerCase();
+  const t = (file.type || '').toLowerCase();
+  if (t.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg|heic|avif)$/.test(n)) return 'image';
+  if (t === 'application/pdf' || n.endsWith('.pdf')) return 'pdf';
+  if (t.includes('wordprocessingml') || t === 'application/msword' || /\.(docx?|odt|rtf)$/.test(n)) return 'word';
+  if (t.includes('spreadsheetml') || t.includes('excel') || t === 'text/csv' || /\.(xlsx?|csv|tsv|ods)$/.test(n)) return 'sheet';
+  if (t.includes('presentationml') || t.includes('powerpoint') || /\.(pptx?|odp)$/.test(n)) return 'slides';
+  if (/\.(js|jsx|ts|tsx|py|java|c|cpp|cs|go|rs|rb|php|html|css|json|xml|ya?ml|sql|sh|kt|swift)$/.test(n)) return 'code';
+  if (t.startsWith('text/') || /\.(txt|md)$/.test(n)) return 'text';
+  return 'other';
+}
+
+/**
+ * Builds status messages that match what the person actually asked or
+ * uploaded, so the wait never shows an unrelated message.
+ */
+function buildThinkingMessages(ctx: ThinkingContext, phase: 'connecting' | 'thinking'): string[] {
+  const q = ctx.question.trim().toLowerCase();
+  const files = ctx.files;
+
+  // ── Uploaded file(s) ───────────────────────────────────────────────────
+  if (files.length > 0) {
+    const kinds = files.map(fileKind);
+    const allSame = kinds.every(k => k === kinds[0]);
+    const kind = allSame ? kinds[0] : 'other';
+    const label = files.length === 1 ? shortFileName(files[0].name) : `${files.length} files`;
+    const noun: Record<string, string> = {
+      image: files.length === 1 ? 'image' : 'images',
+      pdf: files.length === 1 ? 'PDF' : 'PDFs',
+      word: files.length === 1 ? 'document' : 'documents',
+      sheet: files.length === 1 ? 'spreadsheet' : 'spreadsheets',
+      slides: files.length === 1 ? 'presentation' : 'presentations',
+      code: files.length === 1 ? 'code file' : 'code files',
+      text: files.length === 1 ? 'text file' : 'text files',
+      other: files.length === 1 ? 'file' : 'files',
+    };
+    const n = noun[kind];
+
+    if (phase === 'connecting') {
+      return [files.length === 1 ? `Uploading ${label}` : `Uploading your ${n}`];
+    }
+
+    const asks = {
+      summarize: /\b(summari[sz]e|summary|tl;?dr|gist|overview|brief)\b/.test(q),
+      extract: /\b(extract|ocr|transcribe|text from|read (?:out|the text))\b/.test(q),
+      translate: /\b(translate|translation)\b/.test(q),
+      explain: /\b(explain|describe|what is|what'?s in|what does|tell me about)\b/.test(q),
+      fix: /\b(fix|debug|error|bug|refactor|review|optimi[sz]e|improve)\b/.test(q),
+      proofread: /\b(proofread|grammar|rewrite|edit|correct)\b/.test(q),
+      data: /\b(analy[sz]e|chart|trend|total|sum|average|calculate|compare|insight|column|row)\b/.test(q),
+      question: /\?|\b(who|what|when|where|why|how|which|find|list|show)\b/.test(q),
+    };
+
+    if (kind === 'image') {
+      if (asks.extract) return [`Reading the text in your ${n}`, 'Extracting the text'];
+      if (asks.translate) return [`Reading the text in your ${n}`, 'Translating what I find'];
+      return [`Looking at your ${n}`, 'Studying the details', asks.question && !asks.explain ? 'Finding the answer in your image' : 'Putting together a description'];
+    }
+    if (kind === 'sheet') {
+      if (asks.summarize) return [`Reading your ${n}`, 'Summarizing the data'];
+      return [`Reading your ${n}`, 'Analyzing the data', asks.data ? 'Working out the numbers' : 'Finding what matters'];
+    }
+    if (kind === 'code') {
+      if (asks.fix) return [`Reading your ${n}`, 'Reviewing the code', 'Looking for issues and improvements'];
+      return [`Reading your ${n}`, 'Following the code logic', 'Preparing an explanation'];
+    }
+    if (asks.summarize) return [`Reading your ${n}`, 'Picking out the key points', 'Writing the summary'];
+    if (asks.translate) return [`Reading your ${n}`, 'Translating the content'];
+    if (asks.extract) return [`Reading your ${n}`, 'Extracting the text'];
+    if (asks.proofread) return [`Reading your ${n}`, 'Checking the writing', 'Preparing the edits'];
+    if (asks.question && !asks.explain) return [`Reading your ${n}`, 'Looking for the answer in it'];
+    return [`Reading your ${n}`, 'Understanding the content', 'Preparing the analysis'];
+  }
+
+  // ── Plain questions ────────────────────────────────────────────────────
+  if (phase === 'connecting') return ['Reading your question'];
+  if (!q) return ['Thinking'];
+
+  if (q.length <= 40 && IMAGE_CHAT_PATTERN.test(q)) return ['Thinking'];
+  if (/```|\b(code|function|script|program|algorithm|regex|sql|query|api|component|class|bug|debug|compile|stack ?trace|exception|java|python|javascript|typescript|react|html|css|node|golang|rust)\b/.test(q)) {
+    if (/\b(fix|debug|error|bug|exception|not working|stack ?trace|fails?)\b/.test(q)) return ['Reading through the problem', 'Tracing what is going wrong', 'Working out the fix'];
+    if (/\b(explain|what does|how does|why does)\b/.test(q)) return ['Reading the code', 'Preparing an explanation'];
+    return ['Understanding what you need', 'Writing the code'];
+  }
+  if (/\b(translate|translation|how (?:do you|to) say|in (?:hindi|telugu|tamil|kannada|spanish|french|german|english))\b/.test(q)) return ['Working out the translation', 'Checking the wording'];
+  if (/\b(summari[sz]e|summary|tl;?dr)\b/.test(q)) return ['Reading the text', 'Picking out the key points'];
+  if (/\b(email|e-mail|letter|cover letter|essay|article|blog|post|caption|speech|poem|story|song|message|write|draft|compose)\b/.test(q)) {
+    if (/\b(email|e-mail|letter)\b/.test(q)) return ['Drafting your message', 'Polishing the tone'];
+    if (/\b(poem|story|song)\b/.test(q)) return ['Getting creative', 'Writing it out'];
+    return ['Planning the structure', 'Writing it out'];
+  }
+  if (/\b(solve|calculate|equation|integral|derivative|probability|percentage|percent|sum of|math|formula)\b|\d+\s*[+\-*/^x×÷%]\s*\d+/.test(q)) return ['Working through the math', 'Double-checking the result'];
+  if (/\b(recipe|cook|bake|ingredient|dish)\b/.test(q)) return ['Thinking through the recipe', 'Putting the steps together'];
+  if (/\b(trip|travel|itinerary|visit|tour|flight|hotel)\b/.test(q)) return ['Thinking through your trip', 'Putting the plan together'];
+  if (/\b(compare|difference between|vs\.?|versus|better than|pros and cons)\b/.test(q)) return ['Weighing both sides', 'Comparing the key points'];
+  if (/\b(resume|cv|interview|job|career|salary)\b/.test(q)) return ['Thinking about your situation', 'Preparing practical advice'];
+  if (/\b(health|symptom|diet|workout|exercise|medicine|doctor|fever|pain)\b/.test(q)) return ['Looking at your question carefully', 'Preparing a clear answer'];
+  if (/\b(idea|ideas|suggest|suggestions|brainstorm|name for|names for|recommend)\b/.test(q)) return ['Coming up with ideas', 'Picking the best ones'];
+  if (/\b(how (?:do|to|can|does)|steps|guide|tutorial|way to)\b/.test(q)) return ['Working out the steps', 'Putting them in order'];
+  if (/\b(explain|why|what is|what are|what'?s|define|meaning of|who is|who was|tell me about)\b/.test(q)) return ['Thinking about your question', 'Preparing a clear explanation'];
+  return ['Thinking about your question', 'Putting the answer together'];
+}
+
+/** Status text shown while the AI is preparing its reply, tailored to the question or uploaded file. */
+function ThinkingStatus({
+  phase,
+  context,
+}: {
+  phase: 'idle' | 'connecting' | 'thinking' | 'streaming';
+  context: ThinkingContext;
+}) {
+  const stage: 'connecting' | 'thinking' = phase === 'connecting' ? 'connecting' : 'thinking';
+  const messages = useMemo(
+    () => buildThinkingMessages(context, stage),
+    [context.question, context.files, stage]
+  );
+  const [index, setIndex] = useState(0);
   useEffect(() => {
-    const id = window.setInterval(() => setIndex((i) => (i + 1) % THINKING_WORDS.length), 2400);
+    setIndex(0);
+    if (messages.length < 2) return;
+    // Walk through the relevant steps once and stay on the last one.
+    const id = window.setInterval(() => setIndex((i) => Math.min(i + 1, messages.length - 1)), 2600);
     return () => window.clearInterval(id);
-  }, []);
-  const label = phase === 'connecting' ? 'Connecting' : THINKING_WORDS[index];
+  }, [messages]);
+  const label = messages[Math.min(index, messages.length - 1)];
   return (
     <div className="twinkle-thinking-status" role="status" aria-live="polite">
       <StormLogo className="twinkle-thinking-status-logo h-5 w-5" />
@@ -1679,6 +1803,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const [responseDataWeight, setResponseDataWeight] = useState<'light' | 'moderate' | 'heavy'>('light');
   const [longPromptPending, setLongPromptPending] = useState(false);
   const [responseHasFiles, setResponseHasFiles] = useState(false);
+  const [thinkingContext, setThinkingContext] = useState<ThinkingContext>({ question: '', files: [] });
   const [showLongThinking, setShowLongThinking] = useState(false);
   useEffect(() => {
     if (!isTyping || responsePhase === 'idle' || responsePhase === 'streaming' || !longPromptPending) {
@@ -3972,6 +4097,10 @@ const chooseModel = useCallback((modelId: string) => {
     setLongPromptPending(messageText.trim().length >= 120 || (filesToSend?.length ?? 0) > 0 || totalRequestWeight > 18000);
     setShowLongThinking(false);
     setResponseHasFiles((filesToSend?.length ?? 0) > 0);
+    setThinkingContext({
+      question: messageText,
+      files: (filesToSend || []).map(file => ({ name: file.name || '', type: file.type || '' })),
+    });
     setIsTyping(true);
     setResponsePhase('connecting');
     streamingAssistantIdRef.current = null;
@@ -5901,7 +6030,7 @@ if (isBlankDraft) {
                     const replyStarted =
                       !!last && last.role === 'assistant' && cleanMessageContent(last.content).trim().length > 0;
                     return !replyStarted;
-                  })() && <ThinkingStatus phase={responsePhase} />}
+                  })() && <ThinkingStatus phase={responsePhase} context={thinkingContext} />}
 
                 {shouldShowImageProgress(messages, selectedModel, isTyping) && (
                   <ImageGenerationProgress
@@ -6126,6 +6255,8 @@ if (isBlankDraft) {
                     aria-haspopup="menu"
                     aria-expanded={plusMenu !== null}
                     data-tooltip="Add files and more"
+                    data-tooltip-side="bottom"
+                    data-tooltip-fixed
                     whileHover={{ scale: 1.04 }}
                     whileTap={{ scale: 0.94 }}
                     className="twinkle-tooltip-trigger twinkle-composer-plus group relative self-center flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-700 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-900 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-zinc-800 dark:hover:text-white"
@@ -6548,7 +6679,7 @@ if (isBlankDraft) {
                       download={previewFile.name}
                       className="inline-flex h-8 items-center justify-center gap-2 rounded-lg border border-zinc-300 bg-white px-3 text-[14px] font-medium text-zinc-900 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:bg-transparent dark:text-zinc-100 dark:hover:bg-zinc-800"
                     >
-                      <Download className="h-4 w-4" />
+                      <CircleArrowDown className="h-4 w-4" strokeWidth={1.8} />
                       Download
                     </a>
                   </div>
