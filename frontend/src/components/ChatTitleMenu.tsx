@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, Eye, EyeOff, Pencil, PinOff, Trash2, Upload } from 'lucide-react';
+import { ChevronDown, Copy, Eye, EyeOff, Pencil, PinOff, Trash2, Upload } from 'lucide-react';
 import BottomSheet, { RenameSheet, SheetItem, SheetDivider } from './BottomSheet';
 import { useIsMobile } from '../lib/mobileUi';
 import { loadUnreadIds, setChatUnread, UNREAD_CHANGED_EVENT } from '../lib/unread';
@@ -68,10 +68,10 @@ function Item({
 interface Props {
   sessionId: number;
   title: string;
-  /** Kept for compatibility; the status indicator now lives in the sidebar row. */
-  responding?: boolean;
   onRename: (id: number, name: string) => void;
   onShare: (id: number) => void;
+  /** Copies the whole conversation as Markdown. */
+  onCopy: () => void;
   onDelete: (id: number) => void;
 }
 
@@ -79,7 +79,7 @@ interface Props {
  * Chat name shown at the top-left of the chat area. A down arrow opens the
  * chat options (pin, rename, share, delete); hovering shows a tooltip.
  */
-export default function ChatTitleMenu({ sessionId, title, onRename, onShare, onDelete }: Props) {
+export default function ChatTitleMenu({ sessionId, title, onRename, onShare, onCopy, onDelete }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const arrowRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -187,6 +187,8 @@ export default function ChatTitleMenu({ sessionId, title, onRename, onShare, onD
   };
 
   const handleShare = () => { closeMenu(); onShare(sessionId); };
+
+  const handleCopy = () => { closeMenu(); onCopy(); };
 
   const handleDelete = () => {
     closeMenu();
@@ -318,6 +320,7 @@ export default function ChatTitleMenu({ sessionId, title, onRename, onShare, onD
           />
           <SheetItem icon={<Pencil className="h-5 w-5" strokeWidth={1.7} />} label="Rename" onClick={startRename} />
           <SheetItem icon={<Upload className="h-5 w-5" strokeWidth={1.7} />} label="Share chat" onClick={handleShare} />
+          <SheetItem icon={<Copy className="h-5 w-5" strokeWidth={1.7} />} label="Copy chat" onClick={handleCopy} />
           <SheetDivider />
           <SheetItem icon={<Trash2 className="h-5 w-5" strokeWidth={1.7} />} label="Delete" danger onClick={handleDelete} />
         </div>
@@ -352,6 +355,7 @@ export default function ChatTitleMenu({ sessionId, title, onRename, onShare, onD
           <Item icon={isUnread ? <Eye className="h-4 w-4" strokeWidth={1.7} /> : <EyeOff className="h-4 w-4" strokeWidth={1.7} />} label={isUnread ? 'Mark as read' : 'Mark as unread'} shortcut="U" onClick={toggleUnread} />
           <Item icon={<Pencil className="h-4 w-4" strokeWidth={1.7} />} label="Rename" shortcut="R" onClick={startRename} />
           <Item icon={<Upload className="h-4 w-4" strokeWidth={1.7} />} label="Share chat" onClick={handleShare} />
+          <Item icon={<Copy className="h-4 w-4" strokeWidth={1.7} />} label="Copy chat" onClick={handleCopy} />
           <div role="separator" className="mx-2 my-1 h-px bg-zinc-200 dark:bg-zinc-700/70" />
           <Item icon={<Trash2 className="h-4 w-4" strokeWidth={1.7} />} label="Delete" shortcut="D" danger onClick={handleDelete} />
         </motion.div>,
