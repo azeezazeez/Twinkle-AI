@@ -119,7 +119,7 @@ const SharedChat = () => {
                     </div>
 
                     <div className="min-w-0 flex-1 pt-1">
-                      <p className="mb-2 text-xs font-medium text-zinc-400">{isUser ? 'You' : 'Twinkle AI'}</p>
+                      <p className="mb-2 text-xs font-medium text-zinc-400">{isUser ? 'You' : 'Twinkle'}</p>
                       <div data-twinkle-user-content className="prose prose-zinc max-w-none text-[15px] leading-7 dark:prose-invert">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
                           {message.content || ''}
