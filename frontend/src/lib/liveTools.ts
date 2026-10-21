@@ -1,5 +1,5 @@
 import { fetchWithAuth, type WeatherSnapshot } from './api';
-import { getPreciseLocation, isLocationPermissionGranted, describeLocationError } from './geolocation';
+import { getPreciseLocation, isLocationPermissionGranted, describeLocationError, reverseGeocodeZoomFor } from './geolocation';
 
 export type LiveToolResult = Record<string, unknown>;
 
@@ -198,6 +198,8 @@ type ResolvedLocation = {
   parts: { locality?: string; subdistrict?: string; district?: string; state?: string; country?: string };
   /** Always the device position. IP-based guesses are never used. */
   source: 'gps';
+  /** True when the browser could only give a coarse network-based position. */
+  approximate: boolean;
   at: number;
 };
 
@@ -206,21 +208,52 @@ let locationPromise: Promise<ResolvedLocation> | null = null;
 
 class ToolError extends Error {}
 
-const reverseGeocode = async (latitude: number, longitude: number): Promise<{ label: string; parts: ResolvedLocation['parts'] }> => {
+const reverseGeocode = async (
+  latitude: number,
+  longitude: number,
+  accuracyMeters: number | null,
+): Promise<{ label: string; parts: ResolvedLocation['parts'] }> => {
   const parts: ResolvedLocation['parts'] = {};
+  // Only describe the place as precisely as the fix really is.
+  const zoom = reverseGeocodeZoomFor(accuracyMeters);
+  const fine = zoom >= 15;
+
   try {
     const reverse = await fetchJson(
-      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(latitude)}&lon=${encodeURIComponent(longitude)}&zoom=18&addressdetails=1&accept-language=en`,
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(latitude)}&lon=${encodeURIComponent(longitude)}&zoom=${zoom}&addressdetails=1&accept-language=en`,
       7000,
     );
     const address = reverse?.address || {};
-    parts.locality = address.village || address.hamlet || address.suburb || address.neighbourhood || address.town || address.city;
-    parts.subdistrict = address.mandal || address.tehsil || address.subdistrict || address.municipality || address.county || address.city_district;
+    parts.locality = fine
+      ? (address.village || address.hamlet || address.suburb || address.neighbourhood || address.town || address.city)
+      : (address.town || address.city || address.village || address.municipality);
+    parts.subdistrict = fine
+      ? (address.mandal || address.tehsil || address.subdistrict || address.municipality || address.county || address.city_district)
+      : (address.mandal || address.tehsil || address.subdistrict || address.county);
     parts.district = address.state_district || address.district;
     parts.state = address.state || address.region;
     parts.country = address.country;
   } catch {
-    /* Keep whatever was resolved; the label falls back below. */
+    /* Try the second provider below. */
+  }
+
+  // Second provider when the first is rate limited, blocked or returned nothing useful.
+  if (!parts.locality && !parts.district && !parts.state) {
+    try {
+      const alt = await fetchJson(
+        `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(latitude)}&longitude=${encodeURIComponent(longitude)}&localityLanguage=en`,
+        7000,
+      );
+      const admin: any[] = Array.isArray(alt?.localityInfo?.administrative) ? alt.localityInfo.administrative : [];
+      const byLevel = (level: number) => admin.find(item => Number(item?.adminLevel) === level)?.name as string | undefined;
+      parts.locality = alt?.locality || alt?.city || undefined;
+      parts.subdistrict = fine ? byLevel(6) : undefined;
+      parts.district = byLevel(5) || alt?.localityInfo?.administrative?.find((item: any) => /district/i.test(String(item?.description ?? '')))?.name;
+      parts.state = alt?.principalSubdivision || undefined;
+      parts.country = alt?.countryName || undefined;
+    } catch {
+      /* Keep whatever was resolved; the label falls back below. */
+    }
   }
 
   const ordered = [parts.locality, parts.subdistrict, parts.district, parts.state, parts.country]
@@ -236,7 +269,7 @@ const resolveCurrentLocation = async (): Promise<ResolvedLocation> => {
     try {
       // A fresh, high-accuracy device fix. No cached or IP-based fallback exists.
       const fix = await getPreciseLocation();
-      const { label, parts } = await reverseGeocode(fix.latitude, fix.longitude);
+      const { label, parts } = await reverseGeocode(fix.latitude, fix.longitude, fix.accuracy);
       const resolved: ResolvedLocation = {
         latitude: fix.latitude,
         longitude: fix.longitude,
@@ -244,6 +277,7 @@ const resolveCurrentLocation = async (): Promise<ResolvedLocation> => {
         label: label || 'your current location',
         parts,
         source: 'gps',
+        approximate: Boolean(fix.approximate) || fix.accuracy > 500,
         at: Date.now(),
       };
       cachedLocation = resolved;
@@ -344,8 +378,12 @@ const toolGetUserLocation = async (): Promise<LiveToolResult> => {
       longitude: roundTo(location.longitude, 4),
       accuracyMeters: location.accuracyMeters,
     },
-    locationSource: 'device GPS (live, high accuracy)',
+    locationSource: location.approximate ? 'device network location (approximate)' : 'device GPS (live, high accuracy)',
+    approximate: location.approximate,
     note:
+      (location.approximate
+        ? `This position is approximate (about ${location.accuracyMeters ?? 'several thousand'} m, network based, no GPS). Name only the town / district level and say it is approximate; never claim a street or village. `
+        : '') +
       'This is the live position measured by the device just now. ' +
       'Say the location in ordinary words, from the most local level to the broadest. ' +
       'Never invent a village or mandal that is null here. Do not read coordinates unless asked.',
@@ -387,6 +425,8 @@ const toolGetWeather = async (args: Record<string, unknown>, effects: LiveToolEf
   let latitude: number;
   let longitude: number;
   let label: string;
+  let cardLabel = '';
+  let approximateLocation = false;
 
   if (!usesCurrentLocation) {
     let match: PlaceMatch | null = null;
@@ -409,6 +449,12 @@ const toolGetWeather = async (args: Record<string, unknown>, effects: LiveToolEf
     }
     ({ latitude, longitude } = location);
     label = location.label;
+    approximateLocation = location.approximate;
+    // The card names the real place (for example "Kurnool, Andhra Pradesh") instead of "Your location".
+    const shortParts = [location.parts.locality, location.parts.district, location.parts.state]
+      .filter((value, index, all): value is string => Boolean(value) && all.indexOf(value) === index)
+      .slice(0, 2);
+    cardLabel = shortParts.join(', ');
   }
 
   let weather: any;
@@ -417,7 +463,7 @@ const toolGetWeather = async (args: Record<string, unknown>, effects: LiveToolEf
       `https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(latitude)}&longitude=${encodeURIComponent(longitude)}` +
       '&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,showers,snowfall,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m' +
       '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset' +
-      '&timezone=auto&forecast_days=3',
+      '&timezone=auto&forecast_days=3&cell_selection=nearest',
     );
   } catch {
     return { error: 'Live weather could not be retrieved right now. Say so clearly; do not invent current conditions.' };
@@ -433,10 +479,11 @@ const toolGetWeather = async (args: Record<string, unknown>, effects: LiveToolEf
   const days: string[] = Array.isArray(daily.time) ? daily.time : [];
 
   effects.onWeather?.({
-    label: usesCurrentLocation ? 'Your location' : label,
+    label: usesCurrentLocation ? (cardLabel || 'Your location') : label,
     at: Date.now(),
     current,
     daily,
+    approximate: usesCurrentLocation ? approximateLocation : false,
   });
 
   return {
