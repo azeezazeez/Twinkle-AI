@@ -3,7 +3,7 @@ import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom'; 
 import { createPortal, flushSync } from 'react-dom';  
 import { User, Session, Message } from '../types';
-import Sidebar from '../components/Sidebar';  
+import Sidebar from '../components/Sidebar'; 
 import { takeWeatherSnapshot, type WeatherSnapshot, chatApi, authApi, createLiveToken, startLiveTokenKeepWarm, warmLiveToken, buildLiveSocketUrl, reportLiveSocketFailure, reportLiveSocketSuccess } from '../lib/api'; 
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react'; 
 import StormLogo from '../components/StormLogo';
@@ -11,6 +11,7 @@ import { toast } from '../lib/toast';
 import ConfirmationModal from '../components/ConfirmationModal';
 import ShareChatModal from '../components/ShareChatModal';
 import UploadFilesModal from '../components/UploadFilesModal';
+import UploadedFilesModal from '../components/UploadedFilesModal';
 import LiveTalkModal from '../components/LiveTalkModal';
 import { onShortcut, takePendingShortcut, type ShortcutAction } from '../lib/shortcuts';
 import { getSavedLiveTalkColor } from '../lib/liveTalkColors';
@@ -28,7 +29,7 @@ import {
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import AttachmentTile from '../components/AttachmentTile';
 import FileDocIcon from '../components/FileDocIcon';
-import ChatFilesPanel, { detectFileKind, type ChatFileItem } from '../components/ChatFilesPanel';
+import ChatFilesPanel, { detectFileKind, type ChatFileItem, type ChatOutputItem } from '../components/ChatFilesPanel';
 import WeatherCard from '../components/WeatherCard';
 import ChatTitleMenu from '../components/ChatTitleMenu';
 import type { Components } from 'react-markdown'; 
@@ -1865,7 +1866,32 @@ ${textToRead}` }] }], turnComplete: true },
 
   // "Files in this chat" panel: every image / document attached in the open conversation.
   const [filesPanelOpen, setFilesPanelOpen] = useState(false);
-  useEffect(() => { setFilesPanelOpen(false); }, [currentSessionId]);
+  const [uploadsModalOpen, setUploadsModalOpen] = useState(false);
+  useEffect(() => { setFilesPanelOpen(false); setUploadsModalOpen(false); }, [currentSessionId]);
+  // Files the assistant produced (generated images), listed under "Outputs".
+  const chatOutputs = useMemo<ChatOutputItem[]>(() => {
+    const items: ChatOutputItem[] = [];
+    messages.forEach(message => {
+      if (message.role !== 'assistant' || typeof message.content !== 'string' || message.content.indexOf('![') < 0) return;
+      const pattern = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
+      let match: RegExpExecArray | null;
+      let index = 0;
+      while ((match = pattern.exec(message.content)) !== null) {
+        const src = match[2];
+        if (!/^(data:image\/|https?:\/\/)/i.test(src)) continue;
+        const name = imageDownloadName(src, match[1]);
+        items.push({
+          key: `out-${message.id}-${index}`,
+          name,
+          src,
+          badge: name.split('.').pop()!.toUpperCase().slice(0, 5),
+          messageId: message.id,
+        });
+        index += 1;
+      }
+    });
+    return items;
+  }, [messages]);
   const chatFiles = useMemo<ChatFileItem[]>(() => {
     const items: ChatFileItem[] = [];
     messages.forEach(message => {
@@ -4564,18 +4590,19 @@ const chooseModel = useCallback((modelId: string) => {
   }, [isTyping]);
 
   // ---- Files in chat ----
-  const openChatFile = (file: ChatFileItem) => {
+  const openChatOutput = async (output: ChatOutputItem) => {
     setFilesPanelOpen(false);
-    void openPersistedAttachmentPreview(file.url, file.index);
+    try {
+      const blob = await (await fetch(output.src)).blob();
+      await openFilePreview(new File([blob], output.name, { type: blob.type || 'image/png' }));
+    } catch (error) {
+      console.error('Failed to open output:', error);
+      window.open(output.src, '_blank', 'noopener,noreferrer');
+    }
   };
-  const goToChatFile = (file: ChatFileItem) => {
+  const openUploadsModal = () => {
     setFilesPanelOpen(false);
-    setShowAllMessages(true);
-    window.setTimeout(() => {
-      document
-        .querySelector<HTMLElement>(`[data-msg-id="${String(file.messageId).replace(/"/g, '')}"]`)
-        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    }, 80);
+    setUploadsModalOpen(true);
   };
 
   // ---- Search in chat ----
@@ -5212,7 +5239,7 @@ if (isBlankDraft) {
           );
         })()}
         <div className="absolute right-[max(1rem,env(safe-area-inset-right))] top-[max(0.75rem,env(safe-area-inset-top))] z-[9997] flex items-center gap-2">
-          {chatFiles.length > 0 && (
+          {chatFiles.length + chatOutputs.length > 0 && (
             <button
               type="button"
               onClick={() => setFilesPanelOpen(open => !open)}
@@ -5223,7 +5250,7 @@ if (isBlankDraft) {
             >
               <FileDocIcon className="h-[22px] w-[22px] sm:h-5 sm:w-5" strokeWidth={1.8} />
               <span className="absolute -right-1.5 -top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-zinc-900 px-1 text-[10px] font-semibold leading-none text-white dark:bg-zinc-100 dark:text-zinc-900">
-                {chatFiles.length > 99 ? '99+' : chatFiles.length}
+                {chatFiles.length + chatOutputs.length > 99 ? '99+' : chatFiles.length + chatOutputs.length}
               </span>
             </button>
           )}
@@ -5246,8 +5273,16 @@ if (isBlankDraft) {
           open={filesPanelOpen}
           onClose={() => setFilesPanelOpen(false)}
           files={chatFiles}
-          onOpenFile={openChatFile}
-          onGoToMessage={goToChatFile}
+          outputs={chatOutputs}
+          onOpenOutput={output => void openChatOutput(output)}
+          onOpenUploads={openUploadsModal}
+        />
+        <UploadedFilesModal
+          open={uploadsModalOpen}
+          onClose={() => setUploadsModalOpen(false)}
+          files={chatFiles}
+          renderPdfPreview={(src, name) => <PdfPreview src={src} fileName={name} />}
+          readDocxText={extractDocxText}
         />
         {chatSearchOpen && (
           <div role="search" className="absolute right-4 top-14 z-[9997] flex w-[min(380px,calc(100vw-32px))] items-center gap-1.5 rounded-xl border border-zinc-300/70 bg-white p-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.12)] dark:border-white/15 dark:bg-[#30302E]">
@@ -5267,9 +5302,9 @@ if (isBlankDraft) {
             <span className="shrink-0 px-1 text-[12px] tabular-nums text-zinc-500 dark:text-zinc-400" aria-live="polite">
               {chatSearchTerm ? (chatSearchMatchIds.length ? `${Math.min(chatSearchIndex, chatSearchMatchIds.length - 1) + 1} of ${chatSearchMatchIds.length}` : 'No results') : ''}
             </span>
-            <button type="button" onClick={() => stepChatSearch(-1)} aria-label="Previous result" className="rounded-md p-1.5 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-white/10"><ChevronUp className="h-4 w-4" /></button>
-            <button type="button" onClick={() => stepChatSearch(1)} aria-label="Next result" className="rounded-md p-1.5 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-white/10"><ChevronDown className="h-4 w-4" /></button>
-            <button type="button" onClick={closeChatSearch} aria-label="Close search" className="rounded-md p-1.5 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-white/10"><X className="h-4 w-4" /></button>
+            <button type="button" onClick={() => stepChatSearch(-1)} aria-label="Previous result" data-tooltip="Previous result" className="rounded-md p-1.5 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-white/10"><ChevronUp className="h-4 w-4" /></button>
+            <button type="button" onClick={() => stepChatSearch(1)} aria-label="Next result" data-tooltip="Next result" className="rounded-md p-1.5 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-white/10"><ChevronDown className="h-4 w-4" /></button>
+            <button type="button" onClick={closeChatSearch} aria-label="Close search" data-tooltip="Close search" className="rounded-md p-1.5 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-white/10"><X className="h-4 w-4" /></button>
           </div>
         )}
         {/* Mobile / tablet: no navbar, only the sidebar toggle in the top-left.
@@ -5279,6 +5314,8 @@ if (isBlankDraft) {
           type="button"
           onClick={(event) => { event.currentTarget.blur(); setMobileOpen(true); }}
           aria-label="Open sidebar"
+          data-tooltip="Open sidebar"
+          data-tooltip-side="right"
           inert={mobileOpen}
           tabIndex={mobileOpen ? -1 : 0}
           className={`lg:hidden absolute left-2 top-[max(0.5rem,env(safe-area-inset-top))] z-[9997] flex h-10 w-10 items-center justify-center rounded-xl text-zinc-700 transition-all duration-200 hover:bg-zinc-200/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 dark:text-zinc-200 dark:hover:bg-zinc-800 ${
@@ -5851,6 +5888,7 @@ if (isBlankDraft) {
                           name={fp.file.name}
                           badge={fp.file.type === 'application/pdf' ? 'PDF' : ext.slice(0, 5) || 'FILE'}
                           imageSrc={isImage ? fp.preview : null}
+                          pdfSrc={fp.file.type === 'application/pdf' ? fp.preview : null}
                           warnLowRes
                           title={`Preview ${fp.file.name}`}
                           onClick={() => void openFilePreview(fp.file, fp.preview)}
@@ -6370,6 +6408,7 @@ if (isBlankDraft) {
                       type="button"
                       onClick={closeFilePreview}
                       aria-label="Close preview"
+                      data-tooltip="Close"
                       className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
                     >
                       <X className="h-5 w-5" />
