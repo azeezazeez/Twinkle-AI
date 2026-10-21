@@ -63,7 +63,7 @@ export default function PdfCompactPreview({ src, fileName, onClose }: Props) {
           aria-label={`Download ${fileName}`}
           className="group/pdf flex flex-col items-center gap-4 focus:outline-none"
         >
-          <span className="block h-[333px] w-[236px] overflow-hidden rounded-[10px] border border-zinc-200 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)] transition-all group-hover/pdf:border-[#4A83DD] group-hover/pdf:shadow-[0_0_0_2px_rgba(74,131,221,0.35)] group-focus-visible/pdf:border-[#4A83DD] group-focus-visible/pdf:shadow-[0_0_0_2px_rgba(74,131,221,0.35)] dark:border-zinc-700">
+          <span className="block h-[333px] w-[236px] origin-center overflow-hidden rounded-[10px] border transition-transform duration-200 ease-out group-hover/pdf:-rotate-[2deg] group-hover/pdf:scale-[1.03] group-focus-visible/pdf:-rotate-[2deg] group-focus-visible/pdf:scale-[1.03] border border-zinc-200 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)] transition-all group-hover/pdf:border-[#4A83DD] group-hover/pdf:shadow-[0_0_0_2px_rgba(74,131,221,0.35)] group-focus-visible/pdf:border-[#4A83DD] group-focus-visible/pdf:shadow-[0_0_0_2px_rgba(74,131,221,0.35)] dark:border-zinc-700">
             {card?.thumbnail ? (
               <img
                 src={card.thumbnail}
@@ -83,7 +83,7 @@ export default function PdfCompactPreview({ src, fileName, onClose }: Props) {
               {failed ? 'PDF' : pagesLabel}
             </span>
             <span className="absolute inset-0 flex items-center justify-center gap-1.5 whitespace-nowrap font-medium text-[#2F6FDE] opacity-0 transition-opacity group-hover/pdf:opacity-100 group-focus-visible/pdf:opacity-100 dark:text-[#6BA2F5]">
-              <CircleArrowDown className="h-4 w-4" strokeWidth={1.8} />
+              <CircleArrowDown className="h-[15px] w-[15px]" strokeWidth={1.8} />
               Download
             </span>
           </span>
