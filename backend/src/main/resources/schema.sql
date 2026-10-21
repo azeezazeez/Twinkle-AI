@@ -11,7 +11,8 @@
 --    otps                  one-time codes for email verification / password reset
 --    chat_sessions         one row per conversation, owned by a user
 --    chat_messages         one row per message inside a conversation
---    shared_chats          public share links for a conversation
+--    shared_chats          share links for a conversation (+ access mode)
+--    shared_chat_invites   people invited to a shared conversation
 --    user_memories         facts the assistant remembers about a user
 --    user_memory_settings  per-user on/off switch for memory
 --    rag_documents         knowledge-base files uploaded by a user
@@ -20,6 +21,7 @@
 
 DROP TABLE IF EXISTS public.rag_chunks            CASCADE;
 DROP TABLE IF EXISTS public.rag_documents         CASCADE;
+DROP TABLE IF EXISTS public.shared_chat_invites   CASCADE;
 DROP TABLE IF EXISTS public.shared_chats          CASCADE;
 DROP TABLE IF EXISTS public.chat_messages         CASCADE;
 DROP TABLE IF EXISTS public.chat_sessions         CASCADE;
@@ -111,11 +113,21 @@ CREATE TABLE public.shared_chats (
     created_at  TIMESTAMP    NOT NULL DEFAULT NOW(),
     expires_at  TIMESTAMP,                           -- NULL = never expires
     revoked     BOOLEAN      NOT NULL DEFAULT FALSE,
+    access_mode VARCHAR(16)  NOT NULL DEFAULT 'LINK',  -- 'INVITED' (only invited people) or 'LINK' (anyone with the link)
 
     CONSTRAINT uq_shared_chats_token UNIQUE (share_token)
 );
 CREATE INDEX idx_shared_chat_session ON public.shared_chats (session_id);
-COMMENT ON TABLE public.shared_chats IS 'Public read-only links to a conversation.';
+COMMENT ON TABLE public.shared_chats IS 'Read-only links to a conversation.';
+
+CREATE TABLE public.shared_chat_invites (
+    id          BIGSERIAL    PRIMARY KEY,
+    session_id  BIGINT       NOT NULL REFERENCES public.chat_sessions (id) ON DELETE CASCADE,
+    email       VARCHAR(255) NOT NULL,
+    created_at  TIMESTAMP    NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_shared_chat_invite UNIQUE (session_id, email)
+);
+CREATE INDEX idx_shared_chat_invite_session ON public.shared_chat_invites (session_id);
 
 -- -----------------------------------------------------------------------------
 -- 6. user_memories
