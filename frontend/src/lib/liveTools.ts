@@ -8,7 +8,7 @@ export type LiveToolEffects = {
   onWeather?: (snapshot: WeatherSnapshot) => void;
 };
 
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */ 
 /*  Declarations sent to Gemini in the Live `setup` message            */
 /* ------------------------------------------------------------------ */
 
