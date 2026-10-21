@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { Session, User } from '../types'; 
 import {
-  LogOut, Trash2, X, Search, Plus, MoreVertical, PinOff, Loader2,
+  LogOut, Trash2, X, Search, Plus, MoreVertical, PinOff,
   MessageCircle, Pencil, Upload, Eye, EyeOff,
   Settings2, Settings as SettingsGear, UserCircle2, ChevronDown, ChevronRight, SlidersHorizontal, Check,
   Globe, Info, FolderInput, ArrowUpRight,
@@ -22,6 +22,27 @@ import { onShortcut, takePendingShortcut, isMac, type ShortcutAction } from '../
 const TOGGLE_SIDEBAR_KEYS = isMac() ? '⌘.' : 'Ctrl+B';
 const NEW_CHAT_KEYS = isMac() ? '⇧⌘O' : 'Ctrl+Shift+O';
 import { APP_LANGUAGES } from '../pages/Settings';
+
+// Small page-with-folded-corner icon shown at the end of a chat row once the
+// reply is complete (same look as Claude's sidebar).
+function ChatReadyIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.7}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+      className={className}
+    >
+      <path d="M14.5 2.75H7.25A2.5 2.5 0 0 0 4.75 5.25v13.5a2.5 2.5 0 0 0 2.5 2.5h9.5a2.5 2.5 0 0 0 2.5-2.5V7.25z" />
+      <path d="M14.5 2.75V6a1.25 1.25 0 0 0 1.25 1.25H19" />
+    </svg>
+  );
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Props {
@@ -782,6 +803,8 @@ function SessionList({
 }: SessionListProps) {
   const navigate = useNavigate();
   const [recentsCollapsed, setRecentsCollapsed] = useState(false);
+  // True while the pointer is over the Recents header or any chat row.
+  const [recentsHot, setRecentsHot] = useState(false);
   const [menu, setMenu] = useState<{ id: number; anchor: MenuAnchor } | null>(null);
   // Hover tooltip with the full chat name, shown beside the row like Claude.
   const [rowTip, setRowTip] = useState<{ id: number; text: string; x: number; y: number } | null>(null);
@@ -805,6 +828,8 @@ function SessionList({
     return () => { window.removeEventListener('scroll', clearRowTip, true); clearRowTip(); };
   }, [clearRowTip]);
   const isMobile = useIsMobile();
+  // The "View all" arrow only shows on hover and never while a reply is streaming.
+  const viewAllVisible = (recentsHot || isMobile) && respondingSessionId == null;
   const [sheetGroupsOpen, setSheetGroupsOpen] = useState(false);
   // Long-press a chat (touch) to open its options sheet.
   const pressTimer = useRef<number | null>(null);
@@ -1114,7 +1139,11 @@ function SessionList({
       </nav>
 
       {/* Recents header */}
-      <div className="group/recents flex shrink-0 items-center justify-between gap-2 px-4 pb-1 pt-4">
+      <div
+        className="group/recents flex shrink-0 items-center justify-between gap-2 px-4 pb-1 pt-4"
+        onMouseEnter={() => setRecentsHot(true)}
+        onMouseLeave={() => setRecentsHot(false)}
+      >
         <button
           type="button"
           onClick={() => setRecentsCollapsed(collapsed => !collapsed)}
@@ -1135,7 +1164,10 @@ function SessionList({
             type="button"
             onClick={() => { onClose(); navigate('/chats'); }}
             aria-label="View all chats"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-200/60 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            tabIndex={viewAllVisible ? 0 : -1}
+            className={`flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-[opacity,colors] duration-150 hover:bg-zinc-200/60 hover:text-zinc-800 focus-visible:opacity-100 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 ${
+              viewAllVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
+            }`}
           >
             <ArrowUpRight className="h-4 w-4" strokeWidth={1.7} />
           </button>
@@ -1269,7 +1301,7 @@ function SessionList({
                           if (longPressed.current) { longPressed.current = false; return; }
                           clearRowTip(); handleSelectSession(session.id);
                         }}
-                        onMouseEnter={() => prefetchSession(session.id)}
+                        onMouseEnter={() => { setRecentsHot(true); prefetchSession(session.id); }}
                         onMouseDown={() => prefetchSession(session.id)}
                         {...pressHandlers(session, isLocalOnly || isRenaming)}
                         onFocus={() => prefetchSession(session.id)}
@@ -1278,12 +1310,8 @@ function SessionList({
                           if ((event.target as HTMLElement).closest('[data-row-actions]')) { clearRowTip(); return; }
                           scheduleRowTip(event.currentTarget, session);
                         }}
-                        onMouseLeave={clearRowTip}
+                        onMouseLeave={() => { clearRowTip(); setRecentsHot(false); }}
                       >
-                        {isUnread && !isRenaming && (
-                          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-800 dark:bg-zinc-100" aria-label="Unread" />
-                        )}
-
                         {isRenaming && !isMobile ? (
                           <input
                             ref={renameInputRef}
@@ -1301,7 +1329,7 @@ function SessionList({
                         ) : (
                           <span
                             data-twinkle-user-content
-                            className={`min-w-0 flex-1 truncate text-[14px] leading-snug ${isUnread ? 'font-medium' : 'font-normal'}`}
+                            className={`min-w-0 flex-1 truncate text-[14px] leading-snug font-normal`}
                           >
                             {typingSessionId === session.id
                               ? <TypewriterText text={session.sessionName} onDone={onTypingDone} />
@@ -1309,8 +1337,25 @@ function SessionList({
                           </span>
                         )}
 
-                        {(!isRenaming || isMobile) && isResponding && (
-                          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-zinc-500" aria-label="Chat responding" />
+                        {/* Status at the end of the row: orange dot while replying, blue dot when
+                            marked unread, page icon once the reply is complete. Hidden on hover (and
+                            while the menu is open) so the 3-dots button takes its place. */}
+                        {!isRenaming && !isLocalOnly && !isMenuOpen && (isResponding || isUnread || !isMobile) && (
+                          <span
+                            role="img"
+                            aria-label={isResponding ? 'Chat responding' : isUnread ? 'Unread' : 'Reply complete'}
+                            className={`shrink-0 items-center justify-center ${
+                              isMobile ? 'flex' : 'flex group-hover/item:hidden group-focus-within/item:hidden'
+                            }`}
+                          >
+                            {isResponding ? (
+                              <span className="h-2 w-2 animate-pulse rounded-full bg-[#D97757]" />
+                            ) : isUnread ? (
+                              <span className="h-2 w-2 rounded-full bg-[#3B82F6]" />
+                            ) : (
+                              <ChatReadyIcon className="h-3.5 w-3.5 text-zinc-400 dark:text-zinc-500" />
+                            )}
+                          </span>
                         )}
 
                         {(!isRenaming || isMobile) && !isLocalOnly && (
