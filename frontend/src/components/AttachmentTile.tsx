@@ -1,7 +1,8 @@
 import { AlertTriangle, X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import FileDocIcon from './FileDocIcon';
+import { renderPdfThumbnail } from '../lib/pdfThumbnail';
 
 
 export const ATTACHMENT_TILE_SIZE = 120;
@@ -17,6 +18,8 @@ type Props = {
   badge?: string;
   /** When set, the tile shows the picture full-bleed instead of the name + badge. */
   imageSrc?: string | null;
+  /** PDF (object URL or data URL): its first page is shown as the tile preview. */
+  pdfSrc?: string | null;
   /** Show the amber "Low res" badge when the image is small (composer only). */
   warnLowRes?: boolean;
   onClick?: () => void;
@@ -29,6 +32,7 @@ export default function AttachmentTile({
   name,
   badge,
   imageSrc,
+  pdfSrc,
   warnLowRes = false,
   onClick,
   onRemove,
@@ -36,8 +40,32 @@ export default function AttachmentTile({
   children,
 }: Props) {
   const [lowRes, setLowRes] = useState(false);
+  const [pdfThumb, setPdfThumb] = useState<string | null>(null);
 
-  const body = imageSrc ? (
+  useEffect(() => {
+    setPdfThumb(null);
+    if (!pdfSrc) return;
+    let cancelled = false;
+    void renderPdfThumbnail(pdfSrc).then(thumb => {
+      if (!cancelled) setPdfThumb(thumb);
+    });
+    return () => { cancelled = true; };
+  }, [pdfSrc]);
+
+  const body = pdfThumb ? (
+    <div className="relative h-full w-full bg-white">
+      <img
+        src={pdfThumb}
+        alt={name}
+        draggable={false}
+        decoding="async"
+        className="h-full w-full object-cover object-top"
+      />
+      <span className="absolute bottom-2 left-2 rounded-md border border-zinc-300/80 bg-white/95 px-1.5 py-0.5 text-[11px] font-medium leading-none text-zinc-700 shadow-sm dark:border-zinc-600 dark:bg-zinc-800/95 dark:text-zinc-200">
+        {badge || 'PDF'}
+      </span>
+    </div>
+  ) : imageSrc ? (
     <img
       src={imageSrc}
       alt={name}
@@ -108,6 +136,7 @@ export default function AttachmentTile({
           type="button"
           onClick={onRemove}
           aria-label={`Remove ${name}`}
+          data-tooltip="Remove"
           className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full border border-zinc-300 bg-white text-zinc-700 opacity-0 shadow-sm transition-opacity hover:bg-zinc-100 focus:opacity-100 group-hover/tile:opacity-100 [@media(hover:none)]:opacity-100 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
         >
           <X className="h-3.5 w-3.5" strokeWidth={2} />
