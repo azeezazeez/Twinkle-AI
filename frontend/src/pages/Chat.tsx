@@ -467,13 +467,13 @@ const getInitialTheme = (): boolean => {
 function normalizeTwinkleIdentity(content: string): string {
   const normalized = content.trim();
 
-  // Replace the old default identity response with a clearer Twinkle AI
+  // Replace the old default identity response with a clearer Twinkle
   // introduction. Keep this narrowly scoped so documents mentioning Twinkle
   // are not rewritten accidentally.
   if (
     /^I['’]m\s+Twinkle\s+AI,\s+a\s+helpful\s+assistant\s+designed\s+to\s+help\s+you\s+with\s+information,\s+analysis,\s+and\s+more\.?$/i.test(normalized)
   ) {
-    return `Hi! I’m Twinkle AI, a professional AI assistant designed to help you understand information, solve problems, work with files, write and analyze content, develop software, and accomplish tasks efficiently.
+    return `Hi! I’m Twinkle, a professional AI assistant designed to help you understand information, solve problems, work with files, write and analyze content, develop software, and accomplish tasks efficiently.
 
 I adapt my responses to what you’re actually asking. I aim to provide clear, accurate, practical, and meaningful answers rather than following a rigid response template.
 
@@ -2236,7 +2236,7 @@ ${textToRead}` }] }], turnComplete: true },
             generationConfig: { responseModalities: ['AUDIO'] },
             systemInstruction: {
               parts: [{
-                text: `Twinkle AI speech-to-text mode. Transcribe the user's speech accurately. Preserve the user's wording and language. The selected language is ${getSpeechRecognitionLanguage()}. Do not translate the user's speech. Do not answer the user.`,
+                text: `Twinkle speech-to-text mode. Transcribe the user's speech accurately. Preserve the user's wording and language. The selected language is ${getSpeechRecognitionLanguage()}. Do not translate the user's speech. Do not answer the user.`,
               }],
             },
             inputAudioTranscription: inputTranscription,
@@ -4384,7 +4384,7 @@ const chooseModel = useCallback((modelId: string) => {
             // Deleted in the meantime: harmless, so no error is logged.
             console.debug('Chat title not saved: the chat no longer exists.');
           } else {
-            console.error('AI-generated Twinkle AI chat title save failed:', renameErr);
+            console.error('AI-generated Twinkle chat title save failed:', renameErr);
           }
         }
       }
@@ -5201,12 +5201,12 @@ if (isBlankDraft) {
       >
         {showFirstWelcome && !chatsView && (
           <>
-            <div className="absolute left-[32px] top-[max(0.75rem,env(safe-area-inset-top))] z-[9997] flex h-8 max-w-[calc(100%-10rem)] items-center lg:hidden">
+            <div className="absolute left-[38px] top-[max(0.75rem,env(safe-area-inset-top))] z-[9997] flex h-8 max-w-[calc(100%-10rem)] items-center lg:hidden">
               <span className="truncate text-[15px] font-medium text-zinc-800 dark:text-zinc-100">
                 Your first chat with Twinkle
               </span>
             </div>
-          <div className={`absolute z-[9997] hidden h-9 max-w-[calc(100%-18rem)] items-center lg:flex ${desktopSidebarExpanded ? 'left-4 top-3' : 'left-0 top-4'}`}>
+          <div className={`absolute z-[9997] hidden h-9 max-w-[calc(100%-18rem)] items-center lg:flex ${desktopSidebarExpanded ? 'left-4 top-3' : 'left-1.5 top-4'}`}>
             <span className="truncate text-[15px] font-medium text-zinc-800 dark:text-zinc-100">
               Your first chat with Twinkle
             </span>
@@ -5220,7 +5220,7 @@ if (isBlankDraft) {
             <>
               <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-[9996] hidden h-16 bg-gradient-to-b from-[var(--bg-main)] via-[var(--bg-main)]/80 to-transparent lg:block" />
               <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-[9996] h-14 bg-gradient-to-b from-[var(--bg-main)] via-[var(--bg-main)]/80 to-transparent lg:hidden" />
-              <div className="absolute left-[32px] top-[max(0.75rem,env(safe-area-inset-top))] z-[9998] flex h-8 max-w-[calc(100%-10rem)] items-center lg:hidden">
+              <div className="absolute left-[38px] top-[max(0.75rem,env(safe-area-inset-top))] z-[9998] flex h-8 max-w-[calc(100%-10rem)] items-center lg:hidden">
                 <ChatTitleMenu
                   flushLeft
                   sessionId={titledSession.id}
@@ -5231,7 +5231,7 @@ if (isBlankDraft) {
                   onDelete={deleteSession}
                 />
               </div>
-              <div className={`absolute z-[9998] hidden h-9 max-w-[calc(100%-18rem)] items-center lg:flex ${desktopSidebarExpanded ? 'left-4 top-3' : 'left-0 top-4'}`}>
+              <div className={`absolute z-[9998] hidden h-9 max-w-[calc(100%-18rem)] items-center lg:flex ${desktopSidebarExpanded ? 'left-4 top-3' : 'left-1.5 top-4'}`}>
                 <ChatTitleMenu
                   flushLeft={!desktopSidebarExpanded}
                   sessionId={titledSession.id}
@@ -5354,7 +5354,7 @@ if (isBlankDraft) {
           }`}
         >
           <span className="sr-only">Open sidebar</span>
-          <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden="true" className="relative shrink-0">
+          <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden="true" className="relative shrink-0 -translate-y-px">
       <rect x="2.5" y="2.5" width="15" height="15" rx="0.5" stroke="currentColor" strokeWidth="2" />
       <path d="M8 3V17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
           </svg>
