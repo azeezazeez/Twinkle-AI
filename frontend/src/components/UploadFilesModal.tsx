@@ -63,9 +63,6 @@ const UploadFilesModal = ({ isOpen, onClose, onChooseFiles, onFilesDropped }: Up
             <div className="flex items-center justify-between border-b border-zinc-200 px-6 py-5 dark:border-zinc-800">
               <h2 className="text-[15px] font-semibold text-zinc-900 dark:text-zinc-100">Upload or add files</h2>
               <div className="flex items-center gap-3">
-                <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                  Beta
-                </span>
                 <button
                   type="button"
                   onClick={onClose}
