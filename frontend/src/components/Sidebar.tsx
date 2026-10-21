@@ -12,6 +12,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import UserAvatar from './UserAvatar';
 import { chatApi } from '../lib/api';
 import SearchBar from './SearchBar';
+import BottomSheet, { RenameSheet, SheetItem, SheetDivider } from './BottomSheet';
+import { haptic, useIsMobile, useBackClose, useFocusTrap } from '../lib/mobileUi';
 import LanguageModal from './LanguageModal';
 import { useLanguage, type AppLanguage } from '../lib/i18n';
 import { parseServerDate, serverTime } from '../lib/time';
@@ -800,6 +802,16 @@ function SessionList({
     window.addEventListener('scroll', clearRowTip, true);
     return () => { window.removeEventListener('scroll', clearRowTip, true); clearRowTip(); };
   }, [clearRowTip]);
+  const isMobile = useIsMobile();
+  const [sheetGroupsOpen, setSheetGroupsOpen] = useState(false);
+  // Long-press a chat (touch) to open its options sheet.
+  const pressTimer = useRef<number | null>(null);
+  const pressOrigin = useRef<{ x: number; y: number } | null>(null);
+  const longPressed = useRef(false);
+  const cancelPress = () => {
+    if (pressTimer.current !== null) { window.clearTimeout(pressTimer.current); pressTimer.current = null; }
+  };
+  useEffect(() => cancelPress, []);
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -930,6 +942,38 @@ function SessionList({
   }
 
   const menuSession = menu ? displaySessions.find(s => s.id === menu.id) ?? null : null;
+  // Keep the last chat so the sheet's content stays put while it slides away.
+  const lastMenuSession = useRef<Session | null>(null);
+  if (menuSession) lastMenuSession.current = menuSession;
+  const sheetSession = menuSession ?? lastMenuSession.current;
+  useEffect(() => { if (!menu) setSheetGroupsOpen(false); }, [menu]);
+
+  const pressHandlers = (session: Session, disabled: boolean) => ({
+    onTouchStart: (event: React.TouchEvent<HTMLElement>) => {
+      prefetchSession(session.id);
+      if (disabled || !isMobile || event.touches.length !== 1) return;
+      const touch = event.touches[0];
+      const row = event.currentTarget;
+      pressOrigin.current = { x: touch.clientX, y: touch.clientY };
+      longPressed.current = false;
+      cancelPress();
+      pressTimer.current = window.setTimeout(() => {
+        pressTimer.current = null;
+        longPressed.current = true;
+        haptic(15);
+        const rect = row.getBoundingClientRect();
+        setMenu({ id: session.id, anchor: { top: rect.top, bottom: rect.bottom, right: rect.right } });
+      }, 450);
+    },
+    onTouchMove: (event: React.TouchEvent<HTMLElement>) => {
+      const origin = pressOrigin.current;
+      const touch = event.touches[0];
+      if (origin && touch && Math.hypot(touch.clientX - origin.x, touch.clientY - origin.y) > 10) cancelPress();
+    },
+    onTouchEnd: cancelPress,
+    onTouchCancel: cancelPress,
+    onContextMenu: (event: React.MouseEvent) => { if (isMobile) event.preventDefault(); },
+  });
 
   const togglePin = (id: number) => {
     const next = pinnedIds.includes(id) ? pinnedIds.filter(p => p !== id) : [...pinnedIds, id];
@@ -1214,15 +1258,18 @@ function SessionList({
                         key={session.id}
                         initial={{ opacity: 0, x: -6 }}
                         animate={{ opacity: 1, x: 0 }}
-                        className={`group/item flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2.5 transition-colors ${
+                        className={`group/item flex h-8 cursor-pointer [@media(hover:none)]:select-none [@media(hover:none)]:[-webkit-touch-callout:none] items-center gap-2 rounded-lg px-2.5 transition-colors ${
                           isActive || isMenuOpen
                             ? 'bg-zinc-200/70 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
                             : 'text-zinc-700 hover:bg-zinc-200/60 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100'
                         }`}
-                        onClick={() => { clearRowTip(); handleSelectSession(session.id); }}
+                        onClick={() => {
+                          if (longPressed.current) { longPressed.current = false; return; }
+                          clearRowTip(); handleSelectSession(session.id);
+                        }}
                         onMouseEnter={() => prefetchSession(session.id)}
                         onMouseDown={() => prefetchSession(session.id)}
-                        onTouchStart={() => prefetchSession(session.id)}
+                        {...pressHandlers(session, isLocalOnly || isRenaming)}
                         onFocus={() => prefetchSession(session.id)}
                         onMouseOver={event => {
                           if (isRenaming || menu) { clearRowTip(); return; }
@@ -1235,7 +1282,7 @@ function SessionList({
                           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-800 dark:bg-zinc-100" aria-label="Unread" />
                         )}
 
-                        {isRenaming ? (
+                        {isRenaming && !isMobile ? (
                           <input
                             ref={renameInputRef}
                             value={renameValue}
@@ -1260,11 +1307,11 @@ function SessionList({
                           </span>
                         )}
 
-                        {!isRenaming && isResponding && (
+                        {(!isRenaming || isMobile) && isResponding && (
                           <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-zinc-500" aria-label="Chat responding" />
                         )}
 
-                        {!isRenaming && !isLocalOnly && (
+                        {(!isRenaming || isMobile) && !isLocalOnly && (
                           <div
                             data-row-actions
                             className={`shrink-0 items-center gap-0.5 group-focus-within/item:flex group-hover/item:flex [@media(hover:none)]:flex ${
@@ -1330,7 +1377,7 @@ function SessionList({
 
       {/* Chat options dropdown (single instance, portalled) */}
       <AnimatePresence>
-        {menu && menuSession && (
+        {!isMobile && menu && menuSession && (
           <ChatContextMenu
             key={menu.id}
             anchor={menu.anchor}
@@ -1351,6 +1398,68 @@ function SessionList({
           />
         )}
       </AnimatePresence>
+
+      {/* Phones: the same options as a bottom sheet (⋮ button or long-press). */}
+      {isMobile && (
+        <BottomSheet open={!!menuSession} onClose={() => setMenu(null)} label="Chat options">
+          {sheetSession && (
+            <div role="menu" aria-label="Chat options">
+              <SheetItem
+                icon={pinnedIds.includes(sheetSession.id) ? <PinOff className="h-5 w-5" strokeWidth={1.7} /> : <SidebarPinIcon className="h-5 w-5" />}
+                label={pinnedIds.includes(sheetSession.id) ? 'Unpin' : 'Pin'}
+                onClick={() => togglePin(sheetSession.id)}
+              />
+              <SheetItem
+                icon={unreadIds.includes(sheetSession.id) ? <Eye className="h-5 w-5" strokeWidth={1.7} /> : <EyeOff className="h-5 w-5" strokeWidth={1.7} />}
+                label={unreadIds.includes(sheetSession.id) ? 'Mark as read' : 'Mark as unread'}
+                onClick={() => { setUnread(sheetSession.id, !unreadIds.includes(sheetSession.id)); setMenu(null); }}
+              />
+              <SheetItem icon={<Pencil className="h-5 w-5" strokeWidth={1.7} />} label="Rename" onClick={() => startRename(sheetSession)} />
+              <SheetItem icon={<Upload className="h-5 w-5" strokeWidth={1.7} />} label="Share" onClick={() => handleShare(sheetSession.id)} />
+              {groupBy === 'custom' && (
+                <>
+                  <SheetItem
+                    icon={<FolderInput className="h-5 w-5" strokeWidth={1.7} />}
+                    label="Move to group"
+                    trailing={<ChevronRight className={`h-5 w-5 shrink-0 text-zinc-400 transition-transform ${sheetGroupsOpen ? 'rotate-90' : ''}`} strokeWidth={1.8} />}
+                    onClick={() => setSheetGroupsOpen(open => !open)}
+                  />
+                  {sheetGroupsOpen && (
+                    <div className="ml-8 border-l border-zinc-200 pl-2 dark:border-zinc-700">
+                      {custom.groups.length === 0 ? (
+                        <div className="px-3 py-2 text-[14px] text-zinc-500 dark:text-zinc-400">No groups yet. Use “New group” in the chat list.</div>
+                      ) : custom.groups.map(name => (
+                        <SheetItem
+                          key={name}
+                          icon={(custom.assignments[String(sheetSession.id)] ?? null) === name ? <Check className="h-5 w-5" strokeWidth={2} /> : <span className="h-5 w-5" />}
+                          label={name}
+                          onClick={() => { moveToGroup(sheetSession.id, name); setMenu(null); }}
+                        />
+                      ))}
+                      {custom.assignments[String(sheetSession.id)] && (
+                        <SheetItem icon={<X className="h-5 w-5" strokeWidth={1.8} />} label="Remove from group" onClick={() => { moveToGroup(sheetSession.id, null); setMenu(null); }} />
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+              <SheetDivider />
+              <SheetItem icon={<Trash2 className="h-5 w-5" strokeWidth={1.7} />} label="Delete" danger onClick={() => handleDelete(sheetSession.id)} />
+            </div>
+          )}
+        </BottomSheet>
+      )}
+
+      {/* Phones: rename in a sheet above the keyboard instead of inside the narrow row. */}
+      {isMobile && (
+        <RenameSheet
+          open={renamingId !== null}
+          value={renameValue}
+          onChange={setRenameValue}
+          onSubmit={commitRename}
+          onCancel={cancelRename}
+        />
+      )}
 
       {/* Footer */}
       <div className="mt-auto shrink-0 border-t border-zinc-200/80 p-2 dark:border-zinc-800">
@@ -1894,6 +2003,23 @@ export default function Sidebar({
 
   // Shortcuts are detected once for the whole app (GlobalShortcuts in App.tsx)
   // and broadcast here, so they also work when pressed from Settings/Profile.
+  // Mobile drawer: Back button closes it, Escape closes it (unless a sheet is
+  // open on top), focus stays inside, and a left swipe closes it.
+  const drawerRef = useRef<HTMLElement | null>(null);
+  const drawerSwipe = useRef<{ x: number; y: number } | null>(null);
+  useBackClose(mobileOpen, () => onMobileClose?.());
+  useFocusTrap(drawerRef, mobileOpen);
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      onMobileClose?.();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [mobileOpen, onMobileClose]);
+
   const shortcutActions = useRef({ toggleDesktop, openSearch });
   shortcutActions.current = { toggleDesktop, openSearch };
 
@@ -1950,7 +2076,7 @@ export default function Sidebar({
           parent `sessions` prop.
       ═══════════════════════════════════════════════════ */}
       <div
-        className={`lg:hidden fixed inset-0 z-[10010] transition-opacity duration-200 ${
+        className={`lg:hidden fixed inset-0 z-[10010] transition-opacity duration-200 motion-reduce:transition-none ${
           mobileOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
         }`}
         // `inert` hides the closed drawer from assistive tech AND drops focus from
@@ -1963,7 +2089,23 @@ export default function Sidebar({
         />
 
         <aside
-          className={`twinkle-sidebar absolute inset-y-0 left-0 z-[9999] flex h-[100dvh] w-[min(18rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] flex-col overflow-hidden border-r border-zinc-200 bg-white shadow-none transition-transform duration-300 ease-out dark:border-zinc-800 dark:bg-zinc-950 ${
+          ref={drawerRef}
+          aria-label="Sidebar"
+          onTouchStart={event => {
+            const touch = event.touches[0];
+            drawerSwipe.current = event.touches.length === 1 && touch ? { x: touch.clientX, y: touch.clientY } : null;
+          }}
+          onTouchEnd={event => {
+            const start = drawerSwipe.current;
+            drawerSwipe.current = null;
+            const touch = event.changedTouches[0];
+            if (!start || !touch) return;
+            const dx = touch.clientX - start.x;
+            const dy = Math.abs(touch.clientY - start.y);
+            // Swipe left to close.
+            if (dx < -70 && dy < Math.abs(dx) * 0.6) { haptic(8); onMobileClose?.(); }
+          }}
+          className={`twinkle-sidebar absolute inset-y-0 left-0 z-[9999] flex h-[100dvh] w-[min(18rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] flex-col overflow-hidden border-r border-zinc-200 bg-white shadow-none transition-transform duration-300 ease-out motion-reduce:transition-none dark:border-zinc-800 dark:bg-zinc-950 ${
             mobileOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
           onClick={e => e.stopPropagation()}
