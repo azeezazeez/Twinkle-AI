@@ -73,13 +73,15 @@ interface Props {
   /** Copies the whole conversation as Markdown. */
   onCopy: () => void;
   onDelete: (id: number) => void;
+  /** Drop the left padding so the name sits flush (2px) next to the sidebar toggle icon. */
+  flushLeft?: boolean;
 }
 
 /**
  * Chat name shown at the top-left of the chat area. A down arrow opens the
  * chat options (pin, rename, share, delete); hovering shows a tooltip.
  */
-export default function ChatTitleMenu({ sessionId, title, onRename, onShare, onCopy, onDelete }: Props) {
+export default function ChatTitleMenu({ sessionId, title, onRename, onShare, onCopy, onDelete, flushLeft = false }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const arrowRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -273,7 +275,7 @@ export default function ChatTitleMenu({ sessionId, title, onRename, onShare, onC
           data-tooltip="Rename chat"
           data-tooltip-shortcut="R"
           data-tooltip-side="bottom"
-          className="flex h-9 min-w-0 items-center rounded-l-lg pl-2.5 pr-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50"
+          className={`flex h-9 min-w-0 items-center rounded-l-lg ${flushLeft ? 'pl-0' : 'pl-2.5'} pr-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50`}
         >
           <span className="min-w-0 truncate text-[15px] font-normal text-zinc-900 dark:text-zinc-100">{title}</span>
         </button>
