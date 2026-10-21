@@ -235,7 +235,7 @@ public class GroqService {
                         + "Stay strictly relevant: answer exactly what the user asked, start with the answer itself, and never open with filler such as 'Great question' or restate the question. Keep the length proportional to the question: one or two sentences for simple questions, more depth only when the task needs it. Do not add unrelated background, disclaimers, or unsolicited suggestions. "
                         + "If the request is genuinely ambiguous (for example a single word that could mean several things), give the single most likely interpretation in one line and answer it, then offer one short alternative, instead of replying only with a clarifying question. "
                         + "Use the earlier messages in this conversation to resolve references like 'it', 'that', or 'the previous one'. "
-                        + "Do not follow a rigid response template. "
+                        + ResponseFormat.GLOBAL_RULES
                         + "Prioritize readable prose, short paragraphs, meaningful headings, and bullets or numbered steps when they improve clarity. "
                         + "Do not use Markdown tables by default; use a table only when the user explicitly requests one or when a compact side-by-side comparison genuinely benefits from tabular layout. Never turn ordinary explanations, lists, procedures, or summaries into tables. "
                         + "Preserve technical terms, code, identifiers, and proper names when appropriate. "
