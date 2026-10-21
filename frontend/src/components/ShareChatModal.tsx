@@ -533,7 +533,7 @@ const ShareChatModal: React.FC<ShareChatModalProps> = ({ isOpen, sessionId, owne
           <div className="pointer-events-none absolute right-[max(1rem,env(safe-area-inset-right,0px))] top-[calc(max(0.75rem,env(safe-area-inset-top,0px))+46px)] max-sm:left-3 max-sm:right-3 sm:w-[480px]">
             <motion.div
               ref={panelRef}
-              role="dialog"
+              role="dialog" 
               aria-modal="true"
               aria-labelledby="share-session-title"
               tabIndex={-1}
