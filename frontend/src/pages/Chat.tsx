@@ -23,8 +23,8 @@ import { sanitizeAssistantText, friendlyErrorMessage } from '../lib/safeResponse
 import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw'; 
 
 import {
-  Copy, Check, Edit2, Pencil, Upload, Volume2, VolumeX, Share2, CheckCircle2, LoaderCircle,
-  X, RotateCcw, RotateCw, Download, CircleArrowDown, ChevronDown, Eye, Zap, Brain, Sparkles, Plus, Mic, AudioLines,
+  Copy, Check, Pencil, Volume2, VolumeX, Share2,
+  X, RotateCw, Download, CircleArrowDown, ChevronDown, Eye, Zap, Brain, Sparkles, Plus, Mic,
   ThumbsUp, ThumbsDown, Paperclip, Camera, Search as SearchIcon, ChevronUp,
 } from 'lucide-react';
 
@@ -260,15 +260,6 @@ const normalizeMathDelimiters = (value: string): string => {
   }).join('');
 };
 
-const isEquationLikeText = (value: string): boolean => {
-  const text = value.trim();
-  if (!text) return false;
-  const mathSignals = /[=≈≠≤≥→⇒∂∇ℏ∞∫∑ΣΠ√ψΨφΦλμσΩαβγθΔ]/;
-  const operatorSignals = /\b(?:Schrödinger equation|Hamiltonian|eigenvalue|wavefunction|probability density|expectation value|momentum|energy|operator)\b/i;
-  return (mathSignals.test(text) && /[A-Za-z0-9]/.test(text) && text.length <= 420) || (operatorSignals.test(text) && /[=()]/.test(text));
-};
-
-
 const PDFJS_MODULE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs';
 const PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
 
@@ -403,7 +394,6 @@ const isRecentlyCreated = (createdAt?: string): boolean => {
 interface Props {
   user: User;
   onLogout: () => void;
-  onProfile?: () => void;
   onSettings?: () => void;
 }
 
@@ -1576,30 +1566,6 @@ const MODEL_OPTIONS: ModelOption[] = [
 
 const MODEL_STORAGE_KEY = 'Twinkle_selected_model';
 
-const playModelSwitchSound = () => {
-  try {
-    const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContextCtor) return;
-    const context = new AudioContextCtor();
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(520, context.currentTime);
-    oscillator.frequency.exponentialRampToValueAtTime(760, context.currentTime + 0.08);
-    gain.gain.setValueAtTime(0.0001, context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.035, context.currentTime + 0.012);
-    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.11);
-    oscillator.connect(gain);
-    gain.connect(context.destination);
-    oscillator.start();
-    oscillator.stop(context.currentTime + 0.12);
-    oscillator.onended = () => void context.close();
-  } catch {
-    // UI feedback sound is optional.
-  }
-};
-
-
 const EMPTY_CHAT_PROMPTS = [
   "What's on your mind today? 💡",
   "What would you like to explore? 🔍",
@@ -1686,74 +1652,6 @@ const LongTailArrowDown = ({ className = '' }: { className?: string }) => (
 
 
 
-const VOICE_PCM_WORKLET_SOURCE = `
-class TwinkleVoiceCaptureProcessor extends AudioWorkletProcessor {
-  process(inputs) {
-    const input = inputs[0] && inputs[0][0];
-    if (!input || input.length === 0) return true;
-
-    const ratio = sampleRate / 16000;
-    const outputLength = Math.max(1, Math.floor(input.length / ratio));
-    const buffer = new ArrayBuffer(outputLength * 2);
-    const view = new DataView(buffer);
-
-    for (let i = 0; i < outputLength; i += 1) {
-      const sourceIndex = Math.min(input.length - 1, Math.floor(i * ratio));
-      const sample = Math.max(-1, Math.min(1, input[sourceIndex]));
-      view.setInt16(i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
-    }
-
-    this.port.postMessage(buffer, [buffer]);
-    return true;
-  }
-}
-
-registerProcessor('twinkle-voice-capture', TwinkleVoiceCaptureProcessor);
-`;
-
-const downsamplePcm16k = (input: Float32Array, sampleRate: number): Int16Array => {
-  if (sampleRate === 16000) {
-    const output = new Int16Array(input.length);
-    for (let i = 0; i < input.length; i += 1) {
-      const sample = Math.max(-1, Math.min(1, input[i]));
-      output[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
-    }
-    return output;
-  }
-
-  const ratio = sampleRate / 16000;
-  const length = Math.max(1, Math.round(input.length / ratio));
-  const output = new Int16Array(length);
-  let outputIndex = 0;
-  let inputIndex = 0;
-
-  while (outputIndex < length) {
-    const nextInputIndex = Math.min(input.length, Math.round((outputIndex + 1) * ratio));
-    let sum = 0;
-    let count = 0;
-    for (let i = inputIndex; i < nextInputIndex; i += 1) {
-      sum += input[i];
-      count += 1;
-    }
-    const sample = Math.max(-1, Math.min(1, count ? sum / count : input[Math.min(inputIndex, input.length - 1)] || 0));
-    output[outputIndex] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
-    outputIndex += 1;
-    inputIndex = nextInputIndex;
-  }
-
-  return output;
-};
-
-const int16ToBase64 = (pcm: Int16Array): string => {
-  const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + chunkSize, bytes.length)));
-  }
-  return btoa(binary);
-};
-
 const getSpeechLanguage = (): string => {
   try {
     const code = localStorage.getItem('twinkle_app_language') || 'auto';
@@ -1770,7 +1668,7 @@ const getSpeechLanguage = (): string => {
   }
 };
 
-export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
+export default function Chat({ user, onLogout, onSettings }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const { chatUuid } = useParams<{ chatUuid?: string }>();
@@ -1804,21 +1702,7 @@ export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   }, []);
   const [isTyping, setIsTyping] = useState(false);
   const [responsePhase, setResponsePhase] = useState<'idle' | 'connecting' | 'thinking' | 'streaming'>('idle');
-  const [responseDataWeight, setResponseDataWeight] = useState<'light' | 'moderate' | 'heavy'>('light');
-  const [longPromptPending, setLongPromptPending] = useState(false);
-  const [responseHasFiles, setResponseHasFiles] = useState(false);
   const [thinkingContext, setThinkingContext] = useState<ThinkingContext>({ question: '', files: [] });
-  const [showLongThinking, setShowLongThinking] = useState(false);
-  useEffect(() => {
-    if (!isTyping || responsePhase === 'idle' || responsePhase === 'streaming' || !longPromptPending) {
-      setShowLongThinking(false);
-      return;
-    }
-    setShowLongThinking(false);
-    const timeout = window.setTimeout(() => setShowLongThinking(true), 1800);
-    return () => window.clearTimeout(timeout);
-  }, [isTyping, responsePhase, longPromptPending]);
-  const [isDeletingChat, setIsDeletingChat] = useState(false);
   const [loading, setLoading] = useState(true);
   const [justFinished, setJustFinished] = useState(false);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
@@ -1973,7 +1857,7 @@ ${textToRead}` }] }], turnComplete: true },
   }, []);
   const [editingMessage, setEditingMessage] = useState<{ id: string | number; content: string } | null>(null);
   const [editInput, setEditInput] = useState('');
-  const [modalType, setModalType] = useState<'none' | 'delete-all' | 'delete-single'>('none');
+  const [modalType, setModalType] = useState<'none' | 'delete-single'>('none');
   const [sessionIdToDelete, setSessionIdToDelete] = useState<number | null>(null);
   const [messageAttachments, setMessageAttachments] = useState<Record<string | number, string[]>>({});
   // Share popup: null = closed, -1 = open for a chat that is not saved yet, otherwise the session id.
@@ -2018,7 +1902,6 @@ ${textToRead}` }] }], turnComplete: true },
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [chatSearchIndex, setChatSearchIndex] = useState(0);
   const chatSearchInputRef = useRef<HTMLInputElement>(null);
-  const [copiedChat, setCopiedChat] = useState(false);
 
   // "Files in this chat" panel: every image / document attached in the open conversation.
   const [filesPanelOpen, setFilesPanelOpen] = useState(false);
@@ -2111,7 +1994,7 @@ ${textToRead}` }] }], turnComplete: true },
     }
   });
   const [liveTalkOpen, setLiveTalkOpen] = useState(false);
-  const [liveTalkColor, setLiveTalkColor] = useState(() => getSavedLiveTalkColor());
+  const [, setLiveTalkColor] = useState(() => getSavedLiveTalkColor());
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
   const [voiceInputActive, setVoiceInputActive] = useState(false);
   const [voiceCaptureStopped, setVoiceCaptureStopped] = useState(false);
@@ -2144,13 +2027,6 @@ ${textToRead}` }] }], turnComplete: true },
     sessionName: polishChatTitle(session.sessionName, session.sessionName || 'New Chat'),
   }));
   const sessionToDelete = sessions.find(session => session.id === sessionIdToDelete);
-  const deleteDataWeight = (() => {
-    const targetMessages = sessionIdToDelete === currentSessionId ? messages : [];
-    const textWeight = targetMessages.reduce((total, item) => total + (item.content?.length || 0), 0);
-    const attachmentWeight = targetMessages.reduce((total, item) => total + (messageAttachments[item.id]?.length || 0), 0);
-    const units = textWeight + targetMessages.length * 500 + attachmentWeight * 5000;
-    return units > 120000 || (modalType === 'delete-all' && sessions.length > 100) ? 'large' : units > 18000 || (modalType === 'delete-all' && sessions.length > 20) ? 'medium' : 'small';
-  })();
   // Keep the chat interface clean on login; the sidebar opens only when requested.
 
   // =============================================================
@@ -2186,7 +2062,6 @@ ${textToRead}` }] }], turnComplete: true },
   const voiceGeminiSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const voiceGeminiProcessorRef = useRef<AudioWorkletNode | ScriptProcessorNode | null>(null);
   const voiceGeminiSilentGainRef = useRef<GainNode | null>(null);
-  const voiceGeminiWorkletReadyRef = useRef<Promise<void> | null>(null);
   const voiceGeminiFallbackActiveRef = useRef(false);
   // Identifies the current dictation run. A retry (or a stop) bumps it, so a
   // run that is still waiting on the microphone / worklet can tell that its
@@ -2198,8 +2073,8 @@ ${textToRead}` }] }], turnComplete: true },
   const voiceGeminiRetryRef = useRef(0);
   const voiceGeminiBasicSetupRef = useRef(false);
   const startGeminiDictationFallbackRef = useRef<((attempt: number) => Promise<void>) | null>(null);
-  const [voiceDraftVersion, setVoiceDraftVersion] = useState(0);
-  const [voiceLiveTranscript, setVoiceLiveTranscript] = useState('');
+  const [, setVoiceDraftVersion] = useState(0);
+  const [, setVoiceLiveTranscript] = useState('');
   const [voiceSpeechDetected, setVoiceSpeechDetected] = useState(false);
 
   const getSpeechRecognitionLanguage = useCallback((): string => {
@@ -2949,7 +2824,7 @@ ${textToRead}` }] }], turnComplete: true },
     setModelFlyout({ left, bottom: Math.max(8, window.innerHeight - rect.bottom - 8) });
     return true;
   };
-  const [emptyChatPrompt, setEmptyChatPrompt] = useState(() =>
+  const [, setEmptyChatPrompt] = useState(() =>
     EMPTY_CHAT_PROMPTS[Math.floor(Math.random() * EMPTY_CHAT_PROMPTS.length)]
   );
   const [chatGreeting, setChatGreeting] = useState(() => getRandomChatGreeting(user?.name || user?.username || '', '', selectedModel));
@@ -3026,22 +2901,14 @@ ${textToRead}` }] }], turnComplete: true },
 
 
   // Theme
-  const [isDark, setIsDark] = useState<boolean>(() => {
+  // Apply the saved theme before the first paint.
+  useState<boolean>(() => {
     const dark = getInitialTheme();
     if (typeof document !== 'undefined') {
       document.documentElement.classList.toggle('dark', dark);
     }
     return dark;
   });
-
-  const toggleTheme = useCallback(() => {
-    setIsDark(prev => {
-      const next = !prev;
-      document.documentElement.classList.toggle('dark', next);
-      localStorage.setItem('theme', next ? 'dark' : 'light');
-      return next;
-    });
-  }, []);
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
@@ -4111,15 +3978,6 @@ const chooseModel = useCallback((modelId: string) => {
     isSendingRef.current = true;
     const requestGeneration = ++requestGenerationRef.current;
     activeResponseSessionRef.current = currentSessionId;
-    const contextTextWeight = (messagesSnapshot ?? messages).reduce((total, item) => total + (item.content?.length || 0), 0);
-    const uploadedBytesWeight = (filesToSend || []).reduce((total, file) => total + (file instanceof File ? file.size : 0), 0);
-    const totalRequestWeight = messageText.length + contextTextWeight + Math.ceil(uploadedBytesWeight / 4);
-    setResponseDataWeight(totalRequestWeight > 120000 ? 'heavy' : totalRequestWeight > 18000 ? 'moderate' : 'light');
-    // Fast, short prompts show only the breathing dot. Only longer prompts
-    // get the Thinking label, and only if the response is still pending.
-    setLongPromptPending(messageText.trim().length >= 120 || (filesToSend?.length ?? 0) > 0 || totalRequestWeight > 18000);
-    setShowLongThinking(false);
-    setResponseHasFiles((filesToSend?.length ?? 0) > 0);
     setThinkingContext({
       question: messageText,
       files: (filesToSend || []).map(file => ({ name: file.name || '', type: file.type || '' })),
@@ -4883,9 +4741,7 @@ const chooseModel = useCallback((modelId: string) => {
       .join('\n\n---\n\n');
     try {
       await navigator.clipboard.writeText(`# ${title}\n\n${body}\n`);
-      setCopiedChat(true);
       toast.success('Chat copied to clipboard');
-      window.setTimeout(() => setCopiedChat(false), 1800);
     } catch (error) {
       console.error('Could not copy chat:', error);
       toast.error('Could not copy the chat. Please try again.');
@@ -5059,35 +4915,6 @@ if (isBlankDraft) {
 
   const closeShareModal = () => {
     setShareSessionId(null);
-  };
-
-  const confirmClearAll = () => {
-    const previousSessions = sessions;
-    markChatsGone(previousSessions.map(session => ({ id: session.id, publicId: session.publicId })));
-    messageCacheRef.current.clear();
-
-    // Optimistic clear: instant UI, background request, rollback on failure.
-    setModalType('none');
-    setSessions([]);
-    setTypingSessionTitle(null);
-    setSessionIdToDelete(null);
-    setCurrentSessionId(null);
-    persistSessionId(null);
-    setMessages([]);
-    setEditingMessage(null);
-    if (window.location.pathname !== '/') navigate('/', { replace: true });
-
-    toast.success('All chats deleted');
-    void chatApi.clearSessions().catch(err => {
-      console.error('Clear sessions failed:', err);
-      // Nothing was deleted: the chats are valid again.
-      previousSessions.forEach(session => {
-        goneChatsRef.current.ids.delete(session.id);
-        if (session.publicId) goneChatsRef.current.publicIds.delete(session.publicId.toLowerCase());
-      });
-      setSessions(previousSessions);
-      toast.error('Your chats could not be cleared. Please try again.');
-    });
   };
 
   const handleLogout = async () => {
@@ -5361,9 +5188,7 @@ if (isBlankDraft) {
         onDeleteSession={deleteSession}
         onRenameSession={renameSession}
         onShareSession={shareSession}
-        onClearAll={() => setModalType('delete-all')}
         onLogout={handleLogout}
-        onProfile={onProfile}
         onSettings={onSettings}
         onDesktopStateChange={setDesktopSidebarExpanded}
         onDesktopWidthChange={setDesktopSidebarWidth}
@@ -5376,12 +5201,12 @@ if (isBlankDraft) {
       >
         {showFirstWelcome && !chatsView && (
           <>
-            <div className="absolute left-14 top-[max(0.75rem,env(safe-area-inset-top))] z-[9997] flex h-8 max-w-[calc(100%-10rem)] items-center lg:hidden">
+            <div className="absolute left-[46px] top-[max(0.75rem,env(safe-area-inset-top))] z-[9997] flex h-8 max-w-[calc(100%-10rem)] items-center lg:hidden">
               <span className="truncate text-[15px] font-medium text-zinc-800 dark:text-zinc-100">
                 Your first chat with Twinkle
               </span>
             </div>
-          <div className="absolute left-4 top-3 z-[9997] hidden h-9 max-w-[calc(100%-18rem)] items-center lg:flex">
+          <div className={`absolute z-[9997] hidden h-9 max-w-[calc(100%-18rem)] items-center lg:flex ${desktopSidebarExpanded ? 'left-4 top-3' : '-left-1 top-4'}`}>
             <span className="truncate text-[15px] font-medium text-zinc-800 dark:text-zinc-100">
               Your first chat with Twinkle
             </span>
@@ -5395,23 +5220,23 @@ if (isBlankDraft) {
             <>
               <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-[9996] hidden h-16 bg-gradient-to-b from-[var(--bg-main)] via-[var(--bg-main)]/80 to-transparent lg:block" />
               <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-[9996] h-14 bg-gradient-to-b from-[var(--bg-main)] via-[var(--bg-main)]/80 to-transparent lg:hidden" />
-              <div className="absolute left-14 top-[max(0.75rem,env(safe-area-inset-top))] z-[9998] flex h-8 max-w-[calc(100%-10rem)] items-center lg:hidden">
+              <div className="absolute left-[46px] top-[max(0.75rem,env(safe-area-inset-top))] z-[9998] flex h-8 max-w-[calc(100%-10rem)] items-center lg:hidden">
                 <ChatTitleMenu
-                  responding={isTyping && activeResponseSessionRef.current === titledSession.id}
                   sessionId={titledSession.id}
                   title={titledSession.sessionName || 'New Chat'}
                   onRename={renameSession}
                   onShare={shareSession}
+                  onCopy={copyWholeChat}
                   onDelete={deleteSession}
                 />
               </div>
-              <div className="absolute left-4 top-3 z-[9998] hidden max-w-[calc(100%-18rem)] items-center lg:flex">
+              <div className={`absolute z-[9998] hidden h-9 max-w-[calc(100%-18rem)] items-center lg:flex ${desktopSidebarExpanded ? 'left-4 top-3' : '-left-1 top-4'}`}>
                 <ChatTitleMenu
-                  responding={isTyping && activeResponseSessionRef.current === titledSession.id}
                   sessionId={titledSession.id}
                   title={titledSession.sessionName || 'New Chat'}
                   onRename={renameSession}
                   onShare={shareSession}
+                  onCopy={copyWholeChat}
                   onDelete={deleteSession}
                 />
               </div>
@@ -6748,14 +6573,6 @@ if (isBlankDraft) {
         title="Delete chat?"
         confirmText="Delete"
         message={<>This will permanently delete{' '}<strong className="font-semibold text-zinc-700 dark:text-zinc-200">{sessionToDelete?.sessionName || 'this chat'}</strong>. This can’t be undone.</>}
-      />
-      <ConfirmationModal
-        isOpen={modalType === 'delete-all'}
-        onClose={() => setModalType('none')}
-        onConfirm={confirmClearAll}
-        title="Delete all chats?"
-        message={`All ${sessions.length} chats will be permanently deleted. This can’t be undone.`}
-        confirmText="Delete"
       />
     </div>
   );
