@@ -50,7 +50,11 @@ export default function GlobalTooltip() {
       const vh = window.innerHeight;
 
       let side = preferred;
-      if (side === 'top' && r.top - h - GAP < VIEWPORT_PAD) side = 'bottom';
+      // data-tooltip-fixed keeps the requested side even when space is tight.
+      const fixed = target.hasAttribute('data-tooltip-fixed');
+      if (fixed) {
+        // no flipping
+      } else if (side === 'top' && r.top - h - GAP < VIEWPORT_PAD) side = 'bottom';
       else if (side === 'bottom' && r.bottom + h + GAP > vh - VIEWPORT_PAD) side = 'top';
       else if (side === 'left' && r.left - w - GAP < VIEWPORT_PAD) side = 'right';
       else if (side === 'right' && r.right + w + GAP > vw - VIEWPORT_PAD) side = 'left';
