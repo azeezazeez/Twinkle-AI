@@ -9,7 +9,7 @@ const FEATURES = [
 ];
 
 const LINKS = [
-  { icon: Info, label: 'About Twinkle AI', to: '/settings?tab=about' },
+  { icon: Info, label: 'About Twinkle', to: '/settings?tab=about' },
   { icon: Keyboard, label: 'Keyboard shortcuts', to: '/settings?tab=shortcuts' },
   { icon: ShieldCheck, label: 'Data controls', to: '/settings?tab=data' },
 ];
@@ -29,9 +29,9 @@ export default function LearnMore() {
           Back to chat
         </button>
 
-        <h1 className="mt-8 text-[30px] font-semibold tracking-tight">Learn more about Twinkle AI</h1>
+        <h1 className="mt-8 text-[30px] font-semibold tracking-tight">Learn more about Twinkle</h1>
         <p className="mt-3 text-[16px] leading-relaxed text-zinc-600 dark:text-zinc-300">
-          Twinkle AI is a chat assistant for writing, research, coding and everyday questions. Here is a quick tour of what you can do.
+          Twinkle is a chat assistant for writing, research, coding and everyday questions. Here is a quick tour of what you can do.
         </p>
 
         <div className="mt-8 grid gap-3 sm:grid-cols-2">
