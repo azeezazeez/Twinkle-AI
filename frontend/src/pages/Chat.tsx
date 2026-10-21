@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import React from 'react';
-import { useNavigate, useParams } from 'react-router-dom'; 
+import { useLocation, useNavigate, useParams } from 'react-router-dom'; 
 import { createPortal, flushSync } from 'react-dom';   
 import { User, Session, Message } from '../types';
 import Sidebar from '../components/Sidebar';  
@@ -12,7 +12,7 @@ import ConfirmationModal from '../components/ConfirmationModal';
 import ShareChatModal from '../components/ShareChatModal';
 import UploadFilesModal from '../components/UploadFilesModal';
 import UploadedFilesModal from '../components/UploadedFilesModal';
-import LiveTalkModal from '../components/LiveTalkModal';
+import LiveTalkModal, { type LiveWeatherEntry } from '../components/LiveTalkModal';
 import { onShortcut, takePendingShortcut, type ShortcutAction } from '../lib/shortcuts';
 import { getSavedLiveTalkColor } from '../lib/liveTalkColors';
 import { parseServerDate } from '../lib/time';
@@ -31,6 +31,8 @@ import AttachmentTile from '../components/AttachmentTile';
 import FileDocIcon from '../components/FileDocIcon';
 import ChatFilesPanel, { detectFileKind, type ChatFileItem, type ChatOutputItem } from '../components/ChatFilesPanel';
 import WeatherCard from '../components/WeatherCard';
+import PdfCompactPreview from '../components/PdfCompactPreview';
+import ChatsListPage from '../components/ChatsListPage';
 import ChatTitleMenu from '../components/ChatTitleMenu';
 import type { Components } from 'react-markdown'; 
 import remarkGfm from 'remark-gfm';
@@ -1642,7 +1644,10 @@ const getSpeechLanguage = (): string => {
 
 export default function Chat({ user, onLogout, onProfile, onSettings }: Props) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { chatUuid } = useParams<{ chatUuid?: string }>();
+  // "/chats" shows the full "Chats and tasks" page over the chat area.
+  const chatsView = location.pathname === '/chats';
   const creatingNewSessionRef = useRef(false);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [typingSessionTitle, setTypingSessionTitle] = useState<{ id: number; title: string } | null>(null);
@@ -1856,6 +1861,33 @@ ${textToRead}` }] }], turnComplete: true },
 
   // Weather cards, keyed by the assistant message they belong to.
   const [weatherCards, setWeatherCards] = useState<Record<string, WeatherSnapshot>>(() => readWeatherCardStore());
+  // Weather looked up while talking in Live Talk, per chat. It is shown as the same weather card
+  // as in normal chat once the conversation has ended (and re-applied when the saved copy replaces the preview).
+  const liveWeatherRef = useRef<Map<number, LiveWeatherEntry[]>>(new Map());
+  const [liveWeatherVersion, setLiveWeatherVersion] = useState(0);
+  useEffect(() => {
+    if (currentSessionId === null) return;
+    const entries = liveWeatherRef.current.get(currentSessionId);
+    if (!entries || entries.length === 0) return;
+    const assistants = messages.filter(message => message.role === 'assistant');
+    const byIndex = new Map<number, WeatherSnapshot>();
+    entries.forEach(entry => byIndex.set(entry.assistantIndex, entry.snapshot));
+
+    const additions: Array<{ id: string; snapshot: WeatherSnapshot }> = [];
+    byIndex.forEach((snapshot, index) => {
+      const target = assistants[index];
+      if (target && !weatherCards[String(target.id)]) additions.push({ id: String(target.id), snapshot });
+    });
+    if (additions.length === 0) return;
+
+    additions.forEach(item => rememberWeatherCard([item.id], item.snapshot));
+    setWeatherCards(prev => {
+      const next = { ...prev };
+      additions.forEach(item => { next[item.id] = item.snapshot; });
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, currentSessionId, liveWeatherVersion]);
 
   // Search inside the current chat.
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
@@ -3424,6 +3456,8 @@ const chooseModel = useCallback((modelId: string) => {
   // While a deep link is being resolved, do not redirect away from it.
   useEffect(() => {
     if (creatingNewSessionRef.current || loading) return;
+    // The "Chats and tasks" page keeps its own address; do not bounce away from it.
+    if (chatsView) return;
     if (currentSessionId === null) {
       if (!chatUuid && window.location.pathname.startsWith('/chat/')) navigate('/', { replace: true });
       return;
@@ -3433,7 +3467,7 @@ const chooseModel = useCallback((modelId: string) => {
       const expected = `/chat/${active.publicId}`;
       if (window.location.pathname !== expected) navigate(expected);
     }
-  }, [loading, chatUuid, currentSessionId, sessions, navigate]);
+  }, [loading, chatUuid, chatsView, currentSessionId, sessions, navigate]);
 
 
   // Restore the last conversation after a browser refresh. If it was deleted
@@ -4813,7 +4847,7 @@ if (isBlankDraft) {
       persistSessionId(null);
       setMessages([]);
       setEditingMessage(null);
-      if (window.location.pathname !== '/') navigate('/', { replace: true });
+      if (window.location.pathname !== '/' && window.location.pathname !== '/chats') navigate('/', { replace: true });
     }
 
     void chatApi.deleteSession(deletedSessionId).catch(err => {
@@ -5046,9 +5080,14 @@ if (isBlankDraft) {
     publicId?: string;
     sessionName?: string;
     turns: Array<{ role: 'user' | 'assistant'; content: string }>;
+    weather?: LiveWeatherEntry[];
   }) => {
     const turns = info.turns.filter(turn => turn.content.trim());
     if (turns.length === 0) return;
+    if (info.sessionId && info.weather && info.weather.length > 0) {
+      liveWeatherRef.current.set(info.sessionId, info.weather);
+      setLiveWeatherVersion(version => version + 1);
+    }
 
     const stamp = Date.now();
     const now = new Date().toISOString();
@@ -5090,8 +5129,12 @@ if (isBlankDraft) {
     })));
   }, [user.id, navigate]);
 
-  const handleLiveSessionComplete = useCallback(async (sessionId: number, sessionName?: string, publicIdFromLive?: string) => {
+  const handleLiveSessionComplete = useCallback(async (sessionId: number, sessionName?: string, publicIdFromLive?: string, weather?: LiveWeatherEntry[]) => {
     if (!Number.isFinite(sessionId)) return;
+    if (weather && weather.length > 0) {
+      liveWeatherRef.current.set(sessionId, weather);
+      setLiveWeatherVersion(version => version + 1);
+    }
 
     // Hold the URL/session effects for a moment so they cannot snap back to the
     // chat that was open before Live Talk started (e.g. /chat/<old-uuid>).
@@ -5174,6 +5217,41 @@ if (isBlankDraft) {
     }
   }, [user.id, sessions, navigate, loadMessages]);
 
+  // Leaves the "Chats and tasks" page and shows the chosen chat at its own address.
+  const openChatFromList = (id: number) => {
+    if (window.location.pathname !== '/chats') return;
+    const target = sessions.find(session => session.id === id);
+    navigate(target?.publicId ? `/chat/${target.publicId}` : '/', { replace: false });
+  };
+
+  // Deletes several chats at once (used by Select on the "Chats and tasks" page).
+  const deleteManySessions = (ids: number[]) => {
+    const unique = Array.from(new Set(ids)).filter(id => Number.isFinite(id) && id > 0);
+    if (unique.length === 0) return;
+    const removed = sessions.filter(session => unique.includes(session.id));
+    markChatsGone(removed.map(session => ({ id: session.id, publicId: session.publicId })));
+    unique.forEach(id => messageCacheRef.current.delete(id));
+    setSessions(prev => prev.filter(session => !unique.includes(session.id)));
+    setTypingSessionTitle(current => (current && unique.includes(current.id) ? null : current));
+    toast.success(unique.length === 1 ? 'Chat deleted' : `${unique.length} chats deleted`);
+    if (currentSessionId !== null && unique.includes(currentSessionId)) {
+      setCurrentSessionId(null);
+      persistSessionId(null);
+      setMessages([]);
+      setEditingMessage(null);
+    }
+    unique.forEach(id => {
+      void chatApi.deleteSession(id).catch(err => {
+        console.error('Delete session failed:', err);
+        goneChatsRef.current.ids.delete(id);
+        const original = removed.find(session => session.id === id);
+        if (original?.publicId) goneChatsRef.current.publicIds.delete(original.publicId.toLowerCase());
+        if (original) setSessions(prev => (prev.some(session => session.id === id) ? prev : [original, ...prev]));
+        toast.error('A chat could not be deleted. Please try again.');
+      });
+    });
+  };
+
   // Render the chat shell immediately; avoid a separate full-screen loading animation.
 
   return (
@@ -5192,6 +5270,7 @@ if (isBlankDraft) {
           setCurrentSessionId(id);
           persistSessionId(id);
           setMobileOpen(false);
+          openChatFromList(id);
         }}
         onNewSession={() => {
           createNewSession();
@@ -5213,7 +5292,7 @@ if (isBlankDraft) {
         className="relative ml-0 flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent transition-[margin] duration-300 ease-out lg:ml-[var(--desktop-sidebar-offset)]"
         style={{ '--desktop-sidebar-offset': `${desktopSidebarExpanded ? desktopSidebarWidth : 52}px` } as React.CSSProperties}
       >
-        {showFirstWelcome && (
+        {showFirstWelcome && !chatsView && (
           <div className="absolute left-4 top-3 z-[9997] hidden h-9 max-w-[calc(100%-18rem)] items-center lg:flex">
             <span className="truncate text-[15px] font-medium text-zinc-800 dark:text-zinc-100">
               Your first chat with Twinkle
@@ -5222,7 +5301,7 @@ if (isBlankDraft) {
         )}
         {(() => {
           const titledSession = currentSessionId === null ? null : sessions.find(item => item.id === currentSessionId) ?? null;
-          if (!titledSession) return null;
+          if (!titledSession || chatsView) return null;
           return (
             <>
               <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-[9996] hidden h-16 bg-gradient-to-b from-[var(--bg-main)] via-[var(--bg-main)]/80 to-transparent lg:block" />
@@ -5238,7 +5317,7 @@ if (isBlankDraft) {
             </>
           );
         })()}
-        <div className="absolute right-[max(1rem,env(safe-area-inset-right))] top-[max(0.75rem,env(safe-area-inset-top))] z-[9997] flex items-center gap-2">
+        <div className={`absolute right-[max(1rem,env(safe-area-inset-right))] top-[max(0.75rem,env(safe-area-inset-top))] z-[9997] items-center gap-2 ${chatsView ? 'hidden' : 'flex'}`}>
           {chatFiles.length + chatOutputs.length > 0 && (
             <button
               type="button"
@@ -5284,7 +5363,21 @@ if (isBlankDraft) {
           renderPdfPreview={(src, name) => <PdfPreview src={src} fileName={name} />}
           readDocxText={extractDocxText}
         />
-        {chatSearchOpen && (
+        {chatsView && (
+          <ChatsListPage
+            sessions={sidebarSessions}
+            onOpenSession={(id) => {
+              setCurrentSessionId(id);
+              persistSessionId(id);
+              openChatFromList(id);
+            }}
+            onNewChat={() => { createNewSession(); setMobileOpen(false); }}
+            onDeleteSession={deleteSession}
+            onDeleteMany={deleteManySessions}
+            onRenameSession={renameSession}
+          />
+        )}
+        {chatSearchOpen && !chatsView && (
           <div role="search" className="absolute right-4 top-14 z-[9997] flex w-[min(380px,calc(100vw-32px))] items-center gap-1.5 rounded-xl border border-zinc-300/70 bg-white p-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.12)] dark:border-white/15 dark:bg-[#30302E]">
             <SearchIcon className="ml-2 h-4 w-4 shrink-0 text-zinc-400" strokeWidth={1.9} />
             <input
@@ -5471,6 +5564,7 @@ if (isBlankDraft) {
                                     name={attachmentName}
                                     badge={badge}
                                     imageSrc={isImage ? url : null}
+                                    pdfSrc={isPdf ? url : null}
                                     title="Open attachment preview"
                                     onClick={() => void openPersistedAttachmentPreview(url, i)}
                                   />
@@ -6362,6 +6456,26 @@ if (isBlankDraft) {
                     </button>
                   </div>
                 </motion.div>
+              </motion.div>
+            );
+          }
+
+          // PDFs use the compact dialog: first-page thumbnail, page count, hover to download.
+          if (isPdfPreview) {
+            return (
+              <motion.div
+                key="twinkle-file-preview"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                className="fixed inset-0 z-[12000] flex items-center justify-center bg-black/50 p-4"
+                onMouseDown={(e) => { if (e.target === e.currentTarget) closeFilePreview(); }}
+                role="dialog"
+                aria-modal="true"
+                aria-label={previewFile.name}
+              >
+                <PdfCompactPreview src={previewUrl} fileName={previewFile.name} onClose={closeFilePreview} />
               </motion.div>
             );
           }
