@@ -2,23 +2,14 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import { createPortal } from 'react-dom';
 import { ChevronDown, Eye, EyeOff, Pencil, PinOff, Trash2, Upload } from 'lucide-react';
 import FileDocIcon from './FileDocIcon';
+import BottomSheet, { RenameSheet, SheetItem, SheetDivider } from './BottomSheet';
+import { useIsMobile } from '../lib/mobileUi';
+import { loadUnreadIds, setChatUnread, UNREAD_CHANGED_EVENT } from '../lib/unread';
 import { motion } from 'motion/react';
 
 // Same storage the sidebar uses, so pinning here and there stays in sync.
 const PINNED_KEY = 'Twinkle_pinned_sessions';
 const PINNED_CHANGED_EVENT = 'twinkle:pinned-sessions-changed';
-const UNREAD_KEY = 'Twinkle_unread_sessions';
-const UNREAD_CHANGED_EVENT = 'twinkle:unread-sessions-changed';
-const loadUnread = (): number[] => {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(UNREAD_KEY) || '[]');
-    return Array.isArray(parsed) ? parsed.map(Number).filter(Number.isFinite) : [];
-  } catch { return []; }
-};
-const saveUnread = (ids: number[]) => {
-  try { localStorage.setItem(UNREAD_KEY, JSON.stringify(ids)); } catch { /* storage unavailable */ }
-  window.dispatchEvent(new Event(UNREAD_CHANGED_EVENT));
-};
 const TOP_LAYER = 2147483647;
 
 // Same surface as the sidebar's chat options menu, so both popups match.
@@ -104,10 +95,10 @@ export default function ChatTitleMenu({ sessionId, title, responding = false, on
   const [draft, setDraft] = useState('');
 
   const isPinned = pinned.includes(sessionId);
-  const [unread, setUnread] = useState<number[]>(loadUnread);
+  const [unread, setUnread] = useState<number[]>(loadUnreadIds);
   const isUnread = unread.includes(sessionId);
   useEffect(() => {
-    const sync = () => setUnread(loadUnread());
+    const sync = () => setUnread(loadUnreadIds());
     window.addEventListener(UNREAD_CHANGED_EVENT, sync);
     window.addEventListener('storage', sync);
     return () => {
@@ -116,17 +107,8 @@ export default function ChatTitleMenu({ sessionId, title, responding = false, on
     };
   }, []);
 
-  // Phones/tablets (below the lg breakpoint) get a bottom sheet instead of a popover.
-  const [isMobile, setIsMobile] = useState(() =>
-    typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 1023px)').matches);
-  useEffect(() => {
-    if (typeof window.matchMedia !== 'function') return;
-    const mq = window.matchMedia('(max-width: 1023px)');
-    const onChange = () => setIsMobile(mq.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
-
+  // Phones/tablets (below the lg breakpoint) get bottom sheets instead of popovers.
+  const isMobile = useIsMobile();
   useEffect(() => {
     const sync = () => setPinned(loadPinned());
     window.addEventListener(PINNED_CHANGED_EVENT, sync);
@@ -188,9 +170,8 @@ export default function ChatTitleMenu({ sessionId, title, responding = false, on
   };
 
   const toggleUnread = () => {
-    const next = isUnread ? unread.filter(id => id !== sessionId) : [...unread, sessionId];
-    setUnread(next);
-    saveUnread(next);
+    setChatUnread(sessionId, !isUnread);
+    setUnread(loadUnreadIds());
     closeMenu();
   };
 
@@ -230,11 +211,13 @@ export default function ChatTitleMenu({ sessionId, title, responding = false, on
   useEffect(() => {
     if (!menuOpen) return;
     const onPointerDown = (event: PointerEvent) => {
+      if (isMobile) return; // the sheet closes itself (backdrop / Back / Esc)
       const target = event.target as Node;
       if (menuRef.current?.contains(target) || wrapRef.current?.contains(target)) return;
       setMenuOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
+      if (isMobile) return; // the sheet handles Escape and focus itself
       if (event.key === 'Escape') { event.preventDefault(); setMenuOpen(false); return; }
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       const key = event.key.toLowerCase();
@@ -254,7 +237,7 @@ export default function ChatTitleMenu({ sessionId, title, responding = false, on
     };
   }, [menuOpen, isMobile]);
 
-  if (renaming) {
+  if (renaming && !isMobile) {
     return (
       <input
         ref={inputRef}
@@ -337,43 +320,33 @@ export default function ChatTitleMenu({ sessionId, title, responding = false, on
         document.body
       )}
 
-      {menuOpen && isMobile && createPortal(
-        <div className="fixed inset-0" style={{ zIndex: TOP_LAYER }}>
-          <motion.div
-            className="absolute inset-0 bg-black/50"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.2 }}
-            onClick={closeMenu}
+      <BottomSheet open={menuOpen && isMobile} onClose={closeMenu} label="Chat options">
+        <div role="menu" aria-label="Chat options">
+          <SheetItem
+            icon={isPinned ? <PinOff className="h-5 w-5" strokeWidth={1.7} /> : <SidebarPinIcon className="h-5 w-5" />}
+            label={isPinned ? 'Unpin' : 'Pin'}
+            onClick={togglePin}
           />
-          <motion.div
-            ref={menuRef}
-            role="menu"
-            aria-label="Chat options"
-            initial={{ y: '100%' }}
-            animate={{ y: 0 }}
-            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-            drag="y"
-            dragConstraints={{ top: 0, bottom: 0 }}
-            dragElastic={{ top: 0, bottom: 0.6 }}
-            onDragEnd={(_, info) => { if (info.offset.y > 80 || info.velocity.y > 500) closeMenu(); }}
-            className="absolute inset-x-0 bottom-0 rounded-t-[24px] bg-white px-4 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-[0_-8px_30px_rgba(0,0,0,0.18)] dark:bg-zinc-900"
-          >
-            <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-zinc-300 dark:bg-zinc-600" aria-hidden="true" />
-            <Item large
-              icon={isPinned ? <PinOff className="h-5 w-5" strokeWidth={1.7} /> : <SidebarPinIcon className="h-5 w-5" />}
-              label={isPinned ? 'Unpin' : 'Pin'}
-              onClick={togglePin}
-            />
-            <Item large icon={isUnread ? <Eye className="h-5 w-5" strokeWidth={1.7} /> : <EyeOff className="h-5 w-5" strokeWidth={1.7} />} label={isUnread ? 'Mark as read' : 'Mark as unread'} onClick={toggleUnread} />
-            <Item large icon={<Pencil className="h-5 w-5" strokeWidth={1.7} />} label="Rename" onClick={startRename} />
-            <Item large icon={<Upload className="h-5 w-5" strokeWidth={1.7} />} label="Share chat" onClick={handleShare} />
-            <div role="separator" className="mx-2 my-1 h-px bg-zinc-200 dark:bg-zinc-700/70" />
-            <Item large icon={<Trash2 className="h-5 w-5" strokeWidth={1.7} />} label="Delete" danger onClick={handleDelete} />
-          </motion.div>
-        </div>,
-        document.body
-      )}
+          <SheetItem
+            icon={isUnread ? <Eye className="h-5 w-5" strokeWidth={1.7} /> : <EyeOff className="h-5 w-5" strokeWidth={1.7} />}
+            label={isUnread ? 'Mark as read' : 'Mark as unread'}
+            onClick={toggleUnread}
+          />
+          <SheetItem icon={<Pencil className="h-5 w-5" strokeWidth={1.7} />} label="Rename" onClick={startRename} />
+          <SheetItem icon={<Upload className="h-5 w-5" strokeWidth={1.7} />} label="Share chat" onClick={handleShare} />
+          <SheetDivider />
+          <SheetItem icon={<Trash2 className="h-5 w-5" strokeWidth={1.7} />} label="Delete" danger onClick={handleDelete} />
+        </div>
+      </BottomSheet>
+
+      {/* Mobile rename: a sheet that sits above the keyboard. */}
+      <RenameSheet
+        open={renaming && isMobile}
+        value={draft}
+        onChange={setDraft}
+        onSubmit={commitRename}
+        onCancel={() => setRenaming(false)}
+      />
 
       {menuOpen && !isMobile && menuPos && createPortal(
         <motion.div
