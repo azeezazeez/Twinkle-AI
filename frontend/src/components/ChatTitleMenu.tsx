@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Eye, EyeOff, Pencil, PinOff, Trash2, Upload } from 'lucide-react';
-import FileDocIcon from './FileDocIcon';
 import BottomSheet, { RenameSheet, SheetItem, SheetDivider } from './BottomSheet';
 import { useIsMobile } from '../lib/mobileUi';
 import { loadUnreadIds, setChatUnread, UNREAD_CHANGED_EVENT } from '../lib/unread';
@@ -69,7 +68,7 @@ function Item({
 interface Props {
   sessionId: number;
   title: string;
-  /** True while the assistant is still producing a reply in this chat. */
+  /** Kept for compatibility; the status indicator now lives in the sidebar row. */
   responding?: boolean;
   onRename: (id: number, name: string) => void;
   onShare: (id: number) => void;
@@ -80,7 +79,7 @@ interface Props {
  * Chat name shown at the top-left of the chat area. A down arrow opens the
  * chat options (pin, rename, share, delete); hovering shows a tooltip.
  */
-export default function ChatTitleMenu({ sessionId, title, responding = false, onRename, onShare, onDelete }: Props) {
+export default function ChatTitleMenu({ sessionId, title, onRename, onShare, onDelete }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const arrowRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -276,21 +275,6 @@ export default function ChatTitleMenu({ sessionId, title, responding = false, on
         >
           <span className="min-w-0 truncate text-[15px] font-normal text-zinc-900 dark:text-zinc-100">{title}</span>
         </button>
-
-        {/* Status: brand-colour dot while replying or when marked unread, otherwise the file icon. */}
-        <span
-          data-tooltip={responding ? 'Responding…' : isUnread ? 'Unread' : 'Chat ready'}
-          data-tooltip-side="bottom"
-          role="img"
-          aria-label={responding ? 'Responding' : isUnread ? 'Unread' : 'Chat ready'}
-          className="flex h-9 shrink-0 items-center px-1.5"
-        >
-          {responding || isUnread ? (
-            <span className={`h-2 w-2 rounded-full bg-[var(--brand-primary)] ${responding ? 'animate-pulse' : ''}`} />
-          ) : (
-            <FileDocIcon className="h-4 w-4 text-zinc-500 dark:text-zinc-400" strokeWidth={1.8} />
-          )}
-        </span>
 
         {/* Only the arrow opens the options menu and shows the tooltip. */}
         <button
