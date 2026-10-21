@@ -115,7 +115,7 @@ function GlobalShortcuts() {
       }
 
       const path = pathRef.current;
-      const onChat = path === '/' || path.startsWith('/chat/');
+      const onChat = path === '/' || path === '/chats' || path.startsWith('/chat/');
       if (onChat) {
         dispatchShortcut(action);
         return;
@@ -400,6 +400,18 @@ function AuthenticatedApp({
 
       <Route
         path="/chat/:chatUuid"
+        element={
+          user ? (
+            <ChatRoute user={user} onLogout={handleLogout} />
+          ) : (
+            <Navigate to="/login" replace />
+          )
+        }
+      />
+
+      {/* "Chats and tasks": full list of chats, opened from the sidebar arrow. */}
+      <Route
+        path="/chats"
         element={
           user ? (
             <ChatRoute user={user} onLogout={handleLogout} />
