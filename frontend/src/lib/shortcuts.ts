@@ -71,7 +71,7 @@ export const shortcutGroups = (mod: string): Array<{ heading: string; items: Sho
     items: [
       { title: 'Search chats', desc: 'Open chat search from anywhere.', keys: [mod, 'K'] },
       { title: 'New chat', desc: 'Start a fresh conversation.', keys: [mod, 'Shift', 'O'] },
-      { title: 'Toggle sidebar', desc: 'Collapse or expand the chat list.', keys: [mod, 'B'] },
+      { title: 'Toggle sidebar', desc: 'Collapse or expand the chat list. Ctrl/⌘ + B also works.', keys: [mod, '.'] },
       { title: 'Open settings', desc: 'Jump straight to Settings.', keys: [mod, 'Shift', ','] },
       { title: 'Show shortcuts', desc: 'Open this list.', keys: [mod, '/'] },
     ],
@@ -89,9 +89,18 @@ export const shortcutGroups = (mod: string): Array<{ heading: string; items: Sho
     heading: 'Chat list menu',
     items: [
       { title: 'Pin / unpin chat', desc: 'With a chat’s ⋮ menu open.', keys: ['P'] },
-      { title: 'Mark unread', desc: 'With a chat’s ⋮ menu open.', keys: ['U'] },
+      { title: 'Mark read / unread', desc: 'With a chat’s ⋮ menu (or the chat name menu) open.', keys: ['U'] },
       { title: 'Rename chat', desc: 'With a chat’s ⋮ menu open.', keys: ['R'] },
       { title: 'Delete chat', desc: 'With a chat’s ⋮ menu open.', keys: ['D'] },
+    ],
+  },
+  {
+    heading: 'Touch gestures',
+    items: [
+      { title: 'Open sidebar', desc: 'Swipe right from the left edge of the screen.', keys: ['Swipe →'] },
+      { title: 'Close sidebar', desc: 'Swipe left on the sidebar, or press Back.', keys: ['Swipe ←'] },
+      { title: 'Chat options', desc: 'Touch and hold a chat in the list.', keys: ['Long-press'] },
+      { title: 'Close a sheet', desc: 'Drag its handle down, tap outside, or press Back.', keys: ['Drag ↓'] },
     ],
   },
   {
