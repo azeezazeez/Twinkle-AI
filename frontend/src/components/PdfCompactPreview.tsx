@@ -78,14 +78,12 @@ export default function PdfCompactPreview({ src, fileName, onClose }: Props) {
             )}
           </span>
 
-          <span className="relative flex h-6 items-center justify-center text-[15px]">
-            <span className="text-zinc-700 transition-opacity group-hover/pdf:opacity-0 group-focus-visible/pdf:opacity-0 dark:text-zinc-300">
-              {failed ? 'PDF' : pagesLabel}
-            </span>
-            <span className="absolute inset-0 flex items-center justify-center gap-1.5 whitespace-nowrap font-medium text-[#2F6FDE] opacity-0 transition-opacity group-hover/pdf:opacity-100 group-focus-visible/pdf:opacity-100 dark:text-[#6BA2F5]">
-              <CircleArrowDown className="h-[15px] w-[15px]" strokeWidth={1.8} />
-              Download
-            </span>
+          <span
+            className="flex h-6 items-center justify-center gap-1.5 whitespace-nowrap text-[15px] font-medium text-[#2F6FDE] dark:text-[#6BA2F5]"
+            title={failed || !pagesLabel ? undefined : pagesLabel}
+          >
+            <CircleArrowDown className="h-[17px] w-[17px]" strokeWidth={1.8} aria-hidden="true" />
+            Download
           </span>
         </a>
       </div>
