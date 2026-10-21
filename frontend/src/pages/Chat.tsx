@@ -5427,11 +5427,18 @@ if (isBlankDraft) {
         style={{ '--desktop-sidebar-offset': `${desktopSidebarExpanded ? desktopSidebarWidth : 52}px` } as React.CSSProperties}
       >
         {showFirstWelcome && !chatsView && (
+          <>
+            <div className="absolute left-14 top-[max(0.75rem,env(safe-area-inset-top))] z-[9997] flex h-8 max-w-[calc(100%-10rem)] items-center lg:hidden">
+              <span className="truncate text-[15px] font-medium text-zinc-800 dark:text-zinc-100">
+                Your first chat with Twinkle
+              </span>
+            </div>
           <div className="absolute left-4 top-3 z-[9997] hidden h-9 max-w-[calc(100%-18rem)] items-center lg:flex">
             <span className="truncate text-[15px] font-medium text-zinc-800 dark:text-zinc-100">
               Your first chat with Twinkle
             </span>
           </div>
+          </>
         )}
         {(() => {
           const titledSession = currentSessionId === null ? null : sessions.find(item => item.id === currentSessionId) ?? null;
@@ -5439,8 +5446,20 @@ if (isBlankDraft) {
           return (
             <>
               <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-[9996] hidden h-16 bg-gradient-to-b from-[var(--bg-main)] via-[var(--bg-main)]/80 to-transparent lg:block" />
+              <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-[9996] h-14 bg-gradient-to-b from-[var(--bg-main)] via-[var(--bg-main)]/80 to-transparent lg:hidden" />
+              <div className="absolute left-14 top-[max(0.75rem,env(safe-area-inset-top))] z-[9998] flex h-8 max-w-[calc(100%-10rem)] items-center lg:hidden">
+                <ChatTitleMenu
+                  responding={isTyping && activeResponseSessionRef.current === titledSession.id}
+                  sessionId={titledSession.id}
+                  title={titledSession.sessionName || 'New Chat'}
+                  onRename={renameSession}
+                  onShare={shareSession}
+                  onDelete={deleteSession}
+                />
+              </div>
               <div className="absolute left-4 top-3 z-[9998] hidden max-w-[calc(100%-18rem)] items-center lg:flex">
                 <ChatTitleMenu
+                  responding={isTyping && activeResponseSessionRef.current === titledSession.id}
                   sessionId={titledSession.id}
                   title={titledSession.sessionName || 'New Chat'}
                   onRename={renameSession}
@@ -5458,7 +5477,8 @@ if (isBlankDraft) {
               onClick={() => setFilesPanelOpen(open => !open)}
               aria-label="Files in this chat"
               aria-expanded={filesPanelOpen}
-              title="Files in this chat"
+              data-tooltip="Files in this chat"
+              data-tooltip-side="bottom"
               className="relative inline-flex h-10 w-10 shrink-0 touch-manipulation items-center justify-center rounded-lg border border-zinc-300/70 bg-white text-zinc-700 transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 sm:h-9 sm:w-9 dark:border-white/15 dark:bg-[#30302E] dark:text-zinc-200 dark:hover:bg-[#3A3A38]"
             >
               <FileDocIcon className="h-[22px] w-[22px] sm:h-5 sm:w-5" strokeWidth={1.8} />
@@ -5542,17 +5562,18 @@ if (isBlankDraft) {
           onClick={(event) => { event.currentTarget.blur(); setMobileOpen(true); }}
           aria-label="Open sidebar"
           data-tooltip="Open sidebar"
+          data-tooltip-shortcut={/mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent) ? '⌘.' : 'Ctrl+.'}
           data-tooltip-side="right"
           inert={mobileOpen}
           tabIndex={mobileOpen ? -1 : 0}
-          className={`lg:hidden absolute left-2 top-[max(0.5rem,env(safe-area-inset-top))] z-[9997] flex h-10 w-10 items-center justify-center rounded-xl text-zinc-700 transition-all duration-200 hover:bg-zinc-200/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 dark:text-zinc-200 dark:hover:bg-zinc-800 ${
+          className={`lg:hidden absolute left-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[9997] flex h-8 w-8 items-center justify-center rounded-lg text-zinc-700 transition-all duration-200 hover:bg-zinc-200/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/50 dark:text-zinc-200 dark:hover:bg-zinc-800 ${
             mobileOpen ? 'pointer-events-none opacity-0' : 'opacity-100'
           }`}
         >
           <span className="sr-only">Open sidebar</span>
           <svg
-            width="23"
-            height="20"
+            width="20"
+            height="17"
             viewBox="0 0 24 20"
             fill="none"
             aria-hidden="true"
