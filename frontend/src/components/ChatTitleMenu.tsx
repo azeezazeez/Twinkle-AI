@@ -173,11 +173,12 @@ export default function ChatTitleMenu({ sessionId, title, responding = false, on
 
   // Keep the menu inside the viewport once its size is known.
   useLayoutEffect(() => {
-    if (!menuOpen || !menuRef.current || !menuPos) return;
+    if (isMobile || !menuOpen || !menuRef.current || !menuPos) return;
     const width = menuRef.current.offsetWidth;
     const maxLeft = window.innerWidth - width - 8;
-    if (menuPos.left > maxLeft) setMenuPos({ ...menuPos, left: Math.max(8, maxLeft) });
-  }, [menuOpen, menuPos]);
+    const nextLeft = Math.max(8, maxLeft);
+    if (menuPos.left > nextLeft) setMenuPos({ ...menuPos, left: nextLeft });
+  }, [menuOpen, menuPos, isMobile]);
 
   const togglePin = () => {
     const next = isPinned ? pinned.filter(id => id !== sessionId) : [...pinned, sessionId];
@@ -283,8 +284,8 @@ export default function ChatTitleMenu({ sessionId, title, responding = false, on
         {/* Clicking the name itself starts renaming. */}
         <button
           type="button"
-          onClick={startRename}
-          aria-label={`Rename ${title}`}
+          onClick={() => (isMobile ? (menuOpen ? closeMenu() : openMenu()) : startRename())}
+          aria-label={isMobile ? `Chat options for ${title}` : `Rename ${title}`}
           data-tooltip="Rename chat"
           data-tooltip-shortcut="R"
           data-tooltip-side="bottom"
