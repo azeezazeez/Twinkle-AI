@@ -37,7 +37,6 @@ const SharedChat = lazy(() => import('./pages/SharedChat'));
 const KnowledgeBase = lazy(() => import('./pages/KnowledgeBase'));
 const LearnMore = lazy(() => import('./pages/LearnMore'));
 
-import StormLogo from './components/StormLogo';
 import Toaster from './components/Toaster';
 import { toast } from './lib/toast';
 
@@ -65,9 +64,6 @@ function ChatRoute({
     <Chat
       user={user}
       onLogout={onLogout}
-      onProfile={() =>
-        navigate('/profile')
-      }
       onSettings={() =>
         navigate('/settings')
       }
