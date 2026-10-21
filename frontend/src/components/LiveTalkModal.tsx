@@ -226,7 +226,7 @@ const buildSystemInstruction = (language: AppLanguage, toolsLevel: number): stri
       '- get_current_datetime: ANY question about the time, date, day, month or year (the clock line below can be out of date in a long conversation). For the time in another city or country, pass it as `place`.\n' +
       '- get_exchange_rate: currency conversion and exchange rates.\n' +
       '- search_web: any factual question about people, places, companies, events, science, sports or history that you are not completely sure about or that may have changed recently.\n' +
-      '- search_knowledge_base: questions about the user\'s own uploaded documents, files, notes or knowledge base.\n' +
+      '- search_knowledge_base: questions about the user\'s own uploaded documents, files, notes or library.\n' +
       (toolsLevel >= 2
         ? '- Google Search: current events, news, sports scores, prices, schedules, and any fact that may have changed recently or that you are not sure about.\n'
         : '') +
