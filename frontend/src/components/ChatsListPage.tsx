@@ -700,7 +700,7 @@ export default function ChatsListPage({ sessions, onOpenSession, onNewChat, onDe
                     }
                   }}
                   onMouseEnter={() => window.dispatchEvent(new CustomEvent('twinkle-prefetch-session', { detail: session.id }))}
-                  className={`flex min-h-[64px] w-full cursor-pointer items-center gap-4 rounded-2xl px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/60 ${
+                  className={`flex min-h-[64px] w-full cursor-pointer items-center gap-4 rounded-2xl px-4 py-3 text-left transition-colors active:!transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/60 ${
                     isMenuOpen || isChecked ? 'bg-zinc-100 dark:bg-white/[0.06]' : 'hover:bg-zinc-100 dark:hover:bg-white/[0.06]'
                   }`}
                 >
@@ -761,6 +761,8 @@ export default function ChatsListPage({ sessions, onOpenSession, onNewChat, onDe
                         <button
                           type="button"
                           data-chats-menu-trigger
+                          onPointerDown={event => event.stopPropagation()}
+                          onMouseDown={event => event.stopPropagation()}
                           onClick={event => {
                             event.stopPropagation();
                             if (isMenuOpen) { setMenu(null); return; }
