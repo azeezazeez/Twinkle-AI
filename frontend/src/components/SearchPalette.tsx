@@ -1,3 +1,4 @@
+import { numberDuplicateNames } from '../lib/docNames';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
@@ -127,11 +128,12 @@ export default function SearchPalette({
       try {
         const data = await fetchWithAuth('/api/rag/documents');
         if (cancelled || !Array.isArray(data)) return;
-        setDocs(
-          (data as any[])
-            .map(item => ({ id: Number(item?.id), name: String(item?.name ?? '') }))
-            .filter(item => Number.isFinite(item.id) && item.name),
-        );
+        // The same file can be stored more than once; number the copies 1, 2, 3.
+        const cleaned = (data as any[])
+          .map(item => ({ id: Number(item?.id), name: String(item?.name ?? '') }))
+          .filter(item => Number.isFinite(item.id) && item.name);
+        const numbered = numberDuplicateNames(cleaned);
+        setDocs(cleaned.map(item => ({ ...item, name: numbered.get(item.id) ?? item.name })));
       } catch {
         if (!cancelled) setDocs([]);
       }
