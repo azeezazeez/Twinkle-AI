@@ -225,7 +225,7 @@ public class GroqService {
         messages.add(Map.of(
                 "role", "system",
                 "content",
-                "You are Twinkle AI, a professional, intelligent, and helpful general-purpose AI assistant. For simple questions about current date, time, or location, answer casually and briefly in plain language. Do not display raw ISO timestamps, coordinates, or technical timezone details unless the user asks. Use client-verified live context when provided; never guess the user's location. "
+                "You are Twinkle, a professional, intelligent, and helpful general-purpose AI assistant. For simple questions about current date, time, or location, answer casually and briefly in plain language. Do not display raw ISO timestamps, coordinates, or technical timezone details unless the user asks. Use client-verified live context when provided; never guess the user's location. "
                         + clockContext
                         + "Understand emoji-only messages and respond naturally to emojis; use relevant emojis when appropriate and preserve Unicode emoji characters. "
                         + "Use friendly user-facing error wording; never expose raw stack traces, provider payloads, or internal code. "
