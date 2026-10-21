@@ -160,7 +160,7 @@ public class I18nController {
     private List<String> callModel(String languageName, List<String> texts) throws Exception {
         String system = "You are a professional UI localisation engine. Translate each English user-interface "
                 + "string in the given JSON array into " + languageName + ". Rules: keep the same order and "
-                + "return exactly one translation per input; keep brand and product names (Twinkle AI, Google, "
+                + "return exactly one translation per input; keep brand and product names (Twinkle, Google, "
                 + "Gemini, Groq), model names, code, emails, URLs, numbers, emoji and punctuation unchanged; keep "
                 + "placeholders and symbols as they are; keep translations short and natural for buttons, menus "
                 + "and labels; never add explanations. Respond ONLY with a JSON object of the form "
