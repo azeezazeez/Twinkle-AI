@@ -1,6 +1,7 @@
 package com.ai.chatbot_backend.controller;
 
 import com.ai.chatbot_backend.exception.AIServiceException;
+import com.ai.chatbot_backend.exception.ShareAccessException;
 
 import com.ai.chatbot_backend.dto.ChatMessage;
 import com.ai.chatbot_backend.dto.ChatRequest;
@@ -1848,6 +1849,103 @@ public class ChatController {
         }
     }
 
+    // =========================================================
+    // SHARE POPUP: access mode + invited people
+    // =========================================================
+
+    private Map<String, Object> sharingBody(ChatShareService.SharingState state) {
+        List<Map<String, Object>> invites = new ArrayList<>();
+        state.invites().forEach(invite -> {
+            Map<String, Object> item = new HashMap<>();
+            item.put("id", invite.getId());
+            item.put("email", invite.getEmail());
+            item.put("createdAt", invite.getCreatedAt() == null ? null : invite.getCreatedAt().toString());
+            invites.add(item);
+        });
+        Map<String, Object> body = new HashMap<>();
+        body.put("success", true);
+        body.put("accessMode", state.accessMode());
+        body.put("shareToken", state.shareToken());
+        body.put("invites", invites);
+        return body;
+    }
+
+    private ResponseEntity<Map<String, Object>> sharingCall(
+            HttpSession session,
+            java.util.function.Function<User, ChatShareService.SharingState> action,
+            String failureMessage
+    ) {
+        User currentUser = getCurrentUser(session);
+        if (currentUser == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "User not logged in"));
+        }
+        try {
+            return ResponseEntity.ok(sharingBody(action.apply(currentUser)));
+        } catch (AIServiceException e) {
+            Map<String, Object> body = new HashMap<>();
+            body.put("success", false);
+            body.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
+        } catch (Exception e) {
+            log.error("{}: {}", failureMessage, e.getMessage(), e);
+            Map<String, Object> body = new HashMap<>();
+            body.put("success", false);
+            body.put("error", failureMessage);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body);
+        }
+    }
+
+    @GetMapping("/session/{sessionId}/sharing")
+    public ResponseEntity<Map<String, Object>> getSessionSharing(
+            @PathVariable Long sessionId,
+            HttpSession session
+    ) {
+        return sharingCall(session, user -> chatShareService.getSharing(sessionId, user), "Could not load sharing settings");
+    }
+
+    @PostMapping("/session/{sessionId}/sharing/link")
+    public ResponseEntity<Map<String, Object>> createSessionShareLink(
+            @PathVariable Long sessionId,
+            HttpSession session
+    ) {
+        return sharingCall(session, user -> chatShareService.createLink(sessionId, user), "Could not create the link");
+    }
+
+    @PutMapping("/session/{sessionId}/sharing/access")
+    public ResponseEntity<Map<String, Object>> setSessionShareAccess(
+            @PathVariable Long sessionId,
+            @RequestBody Map<String, Object> request,
+            HttpSession session
+    ) {
+        Object mode = request == null ? null : request.get("accessMode");
+        return sharingCall(session,
+                user -> chatShareService.setAccessMode(sessionId, user, mode == null ? null : mode.toString()),
+                "Could not change who has access");
+    }
+
+    @PostMapping("/session/{sessionId}/sharing/invites")
+    public ResponseEntity<Map<String, Object>> inviteToSession(
+            @PathVariable Long sessionId,
+            @RequestBody Map<String, Object> request,
+            HttpSession session
+    ) {
+        Object email = request == null ? null : request.get("email");
+        return sharingCall(session,
+                user -> chatShareService.addInvite(sessionId, user, email == null ? null : email.toString()),
+                "Could not send the invite");
+    }
+
+    @DeleteMapping("/session/{sessionId}/sharing/invites/{inviteId}")
+    public ResponseEntity<Map<String, Object>> removeSessionInvite(
+            @PathVariable Long sessionId,
+            @PathVariable Long inviteId,
+            HttpSession session
+    ) {
+        return sharingCall(session,
+                user -> chatShareService.removeInvite(sessionId, inviteId, user),
+                "Could not remove that person");
+    }
+
     @GetMapping("/session/{sessionId}/shares")
     public ResponseEntity<Map<String, Object>> listSessionShares(
             @PathVariable Long sessionId,
@@ -1912,13 +2010,19 @@ public class ChatController {
         }
     }
 
+    // Anyone can call this; chats shared as "Only people invited" additionally
+    // need a signed-in owner / invited email (answers 401 or 403 otherwise).
     @GetMapping("/shared/{shareToken}")
     public ResponseEntity<?> getSharedSession(
-            @PathVariable String shareToken
+            @PathVariable String shareToken,
+            HttpSession session
     ) {
         try {
-            SharedChatResponse sharedChat = chatShareService.getSharedChat(shareToken);
+            SharedChatResponse sharedChat = chatShareService.getSharedChat(shareToken, getCurrentUser(session));
             return ResponseEntity.ok(sharedChat);
+        } catch (ShareAccessException e) {
+            return ResponseEntity.status(e.getStatus())
+                    .body(Map.of("error", e.getMessage()));
         } catch (AIServiceException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(Map.of("error", e.getMessage()));
