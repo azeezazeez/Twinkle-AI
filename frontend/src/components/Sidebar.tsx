@@ -19,7 +19,7 @@ import { useLanguage, type AppLanguage } from '../lib/i18n';
 import { parseServerDate, serverTime } from '../lib/time';
 import { onShortcut, takePendingShortcut, isMac, type ShortcutAction } from '../lib/shortcuts';
 
-const TOGGLE_SIDEBAR_KEYS = isMac() ? '⌘.' : 'Ctrl+.';
+const TOGGLE_SIDEBAR_KEYS = isMac() ? '⌘.' : 'Ctrl+B';
 const NEW_CHAT_KEYS = isMac() ? '⇧⌘O' : 'Ctrl+Shift+O';
 import { APP_LANGUAGES } from '../pages/Settings';
 
