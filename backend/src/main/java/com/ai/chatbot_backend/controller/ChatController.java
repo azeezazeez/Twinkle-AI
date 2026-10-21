@@ -1470,7 +1470,7 @@ public class ChatController {
         } else if (geminiMediaUrls != null && !geminiMediaUrls.isEmpty()) {
             if (!geminiRequested) {
                 throw new IllegalArgumentException(
-                        "The selected model does not support native media uploads. Select Twinkle Insight 2.0 to analyze images, audio, or video."
+                        "The selected model does not support native media uploads. Select Oracle 2.0 to analyze images, audio, or video."
                 );
             }
             aiResponse = geminiService.generateResponse(
