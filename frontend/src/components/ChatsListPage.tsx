@@ -174,10 +174,18 @@ function RowMenu({
   actions.current = { onSelect, onPin, onRename, onDelete, onClose };
 
   useEffect(() => {
+    // Ignore anything that happens in the first moments after opening, so the
+    // click that opened the menu (and layout changes it causes, such as the open
+    // sidebar settling) can never close it straight away.
+    const openedAt = performance.now();
+    const settled = () => performance.now() - openedAt > 250;
+
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as HTMLElement | null;
       if (ref.current?.contains(target as Node)) return;
       if (target?.closest?.('[data-chats-menu-trigger]')) return;
+      // Menus portalled to <body> (submenus, tooltips) belong to this menu.
+      if (target?.closest?.('[data-chats-menu-surface]')) return;
       actions.current.onClose();
     };
     const onKeyDown = (event: KeyboardEvent) => {
@@ -189,26 +197,30 @@ function RowMenu({
       else if (key === 'r') { event.preventDefault(); actions.current.onRename(); }
       else if (key === 'd') { event.preventDefault(); actions.current.onDelete(); }
     };
-    // Only a real window resize or a scroll of this page's own list closes the menu.
-    // Scroll/resize noise from other parts of the app (for example the open sidebar)
-    // used to close it the instant it appeared.
-    const startSize = { w: window.innerWidth, h: window.innerHeight };
-    const onResize = () => {
-      if (window.innerWidth !== startSize.w || window.innerHeight !== startSize.h) actions.current.onClose();
+    // Only the person scrolling THIS page's list closes the menu. Programmatic
+    // scroll/resize events from other parts of the app (for example the open
+    // sidebar) must never dismiss it, so these listen for real user input only.
+    const onUserScroll = (event: Event) => {
+      if (!settled()) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest?.('[data-chats-menu-surface]')) return;
+      if (target?.closest?.('[data-chats-page]')) actions.current.onClose();
     };
-    const onScroll = (event: Event) => {
-      const target = event.target as HTMLElement | Document | null;
-      if (target instanceof HTMLElement && target.closest?.('[data-chats-page]')) actions.current.onClose();
+    const startWidth = window.innerWidth;
+    const onResize = () => {
+      if (settled() && Math.abs(window.innerWidth - startWidth) > 40) actions.current.onClose();
     };
     document.addEventListener('pointerdown', onPointerDown, true);
     document.addEventListener('keydown', onKeyDown);
     window.addEventListener('resize', onResize);
-    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('wheel', onUserScroll, { capture: true, passive: true });
+    window.addEventListener('touchmove', onUserScroll, { capture: true, passive: true });
     return () => {
       document.removeEventListener('pointerdown', onPointerDown, true);
       document.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('resize', onResize);
-      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('wheel', onUserScroll, true);
+      window.removeEventListener('touchmove', onUserScroll, true);
     };
   }, []);
 
@@ -223,6 +235,7 @@ function RowMenu({
     <motion.div
       ref={ref}
       role="menu"
+      data-chats-menu-surface
       aria-label="Chat options"
       initial={{ opacity: 0, scale: 0.97 }}
       animate={{ opacity: 1, scale: 1 }}
@@ -559,7 +572,7 @@ export default function ChatsListPage({ sessions, onOpenSession, onNewChat, onDe
       <div className="mx-auto w-full max-w-[1216px] px-5 pb-16 pt-16 sm:px-8 lg:pt-[72px]">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="font-serif text-[30px] font-medium leading-tight tracking-[-0.01em] text-zinc-900 sm:text-[34px] dark:text-zinc-50">
-            Chats and tasks
+            Chats
           </h1>
 
           <div className="flex items-center gap-2">
