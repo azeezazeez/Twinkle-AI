@@ -24,7 +24,7 @@ import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw';
 
 import {
   Copy, Check, Pencil, Volume2, VolumeX, Share2,
-  X, RotateCw, Download, CircleArrowDown, ChevronDown, Eye, Zap, Brain, Sparkles, Plus, Mic,
+  X, RotateCw, Download, CircleArrowDown, ChevronDown, Eye, Zap, Brain, Gem, Palette, Plus, Mic,
   ThumbsUp, ThumbsDown, Paperclip, Camera, Search as SearchIcon, ChevronUp,
 } from 'lucide-react';
 
@@ -1534,7 +1534,7 @@ const MODEL_OPTIONS: ModelOption[] = [
     id: '@cf/openai/gpt-oss-20b',
     name: 'Aurora 2.0',
     description: 'Brilliant everyday intelligence. Fast, sharp and dependable for any task',
-    icon: Zap,
+    icon: Gem,
   },
   {
     id: '@cf/meta/llama-3.1-8b-instruct-fp8-fast',
@@ -1552,7 +1552,7 @@ const MODEL_OPTIONS: ModelOption[] = [
     id: '@cf/black-forest-labs/flux-1-schnell',
     name: 'Atelier 1.0',
     description: 'Studio-quality images and artwork from a single sentence',
-    icon: Sparkles,
+    icon: Palette,
   },
   {
     id: 'gemini-3.8-flash',
@@ -6345,6 +6345,7 @@ if (isBlankDraft) {
       <LiveTalkModal
         open={liveTalkOpen}
         onClose={() => setLiveTalkOpen(false)}
+        userName={user.username?.trim() || user.name?.trim() || null}
         onSessionComplete={handleLiveSessionComplete}
         onSessionPreview={handleLiveSessionPreview}
       />
