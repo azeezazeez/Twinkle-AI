@@ -19,7 +19,7 @@ import { useLanguage, type AppLanguage } from '../lib/i18n';
 import { parseServerDate, serverTime } from '../lib/time';
 import { onShortcut, takePendingShortcut, isMac, type ShortcutAction } from '../lib/shortcuts';
 
-const TOGGLE_SIDEBAR_KEYS = isMac() ? '⌘.' : 'Ctrl+B';
+const TOGGLE_SIDEBAR_KEYS = isMac() ? '⌘.' : 'Ctrl+.';
 const NEW_CHAT_KEYS = isMac() ? '⇧⌘O' : 'Ctrl+Shift+O';
 import { APP_LANGUAGES } from '../pages/Settings';
 
@@ -204,9 +204,9 @@ function SidebarPinIcon({ className = '' }: { className?: string }) {
 // ─── Sidebar toggle icon (panel with a left rail) ─────────────────────────────
 function SidebarToggleIcon({ className = '' }: { className?: string }) {
   return (
-    <svg width="20" height="17" viewBox="0 0 24 20" fill="none" aria-hidden="true" className={className}>
-      <rect x="2" y="2" width="20" height="16" rx="4" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M8.5 2.5V17.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden="true" className={className}>
+      <rect x="2.5" y="2.5" width="15" height="15" rx="0.5" stroke="currentColor" strokeWidth="2" />
+      <path d="M8 3V17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }
