@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
-import { Session, User } from '../types';
+import { Session, User } from '../types'; 
 import {
   LogOut, Trash2, X, Search, Plus, MoreVertical, PinOff, Loader2,
   MessageCircle, Pencil, Upload, Eye, EyeOff,
