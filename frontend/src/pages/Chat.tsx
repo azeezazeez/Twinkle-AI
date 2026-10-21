@@ -17,6 +17,8 @@ import { onShortcut, takePendingShortcut, type ShortcutAction } from '../lib/sho
 import { getSavedLiveTalkColor } from '../lib/liveTalkColors';
 import { parseServerDate } from '../lib/time';
 import { loadPrefs } from '../lib/preferences';
+import { setChatUnread } from '../lib/unread';
+import { haptic } from '../lib/mobileUi';
 import { sanitizeAssistantText, friendlyErrorMessage } from '../lib/safeResponse';
 import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw'; 
 
@@ -2084,6 +2086,35 @@ ${textToRead}` }] }], turnComplete: true },
   }, [shareSuccessVisible]);
   const [topShareBusy, setTopShareBusy] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const mobileOpenRef = useRef(false);
+  mobileOpenRef.current = mobileOpen;
+
+  // Swipe right from the left edge of the screen to open the sidebar (phones/tablets).
+  useEffect(() => {
+    let start: { x: number; y: number } | null = null;
+    const onStart = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      start = window.innerWidth < 1024 && event.touches.length === 1 && touch && touch.clientX <= 24
+        ? { x: touch.clientX, y: touch.clientY }
+        : null;
+    };
+    const onEnd = (event: TouchEvent) => {
+      const origin = start;
+      start = null;
+      const touch = event.changedTouches[0];
+      if (!origin || !touch || mobileOpenRef.current) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      const dx = touch.clientX - origin.x;
+      const dy = Math.abs(touch.clientY - origin.y);
+      if (dx > 70 && dy < dx * 0.6) { haptic(10); setMobileOpen(true); }
+    };
+    document.addEventListener('touchstart', onStart, { passive: true });
+    document.addEventListener('touchend', onEnd, { passive: true });
+    return () => {
+      document.removeEventListener('touchstart', onStart);
+      document.removeEventListener('touchend', onEnd);
+    };
+  }, []);
   const [desktopSidebarExpanded, setDesktopSidebarExpanded] = useState(false);
   const [desktopSidebarWidth, setDesktopSidebarWidth] = useState<number>(() => {
     try {
@@ -3358,6 +3389,11 @@ const chooseModel = useCallback((modelId: string) => {
   const handledChatUuidRef = useRef<string | null>(null);
   const currentSessionIdRef = useRef<number | null>(currentSessionId);
   currentSessionIdRef.current = currentSessionId;
+
+  // Opening a chat reads it: the unread dot goes away.
+  useEffect(() => {
+    if (currentSessionId !== null) setChatUnread(currentSessionId, false);
+  }, [currentSessionId]);
   const sessionsRef = useRef<Session[]>(sessions);
   sessionsRef.current = sessions;
 
@@ -4350,6 +4386,8 @@ const chooseModel = useCallback((modelId: string) => {
       await drainStreamRenderer();
       if (requestGeneration !== requestGenerationRef.current) return;
       setIsTyping(false);
+      // The reply finished while another chat is open: flag this one as unread.
+      if (!isNewSession && typeof activeSessionId === 'number' && currentSessionIdRef.current !== activeSessionId) setChatUnread(activeSessionId, true);
 
       const aiContent =
         typeof response?.response === 'string' && response.response.trim()
