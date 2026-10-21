@@ -21,17 +21,21 @@ import { APP_LANGUAGE_KEY, getLanguageInstruction, type AppLanguage } from '../l
 import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw';
 import { describeLiveClose, friendlyLiveError } from '../lib/liveErrors';
 
+/** A weather lookup made during the call and the assistant reply (0-based) it belongs to. */
+export type LiveWeatherEntry = { assistantIndex: number; snapshot: WeatherSnapshot };
+
 type Props = {
   open: boolean;
   onClose: () => void; 
   /** Called after the final Live Talk data has been persisted. */
-  onSessionComplete?: (sessionId: number, sessionName?: string, publicId?: string) => void;
+  onSessionComplete?: (sessionId: number, sessionName?: string, publicId?: string, weather?: LiveWeatherEntry[]) => void;
   /** Fired the instant Live Talk ends, with the local transcript, so the chat can be shown before saving finishes. */
   onSessionPreview?: (info: {
     sessionId: number | null;
     publicId?: string;
     sessionName?: string;
     turns: Array<{ role: 'user' | 'assistant'; content: string }>;
+    weather?: LiveWeatherEntry[];
   }) => void;
 };
 
@@ -295,6 +299,8 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
   const lastSavedSessionNameRef = useRef<string | null>(null);
   const livePublicIdRef = useRef<string | null>(null);
   const turnsRef = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  // Every weather lookup of this call, so the chat can show the weather card(s) afterwards.
+  const weatherLogRef = useRef<LiveWeatherEntry[]>([]);
   const userTurnRef = useRef('');
   const assistantTurnRef = useRef('');
   const endingRef = useRef(false);
@@ -846,6 +852,9 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
   }, [cleanupAudioInput, connected]);
 
   const showWeather = useCallback((snapshot: WeatherSnapshot) => {
+    // The assistant reply that is being spoken right now is the next one to be saved.
+    const assistantIndex = turnsRef.current.filter(turn => turn.role === 'assistant').length;
+    weatherLogRef.current.push({ assistantIndex, snapshot });
     setWeatherChip(snapshot);
     if (weatherTimerRef.current != null) window.clearTimeout(weatherTimerRef.current);
     weatherTimerRef.current = window.setTimeout(() => setWeatherChip(null), 45_000);
@@ -1310,6 +1319,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
     lastSavedSessionNameRef.current = null;
     livePublicIdRef.current = null;
     turnsRef.current = [];
+    weatherLogRef.current = [];
     // Connect first: the token request and Gemini handshake are the critical
     // path to a ready conversation, so the session pre-create must not queue
     // ahead of them on the same backend.
@@ -1346,11 +1356,14 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
     const previewTurns = [...turnsRef.current];
     if (userTurnRef.current.trim()) previewTurns.push({ role: 'user', content: userTurnRef.current.trim() });
     if (assistantTurnRef.current.trim()) previewTurns.push({ role: 'assistant', content: assistantTurnRef.current.trim() });
+    // Weather lookups made during the call (kept after cleanup() clears the log).
+    const weatherEntries = [...weatherLogRef.current];
     onSessionPreview?.({
       sessionId: existingSessionId,
       publicId: livePublicIdRef.current || undefined,
       sessionName: lastSavedSessionNameRef.current || undefined,
       turns: previewTurns,
+      weather: weatherEntries,
     });
 
     // Persist the final partial turn, if any, and ALWAYS wait for saves that
@@ -1372,7 +1385,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
       .then(sessionId => {
         const normalizedId = Number(sessionId);
         if (sessionId != null && Number.isFinite(normalizedId) && normalizedId > 0) {
-          onSessionComplete?.(normalizedId, lastSavedSessionNameRef.current || undefined, livePublicIdRef.current || undefined);
+          onSessionComplete?.(normalizedId, lastSavedSessionNameRef.current || undefined, livePublicIdRef.current || undefined, weatherEntries);
         }
       })
       .catch(error => {
@@ -1383,7 +1396,7 @@ export default function LiveTalkModal({ open, onClose, onSessionComplete, onSess
         // available persisted history.
         const fallbackId = liveSessionIdRef.current ?? existingSessionId;
         if (fallbackId != null && Number.isFinite(fallbackId) && fallbackId > 0) {
-          onSessionComplete?.(fallbackId, lastSavedSessionNameRef.current || undefined, livePublicIdRef.current || undefined);
+          onSessionComplete?.(fallbackId, lastSavedSessionNameRef.current || undefined, livePublicIdRef.current || undefined, weatherEntries);
         }
       });
   };
