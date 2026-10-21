@@ -900,6 +900,8 @@ function cleanMessageContent(content: unknown): string {
       .replace(/^(Java Developer\s*[—-]\s*Java Backend Developer)\s*$/gim, '**$1**')
       // Remove the internal attachment marker from persisted/live messages.
       .replace(/\n?\n?\[Attached Files:.*?\]/g, '')
+      // Remove the internal reply-layout hints added to file/image prompts.
+      .replace(/\n*Reply layout for this (?:file|image):[\s\S]*?Do not mention these layout instructions\.\n*/g, '\n\n')
       .trim();
 
     // The upload flow can persist the internal "no question/instruction"
@@ -5785,7 +5787,7 @@ if (isBlankDraft) {
                                     h2({ children, ...props }: any) {
                                       return (
                                         <h2
-                                          className="mt-6 mb-2 text-[1.25rem] font-semibold leading-snug tracking-tight text-zinc-950 dark:text-zinc-50"
+                                          className="mt-7 mb-2.5 border-b border-zinc-200/70 dark:border-zinc-700/60 pb-1.5 text-[1.25rem] font-semibold leading-snug tracking-tight text-zinc-950 dark:text-zinc-50"
                                           {...props}
                                         >
                                           {children}
@@ -5795,12 +5797,28 @@ if (isBlankDraft) {
                                     h3({ children, ...props }: any) {
                                       return (
                                         <h3
-                                          className="mt-5 mb-2 text-[1.125rem] font-semibold leading-snug tracking-tight text-zinc-950 dark:text-zinc-50"
+                                          className="mt-5 mb-1.5 text-[1.0625rem] font-semibold leading-snug tracking-tight text-zinc-950 dark:text-zinc-50"
                                           {...props}
                                         >
                                           {children}
                                         </h3>
                                       );
+                                    },
+                                    h4({ children, ...props }: any) {
+                                      return (
+                                        <h4
+                                          className="mt-4 mb-1.5 text-[1rem] font-semibold leading-snug text-zinc-900 dark:text-zinc-100"
+                                          {...props}
+                                        >
+                                          {children}
+                                        </h4>
+                                      );
+                                    },
+                                    hr(props: any) {
+                                      return <hr className="my-6 border-0 border-t border-zinc-200 dark:border-zinc-700/70" {...props} />;
+                                    },
+                                    li({ children, ...props }: any) {
+                                      return <li className="pl-1 leading-[1.65] [&>p]:my-1 [&>ul]:my-1.5 [&>ol]:my-1.5" {...props}>{children}</li>;
                                     },
                                     p({ children, ...props }: any) {
                                       return <p className="my-3 leading-[1.7] break-words [overflow-wrap:anywhere] first:mt-0 last:mb-0" {...props}>{children}</p>;
@@ -5846,7 +5864,7 @@ if (isBlankDraft) {
                                     },
                                     strong({ children, ...props }: any) {
                                       return (
-                                        <strong className="font-black" {...props}>
+                                        <strong className="font-semibold text-zinc-950 dark:text-zinc-50" {...props}>
                                           {children}
                                         </strong>
                                       );
@@ -5857,7 +5875,7 @@ if (isBlankDraft) {
                                         /Java Developer\s*[—-]\s*Java Backend Developer/i.test(value);
                                       return (
                                         <em
-                                          className={isResumeSubtitle ? 'not-italic font-black' : undefined}
+                                          className={isResumeSubtitle ? 'not-italic font-semibold' : undefined}
                                           {...props}
                                         >
                                           {children}
