@@ -12,7 +12,6 @@ import {
   Trash2,
   Trophy,
   UserCircle2,
-  X,
   Zap,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
