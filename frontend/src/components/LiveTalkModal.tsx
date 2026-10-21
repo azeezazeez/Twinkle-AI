@@ -240,7 +240,7 @@ const buildSystemInstruction = (language: AppLanguage, toolsLevel: number): stri
   const knownLocation = getLiveContextLine();
 
   return (
-    `You are Twinkle AI, a polished professional voice assistant. Speak naturally, concisely, confidently, and warmly. Answer the user directly and keep the conversation conversational. ` +
+    `You are Twinkle, a polished professional voice assistant. Speak naturally, concisely, confidently, and warmly. Answer the user directly and keep the conversation conversational. ` +
     `${languageRule}` +
     `\n\n${ASSISTANT_NAME_RULES}` +
     (assistantNameContext() ? `\n\n${assistantNameContext()}` : '') +
