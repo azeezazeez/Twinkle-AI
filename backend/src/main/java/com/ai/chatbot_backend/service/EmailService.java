@@ -88,6 +88,36 @@ public class EmailService {
     }
 
     /**
+     * Tell someone a chat was shared with them ("Only people invited").
+     */
+    public void sendChatInviteEmail(
+            String toEmail,
+            String inviterName,
+            String chatName,
+            String chatUrl
+    ) {
+        String who = (inviterName == null || inviterName.isBlank()) ? "Someone" : escapeHtml(inviterName.trim());
+        String title = (chatName == null || chatName.isBlank()) ? "a chat" : "&ldquo;" + escapeHtml(chatName.trim()) + "&rdquo;";
+
+        String body =
+                paragraph(who + " shared " + title + " with you on Twinkle AI.")
+                + paragraph("Sign in with this email address to read the conversation.")
+                + button("Open chat", chatUrl)
+                + note("You&rsquo;re receiving this because someone invited this email address. If you don&rsquo;t know them, you can ignore this message.");
+
+        sendEmail(
+                toEmail,
+                "A chat was shared with you on Twinkle AI",
+                buildLayout(
+                        "A chat was shared with you",
+                        "Shared chat",
+                        body,
+                        who + " shared a chat with you on Twinkle AI."
+                )
+        );
+    }
+
+    /**
      * Send email using Brevo REST API.
      */
     private void sendEmail(
