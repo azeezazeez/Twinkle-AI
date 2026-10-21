@@ -1,4 +1,5 @@
--- Run once on an existing database (schema.sql is only for fresh installs: it drops tables).
+-- Runs automatically at every startup (see application.properties). Safe to re-run: every statement is idempotent.
+-- schema.sql is only for fresh installs because it drops tables.
 -- Adds "Only people invited" / "Anyone with the link" sharing.
 
 ALTER TABLE public.shared_chats
