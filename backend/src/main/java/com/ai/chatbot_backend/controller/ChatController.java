@@ -12,6 +12,7 @@ import com.ai.chatbot_backend.dto.SharedChatResponse;
 import com.ai.chatbot_backend.service.RedisEventService;
 import com.ai.chatbot_backend.service.ChatHistoryService;
 import com.ai.chatbot_backend.service.GroqService;
+import com.ai.chatbot_backend.service.ResponseFormat;
 import com.ai.chatbot_backend.service.CloudflareAiService;
 import com.ai.chatbot_backend.service.GeminiService;
 import com.ai.chatbot_backend.service.UserService;
@@ -511,6 +512,8 @@ public class ChatController {
              * ordinary text input to the selected text model (normally Groq).
              */
             StringBuilder extractedText = new StringBuilder();
+            String firstDocName = null;
+            String firstDocMime = null;
 
             long totalAttachmentBytes = 0L;
             long totalImageBytes = 0L;
@@ -616,6 +619,9 @@ public class ChatController {
                     if (text != null && !text.isBlank()) {
                         if (extractedText.length() > 0) {
                             extractedText.append("\n\n");
+                        } else {
+                            firstDocName = filename;
+                            firstDocMime = mime;
                         }
 
                         extractedText
@@ -670,17 +676,23 @@ public class ChatController {
 
             if (extractedText.length() > 0) {
 
+                final boolean userAskedAboutDocs = !userMessage.isBlank();
+                final String docLayoutHint = ResponseFormat.forDocuments(
+                        firstDocName, firstDocMime, extractedText.toString(), userAskedAboutDocs);
+
                 if (userMessage.isBlank()) {
                     userMessage =
                             "The user uploaded one or more documents. "
                                     + "Use the actual document content below to answer the user's request. "
                                     + "If no specific request was provided, present the document content in clean, readable Markdown. "
-                                    + "Do not invent information or add unsupported claims.\n\n"
+                                    + "Do not invent information or add unsupported claims.\n"
+                                    + docLayoutHint + "\n\n"
                                     + "Uploaded document content:\n"
                                     + extractedText;
                 } else {
                     userMessage =
                             userMessage
+                                    + "\n\n" + docLayoutHint
                                     + "\n\nAttached document content:\n"
                                     + extractedText;
                 }
@@ -696,7 +708,10 @@ public class ChatController {
                 userMessage =
                         "Analyze the uploaded media carefully. "
                                 + "Describe or extract only information that is actually present. "
-                                + "Do not invent information or unsupported claims.";
+                                + "Do not invent information or unsupported claims.\n"
+                                + ResponseFormat.forImages(false);
+            } else if (!geminiMediaUrls.isEmpty()) {
+                userMessage = userMessage + "\n\n" + ResponseFormat.forImages(true);
             }
 
             return processMessageWithFiles(
