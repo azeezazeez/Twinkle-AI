@@ -1999,7 +1999,7 @@ export default function Sidebar({
               aria-label="Open sidebar"
               className="relative flex h-8 w-[17px] items-center justify-center rounded-lg text-zinc-600 transition-colors before:pointer-events-none before:absolute before:inset-y-0 before:-inset-x-[3px] before:rounded-lg before:transition-colors hover:before:bg-zinc-200/60 after:absolute after:inset-y-0 after:-left-3 after:w-3 hover:text-zinc-900 dark:text-zinc-300 dark:hover:before:bg-zinc-800 dark:hover:text-zinc-50"
             >
-              <SidebarToggleIcon className="relative shrink-0" />
+              <SidebarToggleIcon className="relative shrink-0 -translate-y-px" />
             </button>
           </Tip>
         </motion.div>
