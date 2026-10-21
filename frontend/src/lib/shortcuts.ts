@@ -30,7 +30,7 @@ export function matchShortcut(event: KeyboardEvent): ShortcutAction | null {
     return null;
   }
 
-  if (is('b', 'KeyB') || code === 'Period' || key === '.') return 'toggle-sidebar';
+  if (is('b', 'KeyB') || code === 'Period' || key === 'B') return 'toggle-sidebar';
   if (is('k', 'KeyK')) return 'search';
   if (code === 'Comma' || key === ',') return 'settings';
   if (code === 'Slash' || key === '/') return 'shortcuts';
