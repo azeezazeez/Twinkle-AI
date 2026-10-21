@@ -15,8 +15,8 @@ public class HealthController {
         Map<String, Object> response = new LinkedHashMap<>();
 
         response.put("status", "UP");
-        response.put("service", "Twinkle AI Backend");
-        response.put("message", "Twinkle AI backend is running");
+        response.put("service", "Twinkle Backend");
+        response.put("message", "Twinkle backend is running");
 
         return ResponseEntity.ok(response);
     }
@@ -31,7 +31,7 @@ public class HealthController {
         Map<String, Object> response = new LinkedHashMap<>();
 
         response.put("status", "UP");
-        response.put("service", "Twinkle AI Backend");
+        response.put("service", "Twinkle Backend");
 
         return ResponseEntity.ok(response);
     }
