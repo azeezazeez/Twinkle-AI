@@ -2918,7 +2918,7 @@ ${textToRead}` }] }], turnComplete: true },
   const [, setEmptyChatPrompt] = useState(() =>
     EMPTY_CHAT_PROMPTS[Math.floor(Math.random() * EMPTY_CHAT_PROMPTS.length)]
   );
-  const [chatGreeting, setChatGreeting] = useState(() => getRandomChatGreeting(user?.name || user?.username || '', '', selectedModel));
+  const [chatGreeting, setChatGreeting] = useState(() => getRandomChatGreeting(user?.username || user?.name || '', '', selectedModel));
   const chatGreetingRef = useRef(chatGreeting);
   useEffect(() => { chatGreetingRef.current = chatGreeting; }, [chatGreeting]);
 
@@ -2945,13 +2945,14 @@ ${textToRead}` }] }], turnComplete: true },
       updatedAt: now,
     };
   }, [user?.id, showFirstWelcome]);
-  const welcomeName = (user?.name || user?.username || '').trim().split(/\s+/)[0] || 'there';
+  // "What should Twinkle call you?" (username) wins over the full name.
+  const welcomeName = (user?.username || user?.name || '').trim().split(/\s+/)[0] || 'there';
 
   // Pick a fresh greeting every time an empty draft chat is shown (New Chat
   // button, shortcut, logo click, browser back to "/"), like ChatGPT/Claude.
   useEffect(() => {
     if (currentSessionId !== null) return;
-    const nextGreeting = getRandomChatGreeting(user?.name || user?.username || '', chatGreetingRef.current, selectedModel);
+    const nextGreeting = getRandomChatGreeting(user?.username || user?.name || '', chatGreetingRef.current, selectedModel);
     chatGreetingRef.current = nextGreeting;
     setChatGreeting(nextGreeting);
     setEmptyChatPrompt(current => getNextEmptyChatPrompt(current));
@@ -4882,7 +4883,7 @@ const chooseModel = useCallback((modelId: string) => {
    
 if (isBlankDraft) {
   const nextGreeting = getRandomChatGreeting(
-    user?.name || user?.username || '',
+    user?.username || user?.name || '',
     chatGreetingRef.current,
     selectedModel
   );
@@ -4926,7 +4927,7 @@ if (isBlankDraft) {
       return [];
     });
     {
-      const nextGreeting = getRandomChatGreeting(user?.name || user?.username || '', chatGreetingRef.current, selectedModel);
+      const nextGreeting = getRandomChatGreeting(user?.username || user?.name || '', chatGreetingRef.current, selectedModel);
       chatGreetingRef.current = nextGreeting;
       setChatGreeting(nextGreeting);
     }
