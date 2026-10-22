@@ -58,6 +58,26 @@ public class RagController {
         return ResponseEntity.ok(ragService.list(userId));
     }
 
+    /** Original file of a Library document, so the chat composer can attach it again. */
+    @GetMapping("/documents/{id}/file")
+    public ResponseEntity<?> file(@PathVariable long id, HttpSession session) {
+        Long userId = userId(session);
+        if (userId == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Please sign in."));
+        var stored = ragService.getFile(userId, id);
+        if (stored.isEmpty())
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "The original file is not stored. Attach it again from your device."));
+        MediaType type;
+        try { type = MediaType.parseMediaType(stored.get().mimeType()); }
+        catch (Exception e) { type = MediaType.APPLICATION_OCTET_STREAM; }
+        return ResponseEntity.ok()
+                .contentType(type)
+                .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                        org.springframework.http.ContentDisposition.attachment()
+                                .filename(stored.get().name(), java.nio.charset.StandardCharsets.UTF_8).build().toString())
+                .header("Cache-Control", "private, max-age=300")
+                .body(stored.get().data());
+    }
+
     @DeleteMapping("/documents/{id}")
     public ResponseEntity<?> delete(@PathVariable long id, HttpSession session) {
         Long userId = userId(session);
