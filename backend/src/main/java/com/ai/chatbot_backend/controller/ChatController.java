@@ -681,7 +681,7 @@ public class ChatController {
                         if (ragUserId != null && ragUserId > 0) {
                             try {
                                 ragService.queueChatAttachment(
-                                        ragUserId, filename, mime, file.getSize(), text);
+                                        ragUserId, filename, mime, file.getSize(), text, fileBytes);
                             } catch (Exception ragError) {
                                 log.error(
                                         "RAG_QUEUE_FAILED: source=chat_attachment, userId={}, filename={}, message={}",
