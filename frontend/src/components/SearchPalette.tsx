@@ -639,7 +639,7 @@ export default function SearchPalette({
                 tabIndex={-1}
                 disabled={!selectedIds.length || busy}
                 onClick={() => setConfirmDelete(docs.filter(doc => selectedIds.includes(doc.id)))}
-                className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-full border border-zinc-300 bg-white px-4 text-[14px] font-medium text-zinc-900 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-600 dark:bg-transparent dark:text-zinc-100 dark:hover:bg-zinc-800"
+                className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-full bg-[#B53333] px-4 text-[14px] font-medium text-white transition-colors hover:bg-[#9E2B2B] disabled:cursor-not-allowed disabled:opacity-40 dark:bg-[#C73E3E] dark:hover:bg-[#B53333]"
               >
                 <Trash2 className="h-4 w-4 shrink-0" strokeWidth={1.9} /> Delete
               </button>
@@ -698,7 +698,7 @@ export default function SearchPalette({
               type="button"
               role="menuitem"
               onClick={() => { const doc = menu.doc; setMenu(null); setConfirmDelete([doc]); }}
-              className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] text-zinc-800 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-700"
+              className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] font-medium text-[#B53333] hover:bg-[#B53333]/10 dark:text-[#F2877E] dark:hover:bg-[#F2877E]/10"
             >
               <Trash2 className="h-4 w-4" strokeWidth={1.8} /> Delete
             </button>
@@ -728,7 +728,7 @@ export default function SearchPalette({
                   type="button"
                   disabled={busy}
                   onClick={() => void deleteDocs(confirmDelete)}
-                  className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-full bg-zinc-900 px-5 text-[14px] font-medium text-white transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+                  className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-full bg-[#B53333] px-5 text-[14px] font-medium text-white transition-colors hover:bg-[#9E2B2B] disabled:cursor-not-allowed disabled:opacity-60 dark:bg-[#C73E3E] dark:hover:bg-[#B53333]"
                 >
                   {busy && <LoaderCircle className="h-4 w-4 animate-spin" />} Delete
                 </button>
