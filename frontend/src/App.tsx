@@ -56,7 +56,6 @@ const Profile = lazyRetry(() => import('./pages/Profile'));
 const Settings = lazyRetry(() => import('./pages/Settings'));
 const LiveTalkColor = lazyRetry(() => import('./pages/LiveTalkColor'));
 const SharedChat = lazyRetry(() => import('./pages/SharedChat'));
-const Library = lazyRetry(() => import('./pages/KnowledgeBase'));
 const LearnMore = lazyRetry(() => import('./pages/LearnMore'));
 
 import Toaster from './components/Toaster';
@@ -401,14 +400,9 @@ function AuthenticatedApp({
         element={user ? <LearnMore /> : <Navigate to="/login" replace />}
       />
 
-      {/* =====================================================
-          PRIVATE DOCUMENT LIBRARY (RAG)
-          ===================================================== */}
-      <Route
-        path="/library"
-        element={user ? <Library /> : <Navigate to="/login" replace />}
-      />
-      <Route path="/knowledge" element={<Navigate to="/library" replace />} />
+      {/* The Library is now a tab in the search palette (Ctrl/Cmd+K); old links go to the chat. */}
+      <Route path="/library" element={<Navigate to="/" replace />} />
+      <Route path="/knowledge" element={<Navigate to="/" replace />} />
 
       {/* =====================================================
           CHAT
