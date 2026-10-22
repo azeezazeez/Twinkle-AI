@@ -19,6 +19,7 @@ import { parseServerDate } from '../lib/time';
 import { loadPrefs } from '../lib/preferences';
 import { setChatUnread } from '../lib/unread';
 import { haptic } from '../lib/mobileUi';
+import { COMPOSER_FILES_EVENT, takeComposerFiles } from '../lib/libraryAttach';
 import { sanitizeAssistantText, friendlyErrorMessage } from '../lib/safeResponse';
 import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw'; 
 
@@ -3928,6 +3929,19 @@ const chooseModel = useCallback((modelId: string) => {
     }
   };
 
+  // Files picked from the Library (Ctrl/⌘+K -> Library) arrive here and are put in the composer.
+  const handleFileSelectionRef = useRef(handleFileSelection);
+  handleFileSelectionRef.current = handleFileSelection;
+  useEffect(() => {
+    const takeLibraryFiles = () => {
+      const files = takeComposerFiles();
+      if (files.length) void handleFileSelectionRef.current(files);
+    };
+    takeLibraryFiles();
+    window.addEventListener(COMPOSER_FILES_EVENT, takeLibraryFiles);
+    return () => window.removeEventListener(COMPOSER_FILES_EVENT, takeLibraryFiles);
+  }, []);
+
   const removeFile = (id: string) => {
     const removed = filePreviews.find(fp => fp.id === id);
     if (removed?.preview) URL.revokeObjectURL(removed.preview);
@@ -4473,6 +4487,11 @@ const chooseModel = useCallback((modelId: string) => {
           filesToSend.map(fileToDataUrl)
         );
         rememberAttachmentNames(filesToSend, previewUrls);
+      }
+
+      // The server adds attached files to the Library as soon as the upload arrives.
+      if (filesToSend && filesToSend.length > 0) {
+        window.setTimeout(() => window.dispatchEvent(new CustomEvent('twinkle-library-updated')), 1500);
       }
 
       await sendMessage(
