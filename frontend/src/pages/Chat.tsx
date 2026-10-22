@@ -1591,38 +1591,117 @@ const getNextEmptyChatPrompt = (current: string): string => {
   return available[Math.floor(Math.random() * available.length)];
 };
 
+// Greetings are grouped so the empty-chat screen feels fresh every time.
+// {name} is replaced with the user's first name; templates that need a name are
+// dropped automatically when there is none.
 const EMPTY_CHAT_GREETINGS = [
   'Hello, {name}',
   'Welcome back, {name}',
   'Hi, {name}',
+  'Hey {name}, good to see you',
+  'Nice to see you, {name}',
+  'Great to have you here, {name}',
+  'Hey there, {name} 👋',
+  'Hi {name}, what’s the plan?',
+  '{name}, what are we building today?',
+  'Back again, {name}? Let’s go',
+  'Glad you’re here, {name}',
   'Hello there',
+  'Hey there 👋',
   'Ready when you are',
   'What’s on your mind?',
   'How can I help?',
   'Where should we start?',
+  'What can I do for you?',
+  'Got a question? Ask away',
+  'Let’s make something great',
+  'Let’s get started',
+  'What shall we explore today?',
+  'Curious about something?',
+  'Drop an idea, I’ll run with it',
+  'Ask me anything',
+  'Think out loud — I’m listening',
+  'Got a problem? Let’s solve it',
+  'What are we working on?',
+  'Stuck on something? Let’s fix it',
+  'Need a hand?',
+  'Tell me what you need',
+  'Let’s turn that idea into reality',
+  'Your move ✨',
+  'Twinkle is ready ✨',
 ];
 
 const TIME_BASED_CHAT_GREETINGS = {
-  morning: ['Good morning, {name}', 'Good morning'],
-  afternoon: ['Good afternoon, {name}', 'Good afternoon'],
-  evening: ['Good evening, {name}', 'Good evening'],
+  morning: [
+    'Good morning, {name}',
+    'Good morning',
+    'Rise and shine, {name} ☀️',
+    'Morning, {name} — ready to start?',
+    'Fresh morning, fresh ideas',
+    'Good morning! What’s first today?',
+    'Hope your morning’s going well, {name}',
+    'Let’s make this morning count',
+    'Coffee ready? Let’s begin ☕',
+  ],
+  afternoon: [
+    'Good afternoon, {name}',
+    'Good afternoon',
+    'Afternoon, {name} — what’s next?',
+    'How’s your afternoon going, {name}?',
+    'Hope your day is going well, {name}',
+    'Let’s power through the afternoon',
+    'Midday check-in: what do you need?',
+    'Need a break? Let’s chat',
+  ],
+  evening: [
+    'Good evening, {name}',
+    'Good evening',
+    'Evening, {name} — how was your day?',
+    'Winding down, {name}?',
+    'Hope you had a great day, {name}',
+    'What shall we tackle this evening?',
+    'One more thing before the day ends?',
+    'Still going strong? Let’s do it 🌆',
+  ],
+  night: [
+    'Burning the midnight oil, {name}?',
+    'Working late, {name}?',
+    'Night owl mode 🦉',
+    'Good evening, {name}',
+    'Late-night ideas are the best ones',
+    'Still up, {name}? Let’s make it count',
+    'Quiet hours, big ideas 🌙',
+    'Hello, night owl',
+  ],
 };
 
-const getTimeOfDay = (): 'morning' | 'afternoon' | 'evening' => {
+const WEEKDAY_CHAT_GREETINGS: Record<number, string[]> = {
+  0: ['Happy Sunday, {name}', 'Lazy Sunday? Let’s explore something', 'Sunday project time?'],
+  1: ['Happy Monday, {name}', 'New week, new goals 🚀', 'Monday kickoff — what’s first?'],
+  2: ['Happy Tuesday, {name}', 'Tuesday momentum — let’s go'],
+  3: ['Happy Wednesday, {name}', 'Midweek check-in: how can I help?'],
+  4: ['Happy Thursday, {name}', 'Almost the weekend — let’s finish strong'],
+  5: ['Happy Friday, {name} 🎉', 'Friday vibes — what are we wrapping up?'],
+  6: ['Happy Saturday, {name}', 'Weekend side project?', 'Saturday — time to build something fun'],
+};
+
+const getTimeOfDay = (): 'morning' | 'afternoon' | 'evening' | 'night' => {
   const hour = new Date().getHours();
 
-  if (hour < 12) return 'morning';
-  if (hour < 18) return 'afternoon';
-  return 'evening';
+  if (hour >= 5 && hour < 12) return 'morning';
+  if (hour >= 12 && hour < 17) return 'afternoon';
+  if (hour >= 17 && hour < 22) return 'evening';
+  return 'night';
 };
 
-// Each model greets in its own short voice.
+// Each model adds a few greetings in its own voice. They are mixed into the
+// general pool, so every model still gets plenty of variety.
 const MODEL_GREETINGS: Record<string, string[]> = {
-  '@cf/openai/gpt-oss-20b': ['Hi, {name}', 'What’s on your mind?', 'Ask me anything'],
-  '@cf/meta/llama-3.1-8b-instruct-fp8-fast': ['Ready when you are', 'Hi, {name}', 'Go ahead'],
-  '@cf/openai/gpt-oss-120b': ['Welcome, {name}', 'What shall we solve?', 'Where shall we begin?'],
-  '@cf/black-forest-labs/flux-1-schnell': ['What shall we create?', 'Describe an image', 'Hello, {name}'],
-  'gemini-3.8-flash': ['Show me something', 'Share a file or image', 'Hi, {name}'],
+  '@cf/openai/gpt-oss-20b': ['Hi, {name}', 'What’s on your mind?', 'Ask me anything', 'Quick question or deep dive?'],
+  '@cf/meta/llama-3.1-8b-instruct-fp8-fast': ['Ready when you are', 'Hi, {name}', 'Go ahead', 'Fast answers, ready when you are ⚡'],
+  '@cf/openai/gpt-oss-120b': ['Welcome, {name}', 'What shall we solve?', 'Where shall we begin?', 'Big problems welcome'],
+  '@cf/black-forest-labs/flux-1-schnell': ['What shall we create?', 'Describe an image', 'Hello, {name}', 'Paint me a picture in words 🎨', 'What should I draw today?'],
+  'gemini-3.8-flash': ['Show me something', 'Share a file or image', 'Hi, {name}', 'Drop a PDF, photo or idea 📎'],
 };
 
 const getRandomChatGreeting = (userName = '', previousGreeting = '', modelId = ''): string => {
@@ -1638,10 +1717,12 @@ const getRandomChatGreeting = (userName = '', previousGreeting = '', modelId = '
     return displayName ? template.replace(/\{name\}/g, displayName) : null;
   };
 
-  const pool = (MODEL_GREETINGS[modelId] ?? [
+  const pool = [
     ...TIME_BASED_CHAT_GREETINGS[getTimeOfDay()],
+    ...(WEEKDAY_CHAT_GREETINGS[new Date().getDay()] ?? []),
+    ...(MODEL_GREETINGS[modelId] ?? []),
     ...EMPTY_CHAT_GREETINGS,
-  ])
+  ]
     .map(fill)
     .filter((greeting): greeting is string => Boolean(greeting));
 
