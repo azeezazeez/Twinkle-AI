@@ -19,7 +19,7 @@ import { parseServerDate } from '../lib/time';
 import { loadPrefs } from '../lib/preferences';
 import { setChatUnread } from '../lib/unread';
 import { haptic } from '../lib/mobileUi';
-import { COMPOSER_FILES_EVENT, takeComposerFiles } from '../lib/libraryAttach';
+import { COMPOSER_FILES_EVENT, LIBRARY_DOWNLOAD_EVENT, takeComposerFiles } from '../lib/libraryAttach';
 import { sanitizeAssistantText, friendlyErrorMessage } from '../lib/safeResponse';
 import pcmCaptureWorkletSource from '../audio/pcm-capture-worklet.ts?raw'; 
 
@@ -3938,8 +3938,20 @@ const chooseModel = useCallback((modelId: string) => {
       if (files.length) void handleFileSelectionRef.current(files);
     };
     takeLibraryFiles();
+    // Show the composer's loading spinner while Library files are being downloaded.
+    let downloading = 0;
+    const onDownload = (event: Event) => {
+      const active = !!(event as CustomEvent<{ active?: boolean }>).detail?.active;
+      downloading = Math.max(0, downloading + (active ? 1 : -1));
+      if (active) setIsProcessingFiles(true);
+      else if (downloading === 0) setIsProcessingFiles(false);
+    };
     window.addEventListener(COMPOSER_FILES_EVENT, takeLibraryFiles);
-    return () => window.removeEventListener(COMPOSER_FILES_EVENT, takeLibraryFiles);
+    window.addEventListener(LIBRARY_DOWNLOAD_EVENT, onDownload);
+    return () => {
+      window.removeEventListener(COMPOSER_FILES_EVENT, takeLibraryFiles);
+      window.removeEventListener(LIBRARY_DOWNLOAD_EVENT, onDownload);
+    };
   }, []);
 
   const removeFile = (id: string) => {
