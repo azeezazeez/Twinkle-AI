@@ -4,14 +4,16 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
-  AudioLines, BarChart3, BookOpen, CornerDownLeft, FileText, HardDrive, Info, Keyboard,
-  LoaderCircle, MessageCircle, MessagesSquare, Mic, Plus, Settings as SettingsIcon, ShieldCheck,
+  AudioLines, BarChart3, Check, CornerDownLeft, FileText, HardDrive, Image as ImageIcon, Info, Keyboard,
+  LoaderCircle, MessageCircle, MessagesSquare, Mic, MoreHorizontal, Paperclip, Plus, Trash2, Settings as SettingsIcon, ShieldCheck,
   SlidersHorizontal, UserRound, X, type LucideIcon,
 } from 'lucide-react';
 import type { Session } from '../types';
 import { chatApi, fetchWithAuth } from '../lib/api';
 import { serverTime } from '../lib/time';
 import { dispatchShortcut, isMac } from '../lib/shortcuts';
+import { fetchLibraryFile, sendFilesToComposer } from '../lib/libraryAttach';
+import { toast } from '../lib/toast';
 
 /**
  * Command-style search dialog (Ctrl/⌘+K). Tabs: All, Chats, Library, Settings.
@@ -38,11 +40,16 @@ interface PaletteItem {
   /** Labels that come from the user's own data are not auto-translated. */
   userContent?: boolean;
   run: () => void;
+  /** Set for Library files: enables the 3-dot menu and multi-select. */
+  doc?: KnowledgeDoc;
 }
 
 interface KnowledgeDoc {
   id: number;
   name: string;
+  /** Real file name, used when the document is attached to the composer. */
+  fileName: string;
+  mimeType: string;
 }
 
 const mac = isMac();
@@ -109,6 +116,13 @@ export default function SearchPalette({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const requestRef = useRef(0);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  // Library file actions: multi-select mode, the 3-dot menu and delete confirmation.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [menu, setMenu] = useState<{ doc: KnowledgeDoc; top: number; right: number } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<KnowledgeDoc[] | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const q = query.trim();
 
@@ -120,28 +134,45 @@ export default function SearchPalette({
     setActiveIndex(0);
     setServerResults(null);
     setSearching(false);
+    setSelectMode(false);
+    setSelectedIds([]);
+    setMenu(null);
+    setConfirmDelete(null);
     inputRef.current?.focus();
     const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 40);
 
     let cancelled = false;
-    void (async () => {
+    const loadDocs = async () => {
       try {
         const data = await fetchWithAuth('/api/rag/documents');
         if (cancelled || !Array.isArray(data)) return;
-        // The same file can be stored more than once; number the copies 1, 2, 3.
+        // Only files whose original is stored can be picked. The same file can be stored
+        // more than once; number the copies 1, 2, 3.
         const cleaned = (data as any[])
-          .map(item => ({ id: Number(item?.id), name: String(item?.name ?? '') }))
+          .filter(item => item?.hasFile)
+          .map(item => ({
+            id: Number(item?.id),
+            name: String(item?.name ?? ''),
+            mimeType: String(item?.mimeType ?? ''),
+          }))
           .filter(item => Number.isFinite(item.id) && item.name);
         const numbered = numberDuplicateNames(cleaned);
-        setDocs(cleaned.map(item => ({ ...item, name: numbered.get(item.id) ?? item.name })));
+        setDocs(cleaned.map(item => ({ ...item, fileName: item.name, name: numbered.get(item.id) ?? item.name })));
       } catch {
-        if (!cancelled) setDocs([]);
+        /* keep what is already listed */
       }
-    })();
+    };
+    void loadDocs();
+    // Files attached in chat appear within a couple of seconds, without reopening the dialog.
+    const refreshTimer = window.setInterval(() => { void loadDocs(); }, 2500);
+    const onLibraryUpdated = () => { void loadDocs(); };
+    window.addEventListener('twinkle-library-updated', onLibraryUpdated);
 
     return () => {
       cancelled = true;
       window.clearTimeout(focusTimer);
+      window.clearInterval(refreshTimer);
+      window.removeEventListener('twinkle-library-updated', onLibraryUpdated);
     };
   }, [open]);
 
@@ -151,12 +182,26 @@ export default function SearchPalette({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
+        // Close the innermost layer first: confirmation, then the 3-dot menu, then select mode.
+        if (confirmDelete) { setConfirmDelete(null); return; }
+        if (menu) { setMenu(null); return; }
+        if (selectMode) { setSelectMode(false); setSelectedIds([]); return; }
         onClose();
       }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [open, onClose]);
+  }, [open, onClose, confirmDelete, menu, selectMode]);
+
+  // Clicking anywhere outside the 3-dot menu closes it.
+  useEffect(() => {
+    if (!menu) return;
+    const onDown = (event: MouseEvent) => {
+      if (!(event.target as HTMLElement | null)?.closest('[data-doc-menu]')) setMenu(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [menu]);
 
   // Chat search: instant local matches, replaced by the server's answer when it arrives.
   useEffect(() => {
@@ -195,6 +240,64 @@ export default function SearchPalette({
     action();
   }, [onClose]);
 
+  // Picking Library files puts them in the chat composer, ready to send.
+  const attachDocs = useCallback(async (list: KnowledgeDoc[]) => {
+    if (!list.length || busy) return;
+    setBusy(true);
+    try {
+      const files = await Promise.all(list.map(doc => fetchLibraryFile(doc.id, doc.fileName)));
+      onClose();
+      // Not on a chat page (Settings, Profile...): open the chat; it picks the files up on load.
+      if (!/^\/(chat\/|$)/.test(window.location.pathname)) navigate('/');
+      sendFilesToComposer(files);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'This file could not be opened from your Library.');
+    } finally {
+      setBusy(false);
+    }
+  }, [onClose, navigate, busy]);
+
+  const deleteDocs = useCallback(async (list: KnowledgeDoc[]) => {
+    if (!list.length || busy) return;
+    setBusy(true);
+    const removed: number[] = [];
+    try {
+      for (const doc of list) {
+        try {
+          await fetchWithAuth(`/api/rag/documents/${doc.id}`, { method: 'DELETE' });
+          removed.push(doc.id);
+        } catch { /* reported below */ }
+      }
+      setDocs(prev => prev.filter(doc => !removed.includes(doc.id)));
+      setSelectedIds(prev => prev.filter(id => !removed.includes(id)));
+      if (removed.length === list.length) {
+        toast.success(list.length === 1 ? 'File deleted from your Library' : `${list.length} files deleted from your Library`);
+        setSelectMode(false);
+      } else {
+        toast.error(removed.length ? 'Some files could not be deleted. Please try again.' : 'The file could not be deleted. Please try again.');
+      }
+    } finally {
+      setConfirmDelete(null);
+      setBusy(false);
+    }
+  }, [busy]);
+
+  const toggleSelected = useCallback((id: number) => {
+    setSelectedIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
+  }, []);
+
+  const openDocMenu = (event: React.MouseEvent<HTMLElement>, doc: KnowledgeDoc) => {
+    event.stopPropagation();
+    if (menu?.doc.id === doc.id) { setMenu(null); return; }
+    const button = event.currentTarget.getBoundingClientRect();
+    const dialog = dialogRef.current?.getBoundingClientRect();
+    if (!dialog) return;
+    const menuHeight = 96;
+    const below = button.bottom - dialog.top + 4;
+    const top = below + menuHeight > dialog.height ? button.top - dialog.top - menuHeight - 4 : below;
+    setMenu({ doc, top, right: dialog.right - button.right });
+  };
+
   // ── Build the result list for the current tab and query ───────────────────
   const items = useMemo<PaletteItem[]>(() => {
     const out: PaletteItem[] = [];
@@ -203,7 +306,6 @@ export default function SearchPalette({
       const actions: Array<PaletteItem & { keywords: string }> = [
         { key: 'a-new', section: 'Actions', label: 'New chat', Icon: Plus, hint: SHORTCUT_NEW_CHAT, keywords: 'new start conversation', run: () => go(onNewSession) },
         { key: 'a-live', section: 'Actions', label: 'Live Talk', Icon: AudioLines, hint: SHORTCUT_LIVE_TALK, keywords: 'voice speak talk', run: () => go(() => dispatchShortcut('live-talk')) },
-        { key: 'a-kb', section: 'Actions', label: 'Library', Icon: BookOpen, keywords: 'documents upload files rag knowledge', run: () => go(() => navigate('/library')) },
         { key: 'a-chats', section: 'Actions', label: 'All chats', Icon: MessagesSquare, keywords: 'history list view', run: () => go(() => navigate('/chats')) },
         { key: 'a-settings', section: 'Actions', label: 'Settings', Icon: SettingsIcon, hint: SHORTCUT_SETTINGS, keywords: 'preferences options', run: () => go(() => navigate('/settings')) },
         { key: 'a-keys', section: 'Actions', label: 'Keyboard shortcuts', Icon: SlidersHorizontal, hint: SHORTCUT_SHORTCUTS, keywords: 'keys hotkeys', run: () => go(() => navigate('/settings?tab=shortcuts')) },
@@ -246,9 +348,10 @@ export default function SearchPalette({
             key: `d-${doc.id}`,
             section: 'Library',
             label: doc.name,
-            Icon: FileText,
+            Icon: doc.mimeType.startsWith('image/') ? ImageIcon : FileText,
             userContent: true,
-            run: () => go(() => navigate('/library')),
+            doc,
+            run: () => { if (selectMode) toggleSelected(doc.id); else void attachDocs([doc]); },
           });
         });
     }
@@ -269,7 +372,7 @@ export default function SearchPalette({
     }
 
     return out;
-  }, [tab, q, sessions, serverResults, docs, go, navigate, onNewSession, onSelectSession]);
+  }, [tab, q, sessions, serverResults, docs, go, navigate, onNewSession, onSelectSession, attachDocs, selectMode, toggleSelected]);
 
   // Keep the highlighted row valid and in view.
   useEffect(() => {
@@ -351,6 +454,7 @@ export default function SearchPalette({
       <button type="button" aria-label="Close search" tabIndex={-1} onClick={onClose} className="absolute inset-0 cursor-default" />
 
       <motion.div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="Search"
@@ -425,6 +529,20 @@ export default function SearchPalette({
         </div>
 
         {/* Results */}
+        {tab === 'knowledge' && docs.length > 0 && (
+          <div className="flex shrink-0 items-center justify-between px-6 pb-1 pt-1 text-[13px] text-zinc-500 dark:text-zinc-400">
+            <span>{selectMode ? `${selectedIds.length} selected` : `${docs.length} ${docs.length === 1 ? 'file' : 'files'}`}</span>
+            <button
+              type="button"
+              tabIndex={-1}
+              onClick={() => { setSelectMode(on => !on); setSelectedIds([]); setMenu(null); }}
+              className="rounded-full px-3 py-1 text-[13px] font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              {selectMode ? 'Cancel' : 'Select'}
+            </button>
+          </div>
+        )}
+
         <div ref={listRef} id="search-palette-list" role="listbox" aria-label="Results" className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
           {items.length === 0 ? (
             <p className="px-3 py-6 text-[15px] text-zinc-500 dark:text-zinc-400">
@@ -432,7 +550,7 @@ export default function SearchPalette({
                 ? 'Searching…'
                 : q
                   ? <>No results for “<span data-twinkle-user-content>{q}</span>”</>
-                  : tab === 'chats' ? 'No chats yet' : tab === 'knowledge' ? 'No documents in your library yet' : 'Nothing to show'}
+                  : tab === 'chats' ? 'No chats yet' : tab === 'knowledge' ? 'No files in your library yet. Files you attach in chat appear here.' : 'Nothing to show'}
             </p>
           ) : (
             sections.map(section => (
@@ -442,10 +560,9 @@ export default function SearchPalette({
                   const active = index === activeIndex;
                   const Icon = item.Icon;
                   return (
-                    <button
+                    <div
                       key={item.key}
                       id={`search-item-${item.key}`}
-                      type="button"
                       role="option"
                       aria-selected={active}
                       data-active={active}
@@ -455,29 +572,91 @@ export default function SearchPalette({
                       onMouseEnter={() => {
                         if (item.key.startsWith('c-')) onPrefetchSession?.(Number(item.key.slice(2)));
                       }}
-                      className={`flex h-11 w-full items-center gap-3.5 rounded-xl px-3 text-left transition-colors ${
+                      className={`group flex h-11 w-full cursor-pointer items-center gap-3.5 rounded-xl px-3 text-left transition-colors ${
                         active ? 'bg-zinc-100 dark:bg-zinc-800' : ''
                       }`}
                     >
-                      <Icon className="h-5 w-5 shrink-0 text-zinc-800 dark:text-zinc-200" strokeWidth={1.7} aria-hidden="true" />
+                      {item.doc && selectMode ? (
+                        <span
+                          aria-hidden="true"
+                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                            selectedIds.includes(item.doc.id)
+                              ? 'border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-900'
+                              : 'border-zinc-300 text-transparent dark:border-zinc-600'
+                          }`}
+                        >
+                          <Check className="h-3.5 w-3.5" strokeWidth={3} />
+                        </span>
+                      ) : (
+                        <Icon className="h-5 w-5 shrink-0 text-zinc-800 dark:text-zinc-200" strokeWidth={1.7} aria-hidden="true" />
+                      )}
                       <span
                         {...(item.userContent ? { 'data-twinkle-user-content': true } : {})}
                         className="min-w-0 flex-1 truncate text-[16px] text-zinc-900 dark:text-zinc-100"
                       >
                         {item.label}
                       </span>
-                      {active ? (
+                      {item.doc && !selectMode ? (
+                        <button
+                          type="button"
+                          data-doc-menu
+                          tabIndex={-1}
+                          aria-label={`Options for ${item.label}`}
+                          aria-haspopup="menu"
+                          onClick={event => openDocMenu(event, item.doc!)}
+                          onMouseDown={event => event.stopPropagation()}
+                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-200 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-100 ${
+                            active || menu?.doc.id === item.doc.id ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100'
+                          }`}
+                        >
+                          <MoreHorizontal className="h-5 w-5" strokeWidth={1.8} />
+                        </button>
+                      ) : active && !selectMode ? (
                         <CornerDownLeft className="h-4 w-4 shrink-0 text-zinc-500 dark:text-zinc-400" strokeWidth={1.8} aria-hidden="true" />
                       ) : item.hint ? (
                         <span className="hidden shrink-0 text-[12px] text-zinc-400 sm:inline dark:text-zinc-500">{item.hint}</span>
                       ) : null}
-                    </button>
+                    </div>
                   );
                 })}
               </div>
             ))
           )}
         </div>
+
+        {/* Multi-select actions */}
+        {tab === 'knowledge' && selectMode && (
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-zinc-100 px-5 py-3 dark:border-zinc-800">
+            <button
+              type="button"
+              tabIndex={-1}
+              onClick={() => setSelectedIds(selectedIds.length === items.length ? [] : items.flatMap(item => (item.doc ? [item.doc.id] : [])))}
+              className="rounded-full px-3 py-1.5 text-[14px] text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              {selectedIds.length === items.length && items.length > 0 ? 'Clear selection' : 'Select all'}
+            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                tabIndex={-1}
+                disabled={!selectedIds.length || busy}
+                onClick={() => void attachDocs(docs.filter(doc => selectedIds.includes(doc.id)))}
+                className="inline-flex items-center gap-2 rounded-full bg-zinc-900 px-4 py-1.5 text-[14px] font-medium text-white transition-opacity disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900"
+              >
+                {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />} Add to chat
+              </button>
+              <button
+                type="button"
+                tabIndex={-1}
+                disabled={!selectedIds.length || busy}
+                onClick={() => setConfirmDelete(docs.filter(doc => selectedIds.includes(doc.id)))}
+                className="inline-flex items-center gap-2 rounded-full border border-red-200 px-4 py-1.5 text-[14px] font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-40 dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10"
+              >
+                <Trash2 className="h-4 w-4" /> Delete
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Key hints (hidden on phones) */}
         <div className="hidden shrink-0 items-center justify-between gap-4 border-t border-zinc-100 px-5 py-3 text-[13px] text-zinc-500 sm:flex dark:border-zinc-800 dark:text-zinc-400">
@@ -492,6 +671,73 @@ export default function SearchPalette({
             </span>
           )}
         </div>
+
+        {/* 3-dot menu for a Library file */}
+        {menu && (
+          <div
+            data-doc-menu
+            role="menu"
+            style={{ top: menu.top, right: menu.right }}
+            className="absolute z-30 w-44 overflow-hidden rounded-xl border border-zinc-200 bg-white p-1 shadow-[0_12px_32px_rgba(0,0,0,0.16)] dark:border-zinc-700 dark:bg-zinc-800"
+          >
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => { const doc = menu.doc; setMenu(null); void attachDocs([doc]); }}
+              className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] text-zinc-800 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-700"
+            >
+              <Paperclip className="h-4 w-4" strokeWidth={1.8} /> Add to chat
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => { setMenu(null); setSelectMode(true); setSelectedIds([menu.doc.id]); }}
+              className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] text-zinc-800 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-700"
+            >
+              <Check className="h-4 w-4" strokeWidth={1.8} /> Select
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => { const doc = menu.doc; setMenu(null); setConfirmDelete([doc]); }}
+              className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
+            >
+              <Trash2 className="h-4 w-4" strokeWidth={1.8} /> Delete
+            </button>
+          </div>
+        )}
+
+        {/* Delete confirmation */}
+        {confirmDelete && (
+          <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/30 px-6">
+            <div role="alertdialog" aria-modal="true" aria-label="Delete from Library" className="w-full max-w-[380px] rounded-2xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+              <h3 className="text-[17px] font-semibold text-zinc-900 dark:text-zinc-100">
+                {confirmDelete.length === 1 ? 'Delete this file?' : `Delete ${confirmDelete.length} files?`}
+              </h3>
+              <p className="mt-2 text-[14px] text-zinc-500 dark:text-zinc-400">
+                {confirmDelete.length === 1 ? <>“<span data-twinkle-user-content>{confirmDelete[0].name}</span>” will be</> : 'These files will be'} removed from your Library. Chats that already used {confirmDelete.length === 1 ? 'it' : 'them'} are not changed.
+              </p>
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setConfirmDelete(null)}
+                  className="rounded-full px-4 py-2 text-[14px] text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void deleteDocs(confirmDelete)}
+                  className="inline-flex items-center gap-2 rounded-full bg-red-600 px-4 py-2 text-[14px] font-medium text-white hover:bg-red-700 disabled:opacity-60"
+                >
+                  {busy && <LoaderCircle className="h-4 w-4 animate-spin" />} Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </motion.div>
     </motion.div>,
     document.body,
