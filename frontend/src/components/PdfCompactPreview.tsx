@@ -94,7 +94,7 @@ export default function PdfCompactPreview({ src, fileName, onClose }: Props) {
             </span>
             {!failed && pagesLabel && (
               <span
-                className="absolute inset-0 flex items-center justify-center text-zinc-500 transition-opacity duration-150 group-hover/pdf:opacity-0 group-focus-visible/pdf:opacity-0 dark:text-zinc-400 [@media(hover:none)]:opacity-0"
+                className="absolute inset-0 flex items-center justify-center font-medium text-zinc-800 transition-opacity duration-150 group-hover/pdf:opacity-0 group-focus-visible/pdf:opacity-0 dark:text-zinc-100 [@media(hover:none)]:opacity-0"
               >
                 {pagesLabel}
               </span>
