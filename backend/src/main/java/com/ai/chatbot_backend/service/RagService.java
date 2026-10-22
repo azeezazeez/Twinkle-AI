@@ -45,10 +45,14 @@ public class RagService {
     @jakarta.annotation.PreDestroy
     void shutdownIndexer() { indexer.shutdown(); }
 
-    /** Marks rows left in PROCESSING by a restart/redeploy (their worker thread died) as FAILED. */
+    /**
+     * Rows left in PROCESSING by a restart/redeploy lost their worker thread. If the original
+     * file is stored the document is still fully usable (READY); otherwise it is marked FAILED.
+     */
     @jakarta.annotation.PostConstruct
     void recoverInterruptedDocuments() {
         try {
+            jdbc.update("update rag_documents set status='READY' where status='PROCESSING' and file_data is not null");
             int n = jdbc.update("update rag_documents set status='FAILED', chunk_count=0 where status='PROCESSING'");
             if (n > 0) log.warn("Marked {} interrupted library document(s) as FAILED after restart", n);
         } catch (Exception e) {
@@ -61,32 +65,38 @@ public class RagService {
         return name.length() > 250 ? name.substring(0, 250) : name;
     }
 
-    private boolean alreadyInLibrary(Long userId, String name, long size) {
-        Integer existing = jdbc.queryForObject(
-                "select count(*) from rag_documents where user_id=? and name=? and byte_size=? and status in ('READY','PROCESSING')",
-                Integer.class, userId, name, size);
-        return existing != null && existing > 0;
+    /** Id of the newest Library row with this name and size, or null. */
+    private Long findExisting(Long userId, String name, long size) {
+        List<Long> ids = jdbc.queryForList(
+                "select id from rag_documents where user_id=? and name=? and byte_size=? order by id desc limit 1",
+                Long.class, userId, name, size);
+        return ids.isEmpty() ? null : ids.get(0);
     }
 
-    private Long insertDocument(Long userId, String name, String mimeType, long size, String status) {
+    private Long insertDocument(Long userId, String name, String mimeType, long size, String status, byte[] data) {
         Long docId = jdbc.queryForObject(
-                "insert into rag_documents(user_id, name, mime_type, byte_size, status, chunk_count, created_at) " +
-                "values(?,?,?,?,?,?,now()) returning id",
+                "insert into rag_documents(user_id, name, mime_type, byte_size, status, chunk_count, file_data, created_at) " +
+                "values(?,?,?,?,?,?,?,now()) returning id",
                 Long.class, userId, name,
-                Optional.ofNullable(mimeType).orElse("application/octet-stream"), size, status, 0);
+                Optional.ofNullable(mimeType).orElse("application/octet-stream"), size, status, 0, data);
         if (docId == null) throw new IllegalStateException("The database did not return a document ID.");
         return docId;
     }
 
-    /** Indexes with up to 3 attempts so a temporary provider error (429/503) does not lose the file. */
+    /** Same file attached again: keep one row, but make sure the original file is stored and usable. */
+    private void refreshExisting(Long docId, Long userId, byte[] data) {
+        if (data == null) return;
+        jdbc.update("update rag_documents set file_data=?, status=case when status='FAILED' then 'READY' else status end " +
+                "where id=? and user_id=? and file_data is null", data, docId, userId);
+    }
+
+    /** Embeds with up to 3 attempts. This only powers Live Talk "search my library"; the file is usable without it. */
     private void indexWithRetry(Long docId, Long userId, String name, String text) {
         long[] waits = {0L, 3_000L, 8_000L};
         Exception last = null;
-        for (int attempt = 0; attempt < waits.length; attempt++) {
+        for (long wait : waits) {
             try {
-                if (waits[attempt] > 0) Thread.sleep(waits[attempt]);
-                // index() marks the row FAILED on error; put it back to PROCESSING for the retry.
-                if (attempt > 0) jdbc.update("update rag_documents set status='PROCESSING' where id=? and user_id=?", docId, userId);
+                if (wait > 0) Thread.sleep(wait);
                 index(docId, userId, name, text);
                 return;
             } catch (InterruptedException ie) {
@@ -94,58 +104,63 @@ public class RagService {
                 return;
             } catch (Exception e) {
                 last = e;
-                log.warn("Library indexing attempt {} failed; documentId={}, filename={}", attempt + 1, docId, name);
             }
         }
-        log.error("Background library indexing gave up; documentId={}, filename={}", docId, name, last);
+        log.warn("Background library embedding gave up (file is still available); documentId={}, filename={}, message={}",
+                docId, name, last == null ? "" : safeMessage(last));
     }
 
     /**
-     * Adds a document attached in chat to the user's Library. The row is created
-     * immediately (status PROCESSING) so it shows up in the Library at once; the
-     * embeddings are generated in the background. A file with the same name and
-     * size that is already in the Library is not added twice. A document with no
-     * readable text is still listed (status FAILED) instead of silently vanishing.
+     * Adds a document attached in chat to the user's Library. The original file is stored and the
+     * row is READY immediately, so it can be picked from the Library right away. Text embeddings
+     * (used only for Live Talk library search) are generated in the background. The same file
+     * (same name and size) is never added twice.
      */
-    public void queueChatAttachment(Long userId, String fileName, String mimeType, long size, String extractedText) {
+    public void queueChatAttachment(Long userId, String fileName, String mimeType, long size, String extractedText, byte[] data) {
         if (userId == null) return;
         String name = cleanName(fileName, "document");
+        Long existing = findExisting(userId, name, size);
+        if (existing != null) { refreshExisting(existing, userId, data); return; }
+        Long docId = insertDocument(userId, name, mimeType, size, "READY", data);
         String text = extractedText == null ? "" : extractedText.replaceAll("\\s+", " ").trim();
-        if (alreadyInLibrary(userId, name, size)) return;
-        if (text.length() < 30) {
-            log.info("Chat attachment has too little text; listing as FAILED; userId={}, filename={}", userId, name);
-            insertDocument(userId, name, mimeType, size, "FAILED");
-            return;
-        }
+        if (text.length() < 30) return;
         if (text.length() > 2_000_000) text = text.substring(0, 2_000_000);
-        Long docId = insertDocument(userId, name, mimeType, size, "PROCESSING");
         final String indexedText = text;
         indexer.submit(() -> indexWithRetry(docId, userId, name, indexedText));
     }
 
     /**
-     * Adds an image / audio / video attached in chat to the Library. These files
-     * have no text of their own, so Gemini describes them (and transcribes any
-     * visible text or speech) in the background and that description is indexed.
+     * Adds an image / audio / video attached in chat to the Library. The file is stored and
+     * listed at once; Gemini then describes it in the background so Live Talk can search it.
      */
     public void queueChatMedia(Long userId, String fileName, String mimeType, byte[] data) {
         if (userId == null || data == null || data.length == 0 || mimeType == null) return;
         String name = cleanName(fileName, "attachment");
         long size = data.length;
-        if (alreadyInLibrary(userId, name, size)) return;
-        Long docId = insertDocument(userId, name, mimeType, size, "PROCESSING");
+        Long existing = findExisting(userId, name, size);
+        if (existing != null) { refreshExisting(existing, userId, data); return; }
+        Long docId = insertDocument(userId, name, mimeType, size, "READY", data);
         indexer.submit(() -> {
             try {
                 String description = describeMedia(name, mimeType, data);
                 String text = ("File: " + name + " (" + mimeType + ")\n" + description).replaceAll("\\s+", " ").trim();
-                if (text.length() < 30) throw new IllegalStateException("No description could be produced for this file.");
+                if (text.length() < 30) return;
                 indexWithRetry(docId, userId, name, text);
             } catch (Exception e) {
-                log.error("Library media description failed; documentId={}, filename={}, message={}", docId, name, safeMessage(e));
-                try { jdbc.update("update rag_documents set status='FAILED', chunk_count=0 where id=? and user_id=?", docId, userId); }
-                catch (Exception statusError) { log.error("Could not mark media document FAILED; documentId={}", docId, statusError); }
+                log.warn("Library media description failed (file is still available); documentId={}, filename={}, message={}", docId, name, safeMessage(e));
             }
         });
+    }
+
+    public record StoredFile(String name, String mimeType, byte[] data) {}
+
+    /** The original file of a Library document, or empty when it was not stored. */
+    public Optional<StoredFile> getFile(Long userId, long documentId) {
+        List<StoredFile> rows = jdbc.query(
+                "select name, mime_type, file_data from rag_documents where id=? and user_id=? and file_data is not null",
+                (rs, i) -> new StoredFile(rs.getString("name"), rs.getString("mime_type"), rs.getBytes("file_data")),
+                documentId, userId);
+        return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
     }
 
     private String describeMedia(String name, String mimeType, byte[] data) {
@@ -177,13 +192,7 @@ public class RagService {
         if (text.length() < 30) throw new IllegalArgumentException("Not enough readable text was found in this document.");
         if (text.length() > 2_000_000) text = text.substring(0, 2_000_000);
         log.info("RAG ingestion started; userId={}, filename={}, sizeBytes={}", userId, name, file.getSize());
-        Long docId = jdbc.queryForObject(
-                "insert into rag_documents(user_id, name, mime_type, byte_size, status, chunk_count, created_at) " +
-                "values(?,?,?,?,?,?,now()) returning id",
-                Long.class, userId, name,
-                Optional.ofNullable(file.getContentType()).orElse("application/octet-stream"),
-                file.getSize(), "PROCESSING", 0);
-        if (docId == null) throw new IllegalStateException("The database did not return a document ID.");
+        Long docId = insertDocument(userId, name, file.getContentType(), file.getSize(), "PROCESSING", file.getBytes());
         int chunkCount = index(docId, userId, name, text);
         log.info("RAG document processed successfully; documentId={}, userId={}, chunkCount={}", docId, userId, chunkCount);
         return Map.of("id", docId, "name", name, "status", "READY", "chunkCount", chunkCount, "size", file.getSize());
@@ -217,9 +226,9 @@ public class RagService {
         } catch (Exception e) {
             try { jdbc.update("delete from rag_chunks where document_id=? and user_id=?", docId, userId); }
             catch (Exception cleanupError) { log.warn("Could not clean partial RAG chunks for documentId={}", docId, cleanupError); }
-            try { jdbc.update("update rag_documents set status='FAILED', chunk_count=0 where id=? and user_id=?", docId, userId); }
-            catch (Exception statusError) { log.error("Could not mark RAG document FAILED; documentId={}", docId, statusError); }
-            log.error("RAG document processing failed; documentId={}, userId={}, filename={}, errorType={}, message={}",
+            try { jdbc.update("update rag_documents set status=case when file_data is not null then 'READY' else 'FAILED' end, chunk_count=0 where id=? and user_id=?", docId, userId); }
+            catch (Exception statusError) { log.error("Could not update RAG document status; documentId={}", docId, statusError); }
+            log.warn("RAG embedding failed; documentId={}, userId={}, filename={}, errorType={}, message={}",
                     docId, userId, name, e.getClass().getSimpleName(), safeMessage(e));
             throw e;
         }
@@ -234,7 +243,7 @@ public class RagService {
     }
 
     public List<Map<String,Object>> list(Long userId) {
-        return jdbc.queryForList("select id, name, mime_type as \"mimeType\", byte_size as size, status, chunk_count as \"chunkCount\", created_at as \"createdAt\" from rag_documents where user_id=? order by created_at desc", userId);
+        return jdbc.queryForList("select id, name, mime_type as \"mimeType\", byte_size as size, status, chunk_count as \"chunkCount\", created_at as \"createdAt\", (file_data is not null) as \"hasFile\" from rag_documents where user_id=? order by created_at desc", userId);
     }
 
     @Transactional
