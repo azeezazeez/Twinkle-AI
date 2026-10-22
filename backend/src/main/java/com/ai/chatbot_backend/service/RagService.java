@@ -51,6 +51,8 @@ public class RagService {
      */
     @jakarta.annotation.PostConstruct
     void recoverInterruptedDocuments() {
+        if (apiKey == null || apiKey.isBlank()) log.error("RAG_CONFIG: no Gemini API key set (twinkle.rag.api-key / gemini.api.key); embeddings will fail");
+        else log.info("RAG_CONFIG: embeddingModel={}, baseUrl={}, keyLength={}", embeddingModel, baseUrl, apiKey.length());
         try {
             jdbc.update("update rag_documents set status='READY' where status='PROCESSING' and file_data is not null");
             int n = jdbc.update("update rag_documents set status='FAILED', chunk_count=0 where status='PROCESSING'");
@@ -71,6 +73,11 @@ public class RagService {
                 "select id from rag_documents where user_id=? and name=? and byte_size=? order by id desc limit 1",
                 Long.class, userId, name, size);
         return ids.isEmpty() ? null : ids.get(0);
+    }
+
+    private boolean hasChunks(Long docId) {
+        Integer n = jdbc.queryForObject("select count(*) from rag_chunks where document_id=?", Integer.class, docId);
+        return n != null && n > 0;
     }
 
     private Long insertDocument(Long userId, String name, String mimeType, long size, String status, byte[] data) {
@@ -106,8 +113,8 @@ public class RagService {
                 last = e;
             }
         }
-        log.warn("Background library embedding gave up (file is still available); documentId={}, filename={}, message={}",
-                docId, name, last == null ? "" : safeMessage(last));
+        log.error("RAG_EMBEDDING_FAILED: background library embedding gave up (file is still available); documentId={}, filename={}, message={}",
+                docId, name, last == null ? "" : safeMessage(last), last);
     }
 
     /**
@@ -120,12 +127,21 @@ public class RagService {
         if (userId == null) return;
         String name = cleanName(fileName, "document");
         Long existing = findExisting(userId, name, size);
-        if (existing != null) { refreshExisting(existing, userId, data); return; }
-        Long docId = insertDocument(userId, name, mimeType, size, "READY", data);
         String text = extractedText == null ? "" : extractedText.replaceAll("\\s+", " ").trim();
-        if (text.length() < 30) return;
         if (text.length() > 2_000_000) text = text.substring(0, 2_000_000);
         final String indexedText = text;
+        if (existing != null) {
+            refreshExisting(existing, userId, data);
+            // A previous attempt may have failed before any chunk was stored: try again.
+            if (indexedText.length() >= 30 && !hasChunks(existing)) {
+                log.info("Re-indexing library document with no chunks; documentId={}, filename={}", existing, name);
+                indexer.submit(() -> indexWithRetry(existing, userId, name, indexedText));
+            }
+            return;
+        }
+        Long docId = insertDocument(userId, name, mimeType, size, "READY", data);
+        if (indexedText.length() < 30) return;
+        log.info("Queued library embedding; documentId={}, filename={}, textLength={}", docId, name, indexedText.length());
         indexer.submit(() -> indexWithRetry(docId, userId, name, indexedText));
     }
 
@@ -138,8 +154,9 @@ public class RagService {
         String name = cleanName(fileName, "attachment");
         long size = data.length;
         Long existing = findExisting(userId, name, size);
-        if (existing != null) { refreshExisting(existing, userId, data); return; }
-        Long docId = insertDocument(userId, name, mimeType, size, "READY", data);
+        if (existing != null) refreshExisting(existing, userId, data);
+        if (existing != null && hasChunks(existing)) return;
+        Long docId = existing != null ? existing : insertDocument(userId, name, mimeType, size, "READY", data);
         indexer.submit(() -> {
             try {
                 String description = describeMedia(name, mimeType, data);
@@ -296,7 +313,15 @@ public class RagService {
                         "model", "models/" + embeddingModel,
                         "content", Map.of("parts", List.of(Map.of("text", text)))
                 )).toList();
-        JsonNode root = geminiCall("/models/" + embeddingModel + ":batchEmbedContents", Map.of("requests", requests));
+        JsonNode root;
+        try {
+            root = geminiCall("/models/" + embeddingModel + ":batchEmbedContents", Map.of("requests", requests));
+        } catch (IllegalStateException batchError) {
+            log.warn("Batch embedding failed ({}); falling back to single embedContent calls", batchError.getMessage());
+            List<List<Double>> single = new ArrayList<>();
+            for (String t : texts) single.add(embed(t));
+            return single;
+        }
         JsonNode embeddings = root.path("embeddings");
         if (!embeddings.isArray()) throw new IllegalStateException("Gemini batch embedding API returned no vectors.");
         List<List<Double>> vectors = new ArrayList<>();
@@ -333,12 +358,19 @@ public class RagService {
                     .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(payload), StandardCharsets.UTF_8)).build();
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
             if (res.statusCode() < 200 || res.statusCode() >= 300) {
-                // Do not expose the key or provider response body in application errors.
-                throw new IllegalStateException("Gemini RAG request failed (HTTP " + res.statusCode() + "). Check GEMINI_API_KEY, model availability, and quota.");
+                String detail = "";
+                try { detail = res.body() == null ? "" : res.body().replaceAll("\\s+", " "); } catch (Exception ignored) {}
+                detail = safeMessage(new RuntimeException(detail));
+                log.error("Gemini RAG request failed: path={}, http={}, body={}", path, res.statusCode(), detail);
+                // The provider body never contains our key (it is only in the request URL).
+                throw new IllegalStateException("Gemini RAG request failed (HTTP " + res.statusCode() + "): " + detail);
             }
             return mapper.readTree(res.body());
         } catch (IllegalStateException e) { throw e; }
-        catch (Exception e) { throw new IllegalStateException("Could not reach the Gemini API for RAG."); }
+        catch (Exception e) {
+            log.error("Could not reach the Gemini API for RAG: {}", e.toString());
+            throw new IllegalStateException("Could not reach the Gemini API for RAG: " + e.getClass().getSimpleName());
+        }
     }
 
     private List<String> chunk(String text, int size, int overlap) {
