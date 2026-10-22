@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, BookOpen, Check, FileText, LoaderCircle, Search, Send, Trash2, UploadCloud, X } from 'lucide-react';
+import { ArrowLeft, BookOpen, Check, FileText, Image as ImageIcon, LoaderCircle, Search, Send, Trash2, UploadCloud, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { fetchWithAuth } from '../lib/api';
 import { toast } from '../lib/toast';
 import ConfirmationModal from '../components/ConfirmationModal';
 import { numberDuplicateNames } from '../lib/docNames';
 
-type Doc = { id: number; name: string; status: string; size: number; chunkCount: number; createdAt?: string };
+type Doc = { id: number; name: string; mimeType?: string; status: string; size: number; chunkCount: number; createdAt?: string };
 type Source = { citation: string; documentId: number; documentName: string; chunk: number; excerpt: string };
 type Answer = { answer: string; sources: Source[] };
 
@@ -286,11 +286,11 @@ export default function Library() {
                     >
                       <Check size={13} strokeWidth={3} />
                     </button>
-                    <FileText className="shrink-0 text-[#C6613F]" size={20} />
+                    {doc.mimeType?.startsWith('image/') ? <ImageIcon className="shrink-0 text-[#C6613F]" size={20} /> : <FileText className="shrink-0 text-[#C6613F]" size={20} />}
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">{nameOf(doc)}</div>
                       <div className="mt-1 text-xs text-zinc-500">
-                        {doc.status === 'READY' ? `${doc.chunkCount || 0} chunks · ${fmt(doc.size || 0)}` : doc.status}
+                        {doc.status === 'READY' ? `${doc.chunkCount || 0} chunks · ${fmt(doc.size || 0)}` : doc.status === 'PROCESSING' ? 'Processing…' : doc.status === 'FAILED' ? 'Could not be indexed (no readable text or the service was busy). Delete it and upload again.' : doc.status}
                       </div>
                     </div>
                     <button
