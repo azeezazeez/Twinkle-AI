@@ -45,36 +45,125 @@ public class RagService {
     @jakarta.annotation.PreDestroy
     void shutdownIndexer() { indexer.shutdown(); }
 
-    /**
-     * Adds a document attached in chat to the user's Library. The row is created
-     * immediately (status PROCESSING) so it shows up in the Library at once; the
-     * embeddings are generated in the background. A file with the same name and
-     * size that is already in the Library is not added twice.
-     */
-    public void queueChatAttachment(Long userId, String fileName, String mimeType, long size, String extractedText) {
-        if (userId == null || extractedText == null) return;
-        String name = Optional.ofNullable(fileName).orElse("document").replaceAll("[\\r\\n\\\\/]+", "_");
-        String text = extractedText.replaceAll("\\s+", " ").trim();
-        if (text.length() < 30) {
-            log.info("Chat attachment not added to library (too little text); userId={}, filename={}", userId, name);
-            return;
+    /** Marks rows left in PROCESSING by a restart/redeploy (their worker thread died) as FAILED. */
+    @jakarta.annotation.PostConstruct
+    void recoverInterruptedDocuments() {
+        try {
+            int n = jdbc.update("update rag_documents set status='FAILED', chunk_count=0 where status='PROCESSING'");
+            if (n > 0) log.warn("Marked {} interrupted library document(s) as FAILED after restart", n);
+        } catch (Exception e) {
+            log.warn("Could not recover interrupted library documents: {}", e.getMessage());
         }
-        if (text.length() > 2_000_000) text = text.substring(0, 2_000_000);
+    }
+
+    private static String cleanName(String fileName, String fallback) {
+        String name = Optional.ofNullable(fileName).filter(n -> !n.isBlank()).orElse(fallback).replaceAll("[\\r\\n\\\\/]+", "_");
+        return name.length() > 250 ? name.substring(0, 250) : name;
+    }
+
+    private boolean alreadyInLibrary(Long userId, String name, long size) {
         Integer existing = jdbc.queryForObject(
                 "select count(*) from rag_documents where user_id=? and name=? and byte_size=? and status in ('READY','PROCESSING')",
                 Integer.class, userId, name, size);
-        if (existing != null && existing > 0) return;
+        return existing != null && existing > 0;
+    }
+
+    private Long insertDocument(Long userId, String name, String mimeType, long size, String status) {
         Long docId = jdbc.queryForObject(
                 "insert into rag_documents(user_id, name, mime_type, byte_size, status, chunk_count, created_at) " +
                 "values(?,?,?,?,?,?,now()) returning id",
                 Long.class, userId, name,
-                Optional.ofNullable(mimeType).orElse("application/octet-stream"), size, "PROCESSING", 0);
+                Optional.ofNullable(mimeType).orElse("application/octet-stream"), size, status, 0);
         if (docId == null) throw new IllegalStateException("The database did not return a document ID.");
+        return docId;
+    }
+
+    /** Indexes with up to 3 attempts so a temporary provider error (429/503) does not lose the file. */
+    private void indexWithRetry(Long docId, Long userId, String name, String text) {
+        long[] waits = {0L, 3_000L, 8_000L};
+        Exception last = null;
+        for (int attempt = 0; attempt < waits.length; attempt++) {
+            try {
+                if (waits[attempt] > 0) Thread.sleep(waits[attempt]);
+                // index() marks the row FAILED on error; put it back to PROCESSING for the retry.
+                if (attempt > 0) jdbc.update("update rag_documents set status='PROCESSING' where id=? and user_id=?", docId, userId);
+                index(docId, userId, name, text);
+                return;
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return;
+            } catch (Exception e) {
+                last = e;
+                log.warn("Library indexing attempt {} failed; documentId={}, filename={}", attempt + 1, docId, name);
+            }
+        }
+        log.error("Background library indexing gave up; documentId={}, filename={}", docId, name, last);
+    }
+
+    /**
+     * Adds a document attached in chat to the user's Library. The row is created
+     * immediately (status PROCESSING) so it shows up in the Library at once; the
+     * embeddings are generated in the background. A file with the same name and
+     * size that is already in the Library is not added twice. A document with no
+     * readable text is still listed (status FAILED) instead of silently vanishing.
+     */
+    public void queueChatAttachment(Long userId, String fileName, String mimeType, long size, String extractedText) {
+        if (userId == null) return;
+        String name = cleanName(fileName, "document");
+        String text = extractedText == null ? "" : extractedText.replaceAll("\\s+", " ").trim();
+        if (alreadyInLibrary(userId, name, size)) return;
+        if (text.length() < 30) {
+            log.info("Chat attachment has too little text; listing as FAILED; userId={}, filename={}", userId, name);
+            insertDocument(userId, name, mimeType, size, "FAILED");
+            return;
+        }
+        if (text.length() > 2_000_000) text = text.substring(0, 2_000_000);
+        Long docId = insertDocument(userId, name, mimeType, size, "PROCESSING");
         final String indexedText = text;
+        indexer.submit(() -> indexWithRetry(docId, userId, name, indexedText));
+    }
+
+    /**
+     * Adds an image / audio / video attached in chat to the Library. These files
+     * have no text of their own, so Gemini describes them (and transcribes any
+     * visible text or speech) in the background and that description is indexed.
+     */
+    public void queueChatMedia(Long userId, String fileName, String mimeType, byte[] data) {
+        if (userId == null || data == null || data.length == 0 || mimeType == null) return;
+        String name = cleanName(fileName, "attachment");
+        long size = data.length;
+        if (alreadyInLibrary(userId, name, size)) return;
+        Long docId = insertDocument(userId, name, mimeType, size, "PROCESSING");
         indexer.submit(() -> {
-            try { index(docId, userId, name, indexedText); }
-            catch (Exception e) { log.error("Background library indexing failed; documentId={}, filename={}", docId, name, e); }
+            try {
+                String description = describeMedia(name, mimeType, data);
+                String text = ("File: " + name + " (" + mimeType + ")\n" + description).replaceAll("\\s+", " ").trim();
+                if (text.length() < 30) throw new IllegalStateException("No description could be produced for this file.");
+                indexWithRetry(docId, userId, name, text);
+            } catch (Exception e) {
+                log.error("Library media description failed; documentId={}, filename={}, message={}", docId, name, safeMessage(e));
+                try { jdbc.update("update rag_documents set status='FAILED', chunk_count=0 where id=? and user_id=?", docId, userId); }
+                catch (Exception statusError) { log.error("Could not mark media document FAILED; documentId={}", docId, statusError); }
+            }
         });
+    }
+
+    private String describeMedia(String name, String mimeType, byte[] data) {
+        String kind = mimeType.startsWith("image/") ? "image" : mimeType.startsWith("audio/") ? "audio recording" : "video";
+        String prompt = "This " + kind + " is being saved to a personal searchable library. Write a plain-text description that makes it easy to find later: "
+                + "first transcribe ALL visible text or spoken words exactly as they appear, then describe what it shows or contains "
+                + "(subjects, objects, setting, charts or tables with their values, key details). Do not identify real people by name. Do not use Markdown.";
+        List<Object> parts = List.of(
+                Map.of("text", prompt),
+                Map.of("inline_data", Map.of("mime_type", mimeType, "data", Base64.getEncoder().encodeToString(data))));
+        JsonNode root = geminiCall("/models/" + chatModel + ":generateContent", Map.of(
+                "contents", List.of(Map.of("role", "user", "parts", parts)),
+                "generationConfig", Map.of("temperature", 0.1)
+        ));
+        JsonNode out = root.path("candidates").path(0).path("content").path("parts");
+        StringBuilder sb = new StringBuilder();
+        if (out.isArray()) out.forEach(part -> { if (part.hasNonNull("text")) sb.append(part.path("text").asText()).append('\n'); });
+        return sb.toString().trim();
     }
 
     public Map<String,Object> ingest(Long userId, MultipartFile file) throws Exception {
