@@ -41,3 +41,6 @@ CREATE TABLE IF NOT EXISTS public.rag_chunks (
     CONSTRAINT uq_rag_chunks_document_chunk UNIQUE (document_id, chunk_index)
 );
 CREATE INDEX IF NOT EXISTS idx_rag_chunks_user_document ON public.rag_chunks (user_id, document_id);
+
+-- Original file of each Library document, so a document can be picked from the Library and attached to a chat.
+ALTER TABLE public.rag_documents ADD COLUMN IF NOT EXISTS file_data BYTEA;
