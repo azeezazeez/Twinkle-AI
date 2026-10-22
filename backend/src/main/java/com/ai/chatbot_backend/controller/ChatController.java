@@ -636,6 +636,21 @@ public class ChatController {
                             }
                         }
 
+                        // Add images / audio / video to the user's Library too. Gemini
+                        // describes them in the background and that description is indexed.
+                        Long mediaUserId = resolveUserId(session);
+                        if (mediaUserId != null && mediaUserId > 0) {
+                            try {
+                                ragService.queueChatMedia(mediaUserId, filename, mime, fileBytes);
+                            } catch (Exception ragError) {
+                                log.error(
+                                        "RAG_QUEUE_FAILED: source=chat_media, userId={}, filename={}, message={}",
+                                        mediaUserId, filename, ragError.getMessage(), ragError);
+                            }
+                        } else {
+                            log.warn("Skipping chat media library ingestion: no signed-in user; filename={}", filename);
+                        }
+
                         geminiMediaUrls.add(dataUrl);
                         continue;
                     }
