@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import {
-  Check, ChevronRight, FolderInput, MoreVertical, Pencil, Pin, PinOff, Plus, Search, SlidersHorizontal, Trash2, X,
+  Check, ChevronRight, FolderInput, MoreVertical, Pencil, Pin, PinOff, Plus, Search, SlidersHorizontal, Trash2, X, CheckCheck
 } from 'lucide-react';
 import type { Session } from '../types';
 import { chatApi } from '../lib/api';
@@ -644,14 +644,15 @@ export default function ChatsListPage({ sessions, onOpenSession, onNewChat, onDe
         )}
 
         {selectMode && (
-          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-zinc-100 px-4 py-2.5 dark:bg-white/5">
-            <div className="flex items-center gap-4 text-[14px] text-zinc-700 dark:text-zinc-200">
-              <span>{selected.length} selected</span>
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-zinc-100 px-4 py-2.5 dark:bg-white/5">
+            <div className="flex items-center gap-3 text-[14px] font-medium text-zinc-800 dark:text-zinc-100">
+              <span className="min-w-[84px]">{selected.length} selected</span>
               <button
                 type="button"
                 onClick={() => setSelected(allSelected ? [] : items.map(item => item.id))}
-                className="text-[#2F6FDE] hover:underline dark:text-[#6BA2F5]"
+                className="inline-flex h-8 items-center gap-2 rounded-full border border-zinc-300 bg-white px-3.5 text-[13px] font-medium text-zinc-900 transition-colors hover:bg-zinc-50 active:bg-zinc-100 dark:border-zinc-600 dark:bg-transparent dark:text-zinc-100 dark:hover:bg-white/10"
               >
+                {allSelected ? <X className="h-4 w-4" strokeWidth={1.9} /> : <CheckCheck className="h-4 w-4" strokeWidth={1.9} />}
                 {allSelected ? 'Clear selection' : 'Select all'}
               </button>
             </div>
@@ -659,7 +660,7 @@ export default function ChatsListPage({ sessions, onOpenSession, onNewChat, onDe
               type="button"
               disabled={selected.length === 0}
               onClick={() => setConfirmBulk(true)}
-              className="inline-flex h-8 items-center gap-2 rounded-lg bg-[#B53333] px-3 text-[13px] font-medium text-white transition-colors hover:bg-[#9E2B2B] disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex h-8 items-center gap-2 rounded-full bg-[#B53333] px-4 text-[13px] font-medium text-white transition-colors hover:bg-[#9E2B2B] disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-400 dark:disabled:bg-white/10 dark:disabled:text-zinc-500"
             >
               <Trash2 className="h-4 w-4" strokeWidth={1.8} />
               Delete
