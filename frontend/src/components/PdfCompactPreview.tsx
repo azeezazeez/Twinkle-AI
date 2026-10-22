@@ -78,12 +78,27 @@ export default function PdfCompactPreview({ src, fileName, onClose }: Props) {
             )}
           </span>
 
-          <span
-            className="flex h-6 items-center justify-center gap-1.5 whitespace-nowrap text-[15px] font-medium text-[#2F6FDE] dark:text-[#6BA2F5]"
-            title={failed || !pagesLabel ? undefined : pagesLabel}
-          >
-            <CircleArrowDown className="h-[17px] w-[17px]" strokeWidth={1.8} aria-hidden="true" />
-            Download
+          {/* Page count by default; "Download" replaces it while hovering (or focusing) the file.
+              Touch screens have no hover, so they always show "Download". */}
+          <span className="relative flex h-6 min-w-[120px] items-center justify-center whitespace-nowrap text-[15px]">
+            <span
+              aria-hidden={failed || !pagesLabel ? undefined : true}
+              className={`absolute inset-0 flex items-center justify-center gap-1.5 font-medium text-[#2F6FDE] transition-opacity duration-150 dark:text-[#6BA2F5] ${
+                failed || !pagesLabel
+                  ? 'opacity-100'
+                  : 'opacity-0 group-hover/pdf:opacity-100 group-focus-visible/pdf:opacity-100 [@media(hover:none)]:opacity-100'
+              }`}
+            >
+              <CircleArrowDown className="h-[17px] w-[17px]" strokeWidth={1.8} aria-hidden="true" />
+              Download
+            </span>
+            {!failed && pagesLabel && (
+              <span
+                className="absolute inset-0 flex items-center justify-center text-zinc-500 transition-opacity duration-150 group-hover/pdf:opacity-0 group-focus-visible/pdf:opacity-0 dark:text-zinc-400 [@media(hover:none)]:opacity-0"
+              >
+                {pagesLabel}
+              </span>
+            )}
           </span>
         </a>
       </div>
