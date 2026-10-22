@@ -5399,7 +5399,7 @@ if (isBlankDraft) {
           }`}
         >
           <span className="sr-only">Open sidebar</span>
-          <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden="true" className="relative shrink-0 -translate-y-px">
+          <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden="true" className="relative shrink-0 -translate-y-[2px]">
       <rect x="2.5" y="2.5" width="15" height="15" rx="0.5" stroke="currentColor" strokeWidth="2" />
       <path d="M8 3V17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
           </svg>
