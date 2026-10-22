@@ -12,7 +12,7 @@ import type { Session } from '../types';
 import { chatApi, fetchWithAuth } from '../lib/api';
 import { serverTime } from '../lib/time';
 import { dispatchShortcut, isMac } from '../lib/shortcuts';
-import { fetchLibraryFile, sendFilesToComposer } from '../lib/libraryAttach';
+import { attachLibraryFiles, forgetLibraryFile, prefetchLibraryFile } from '../lib/libraryAttach';
 import { toast } from '../lib/toast';
 
 /**
@@ -240,22 +240,17 @@ export default function SearchPalette({
     action();
   }, [onClose]);
 
-  // Picking Library files puts them in the chat composer, ready to send.
-  const attachDocs = useCallback(async (list: KnowledgeDoc[]) => {
-    if (!list.length || busy) return;
-    setBusy(true);
-    try {
-      const files = await Promise.all(list.map(doc => fetchLibraryFile(doc.id, doc.fileName)));
-      onClose();
-      // Not on a chat page (Settings, Profile...): open the chat; it picks the files up on load.
-      if (!/^\/(chat\/|$)/.test(window.location.pathname)) navigate('/');
-      sendFilesToComposer(files);
-    } catch (error) {
+  // Picking Library files puts them in the chat composer. The dialog closes at once; the composer
+  // shows its loading spinner while the files download (usually instant: rows prefetch on hover).
+  const attachDocs = useCallback((list: KnowledgeDoc[]) => {
+    if (!list.length) return;
+    onClose();
+    // Not on a chat page (Settings, Profile...): open the chat; it picks the files up on load.
+    if (!/^\/(chat\/|$)/.test(window.location.pathname)) navigate('/');
+    attachLibraryFiles(list.map(doc => ({ id: doc.id, name: doc.fileName }))).catch(error => {
       toast.error(error instanceof Error ? error.message : 'This file could not be opened from your Library.');
-    } finally {
-      setBusy(false);
-    }
-  }, [onClose, navigate, busy]);
+    });
+  }, [onClose, navigate]);
 
   const deleteDocs = useCallback(async (list: KnowledgeDoc[]) => {
     if (!list.length || busy) return;
@@ -266,6 +261,7 @@ export default function SearchPalette({
         try {
           await fetchWithAuth(`/api/rag/documents/${doc.id}`, { method: 'DELETE' });
           removed.push(doc.id);
+          forgetLibraryFile(doc.id);
         } catch { /* reported below */ }
       }
       setDocs(prev => prev.filter(doc => !removed.includes(doc.id)));
@@ -292,6 +288,7 @@ export default function SearchPalette({
     const button = event.currentTarget.getBoundingClientRect();
     const dialog = dialogRef.current?.getBoundingClientRect();
     if (!dialog) return;
+    prefetchLibraryFile(doc.id, doc.fileName);
     const menuHeight = 96;
     const below = button.bottom - dialog.top + 4;
     const top = below + menuHeight > dialog.height ? button.top - dialog.top - menuHeight - 4 : below;
@@ -351,7 +348,7 @@ export default function SearchPalette({
             Icon: doc.mimeType.startsWith('image/') ? ImageIcon : FileText,
             userContent: true,
             doc,
-            run: () => { if (selectMode) toggleSelected(doc.id); else void attachDocs([doc]); },
+            run: () => { if (selectMode) { toggleSelected(doc.id); prefetchLibraryFile(doc.id, doc.fileName); } else attachDocs([doc]); },
           });
         });
     }
@@ -536,7 +533,7 @@ export default function SearchPalette({
               type="button"
               tabIndex={-1}
               onClick={() => { setSelectMode(on => !on); setSelectedIds([]); setMenu(null); }}
-              className="rounded-full px-3 py-1 text-[13px] font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              className="h-8 rounded-full px-3.5 text-[13px] font-medium text-zinc-800 transition-colors hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-800"
             >
               {selectMode ? 'Cancel' : 'Select'}
             </button>
@@ -571,6 +568,7 @@ export default function SearchPalette({
                       onMouseMove={() => { if (!active) setActiveIndex(index); }}
                       onMouseEnter={() => {
                         if (item.key.startsWith('c-')) onPrefetchSession?.(Number(item.key.slice(2)));
+                        if (item.doc && !selectMode) prefetchLibraryFile(item.doc.id, item.doc.fileName);
                       }}
                       className={`group flex h-11 w-full cursor-pointer items-center gap-3.5 rounded-xl px-3 text-left transition-colors ${
                         active ? 'bg-zinc-100 dark:bg-zinc-800' : ''
@@ -626,12 +624,12 @@ export default function SearchPalette({
 
         {/* Multi-select actions */}
         {tab === 'knowledge' && selectMode && (
-          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-zinc-100 px-5 py-3 dark:border-zinc-800">
+          <div className="flex shrink-0 items-center justify-between gap-3 border-t border-zinc-100 px-5 py-3 dark:border-zinc-800">
             <button
               type="button"
               tabIndex={-1}
               onClick={() => setSelectedIds(selectedIds.length === items.length ? [] : items.flatMap(item => (item.doc ? [item.doc.id] : [])))}
-              className="rounded-full px-3 py-1.5 text-[14px] text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              className="h-10 shrink-0 rounded-full px-4 text-[14px] font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
               {selectedIds.length === items.length && items.length > 0 ? 'Clear selection' : 'Select all'}
             </button>
@@ -640,19 +638,19 @@ export default function SearchPalette({
                 type="button"
                 tabIndex={-1}
                 disabled={!selectedIds.length || busy}
-                onClick={() => void attachDocs(docs.filter(doc => selectedIds.includes(doc.id)))}
-                className="inline-flex items-center gap-2 rounded-full bg-zinc-900 px-4 py-1.5 text-[14px] font-medium text-white transition-opacity disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900"
+                onClick={() => setConfirmDelete(docs.filter(doc => selectedIds.includes(doc.id)))}
+                className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-full border border-zinc-300 bg-white px-4 text-[14px] font-medium text-zinc-900 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-600 dark:bg-transparent dark:text-zinc-100 dark:hover:bg-zinc-800"
               >
-                {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />} Add to chat
+                <Trash2 className="h-4 w-4 shrink-0" strokeWidth={1.9} /> Delete
               </button>
               <button
                 type="button"
                 tabIndex={-1}
                 disabled={!selectedIds.length || busy}
-                onClick={() => setConfirmDelete(docs.filter(doc => selectedIds.includes(doc.id)))}
-                className="inline-flex items-center gap-2 rounded-full border border-red-200 px-4 py-1.5 text-[14px] font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-40 dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10"
+                onClick={() => attachDocs(docs.filter(doc => selectedIds.includes(doc.id)))}
+                className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-full bg-zinc-900 px-5 text-[14px] font-medium text-white transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
               >
-                <Trash2 className="h-4 w-4" /> Delete
+                {busy ? <LoaderCircle className="h-4 w-4 shrink-0 animate-spin" /> : <Paperclip className="h-4 w-4 shrink-0" strokeWidth={1.9} />} Add to chat
               </button>
             </div>
           </div>
@@ -683,7 +681,7 @@ export default function SearchPalette({
             <button
               type="button"
               role="menuitem"
-              onClick={() => { const doc = menu.doc; setMenu(null); void attachDocs([doc]); }}
+              onClick={() => { const doc = menu.doc; setMenu(null); attachDocs([doc]); }}
               className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] text-zinc-800 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-700"
             >
               <Paperclip className="h-4 w-4" strokeWidth={1.8} /> Add to chat
@@ -700,7 +698,7 @@ export default function SearchPalette({
               type="button"
               role="menuitem"
               onClick={() => { const doc = menu.doc; setMenu(null); setConfirmDelete([doc]); }}
-              className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
+              className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] text-zinc-800 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-700"
             >
               <Trash2 className="h-4 w-4" strokeWidth={1.8} /> Delete
             </button>
@@ -722,7 +720,7 @@ export default function SearchPalette({
                   type="button"
                   disabled={busy}
                   onClick={() => setConfirmDelete(null)}
-                  className="rounded-full px-4 py-2 text-[14px] text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  className="inline-flex h-10 items-center justify-center rounded-full border border-zinc-300 px-5 text-[14px] font-medium text-zinc-800 transition-colors hover:bg-zinc-100 disabled:opacity-60 dark:border-zinc-600 dark:text-zinc-100 dark:hover:bg-zinc-800"
                 >
                   Cancel
                 </button>
@@ -730,7 +728,7 @@ export default function SearchPalette({
                   type="button"
                   disabled={busy}
                   onClick={() => void deleteDocs(confirmDelete)}
-                  className="inline-flex items-center gap-2 rounded-full bg-red-600 px-4 py-2 text-[14px] font-medium text-white hover:bg-red-700 disabled:opacity-60"
+                  className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-full bg-zinc-900 px-5 text-[14px] font-medium text-white transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
                 >
                   {busy && <LoaderCircle className="h-4 w-4 animate-spin" />} Delete
                 </button>
