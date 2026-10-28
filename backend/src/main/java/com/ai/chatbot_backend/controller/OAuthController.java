@@ -1,5 +1,6 @@
 package com.ai.chatbot_backend.controller;
 
+import com.ai.chatbot_backend.config.SessionSupport;
 import com.ai.chatbot_backend.dto.User;
 import com.ai.chatbot_backend.service.OAuthService;
 
@@ -29,6 +30,11 @@ import javax.crypto.spec.SecretKeySpec;
 @Slf4j
 public class OAuthController {
 
+    private static final String OAUTH_NONCE_ATTRIBUTE = "oauth_state_nonce";
+
+    private static final java.security.SecureRandom NONCE_RANDOM = new java.security.SecureRandom();
+
+
     private final OAuthService oauthService;
 
 
@@ -53,12 +59,18 @@ public class OAuthController {
      */
 
     @GetMapping("/google")
-    public String google() {
+    public String google(HttpServletRequest request) {
 
         try {
 
+            // The state is bound to THIS browser: a random nonce is kept in the server-side
+            // session and also signed into the state. The callback only accepts a state
+            // whose nonce matches the session (blocks login CSRF / state replay).
+            String nonce = newNonce();
+            request.getSession(true).setAttribute(OAUTH_NONCE_ATTRIBUTE, nonce);
+
             String state =
-                    createState("GOOGLE");
+                    createState("GOOGLE", nonce);
 
 
             String authorizationUrl =
@@ -178,10 +190,21 @@ public class OAuthController {
          * --------------------------------------------------------
          */
 
+        HttpSession stateSession = request.getSession(false);
+        Object expectedNonce = stateSession == null
+                ? null
+                : stateSession.getAttribute(OAUTH_NONCE_ATTRIBUTE);
+        if (stateSession != null) {
+            // Single use: a state can never be replayed.
+            stateSession.removeAttribute(OAUTH_NONCE_ATTRIBUTE);
+        }
+
         if (
-                !verifyState(
+                !(expectedNonce instanceof String)
+                        || !verifyState(
                         state,
-                        "GOOGLE"
+                        "GOOGLE",
+                        (String) expectedNonce
                 )
         ) {
 
@@ -259,31 +282,8 @@ public class OAuthController {
              */
 
             log.info(
-                    "Google OAuth authentication successful"
-            );
-
-            log.info(
-                    "Google user email: {}",
-                    user.getEmail()
-            );
-
-            log.info(
-                    "Google session created: {}",
-                    session.getId()
-            );
-
-            log.info(
-                    "Google session userId: {}",
-                    session.getAttribute(
-                            "userId"
-                    )
-            );
-
-            log.info(
-                    "Google session user exists: {}",
-                    session.getAttribute(
-                            "user"
-                    ) != null
+                    "Google OAuth authentication successful for userId {}",
+                    session.getAttribute("userId")
             );
 
 
@@ -338,30 +338,10 @@ public class OAuthController {
          */
 
         HttpSession session =
-                request.getSession(true);
-
-
-        /*
-         * Store the complete user object.
-         *
-         * AuthController /status reads this attribute.
-         */
-
-        session.setAttribute(
-                "user",
-                user
-        );
-
-
-        /*
-         * Store user ID separately because other
-         * controllers/services may use it.
-         */
-
-        session.setAttribute(
-                "userId",
-                user.getId()
-        );
+                SessionSupport.establishAuthenticatedSession(
+                        request,
+                        user
+                );
 
 
         /*
@@ -369,7 +349,7 @@ public class OAuthController {
          */
 
         session.setMaxInactiveInterval(
-                30 * 24 * 60 * 60
+                24 * 60 * 60
         );
 
 
@@ -397,7 +377,8 @@ public class OAuthController {
      */
 
     private String createState(
-            String provider
+            String provider,
+            String nonce
     ) {
 
         long timestamp =
@@ -408,7 +389,9 @@ public class OAuthController {
         String payload =
                 provider +
                         ":" +
-                        timestamp;
+                        timestamp +
+                        ":" +
+                        nonce;
 
 
         String signature =
@@ -438,11 +421,9 @@ public class OAuthController {
      */
 
     private boolean verifyState(
-
             String state,
-
-            String expectedProvider
-
+            String expectedProvider,
+            String expectedNonce
     ) {
 
         try {
@@ -496,12 +477,11 @@ public class OAuthController {
             String[] payloadParts =
                     payload.split(
                             ":",
-                            2
+                            3
                     );
 
-
             if (
-                    payloadParts.length != 2
+                    payloadParts.length != 3
             ) {
 
                 return false;
@@ -516,6 +496,18 @@ public class OAuthController {
                     Long.parseLong(
                             payloadParts[1]
                     );
+
+            /*
+             * Nonce must be the one stored in this browser's session.
+             */
+            if (
+                    !constantTimeEquals(
+                            payloadParts[2],
+                            expectedNonce
+                    )
+            ) {
+                return false;
+            }
 
 
             /*
@@ -587,7 +579,14 @@ public class OAuthController {
      * ============================================================
      */
 
-    private String hmac(
+    private static String newNonce() {
+        byte[] bytes = new byte[24];
+        NONCE_RANDOM.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+
+        private String hmac(
             String value
     ) {
 
