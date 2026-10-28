@@ -6071,7 +6071,7 @@ if (isBlankDraft) {
 
               <div
                 ref={modelPickerRef}
-                className={`twinkle-composer-row relative z-[200] flex min-w-0 items-center${messages.length > 0 ? ' twinkle-composer-inline' : ''}${isTyping ? ' twinkle-composer-streaming' : ''}${voiceInputActive ? ' twinkle-composer-voice' : ''}`}
+                className={`twinkle-composer-row relative z-[200] flex min-w-0 items-center${messages.length > 0 ? ' twinkle-composer-inline' : ''}${isTyping ? ' twinkle-composer-streaming' : ''}${voiceInputActive ? ' twinkle-composer-voice' : ''}${isPhoneViewport ? ' twinkle-composer-phone' : ''}`}
               >
                 {/* Hidden file input */}
                 <input
