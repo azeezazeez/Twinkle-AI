@@ -1,5 +1,8 @@
 package com.ai.chatbot_backend.controller;
 
+import com.ai.chatbot_backend.config.ClientIpResolver;
+import com.ai.chatbot_backend.config.PasswordPolicy;
+import com.ai.chatbot_backend.config.SessionSupport;
 import com.ai.chatbot_backend.dto.LoginRequest;
 import com.ai.chatbot_backend.dto.RegisterRequest;
 import com.ai.chatbot_backend.dto.VerifyOtpRequest;
@@ -52,10 +55,37 @@ public class AuthController {
     private final ChatHistoryService chatHistoryService;
     private final RateLimitService rateLimitService;
     private final AccountService accountService;
+    private final ClientIpResolver clientIpResolver;
+
+    // Emails we are willing to send per address, no matter which IP asks (stops mail-bombing
+    // a victim from many IPs).
+    private static final int MAX_MAILS_PER_ADDRESS = 3;
+    private static final Duration MAIL_WINDOW = Duration.ofMinutes(10);
+
+    private static final String GENERIC_FORGOT_MESSAGE =
+            "If an account exists for that email, a password reset code has been sent.";
+
+    private String clientIp(HttpServletRequest request) {
+        return clientIpResolver.resolve(request);
+    }
+
+    /** True when too many emails were already sent to this address recently. */
+    private boolean mailBudgetExceeded(String email) {
+        return !rateLimitService.allow("mail-email:" + email, MAX_MAILS_PER_ADDRESS, MAIL_WINDOW);
+    }
 
     // Failed-attempt lockouts (per account, in addition to the per-IP limits).
     private static final int MAX_FAILED_ATTEMPTS = 5;
+    private static final int MAX_FAILED_ATTEMPTS_PER_IP = 30;
     private static final Duration LOCKOUT = Duration.ofMinutes(15);
+
+    private ResponseEntity<Map<String, Object>> tooManyMails() {
+        return ResponseEntity
+                .status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", String.valueOf(MAIL_WINDOW.toSeconds()))
+                .body(errorResponse(
+                        "Too many emails were sent to this address. Please try again in a few minutes."));
+    }
 
     private ResponseEntity<Map<String, Object>> tooManyAttempts(String key) {
         long minutes = Math.max(1, (rateLimitService.retryAfterSeconds(key) + 59) / 60);
@@ -119,11 +149,18 @@ public class AuthController {
             // LOGIN
             // ----------------------------------------------------
 
+            // Lockout is per (account + client IP) so a stranger cannot lock the real owner
+            // out, plus a per-IP failure budget against password spraying.
+            String loginIp = clientIp(httpRequest);
             loginKey = "login-fail:" +
-                    request.getUsername().trim().toLowerCase();
+                    request.getUsername().trim().toLowerCase() + "|" + loginIp;
+            String loginIpKey = "login-fail-ip:" + loginIp;
 
             if (rateLimitService.isBlocked(loginKey, MAX_FAILED_ATTEMPTS)) {
                 return tooManyAttempts(loginKey);
+            }
+            if (rateLimitService.isBlocked(loginIpKey, MAX_FAILED_ATTEMPTS_PER_IP)) {
+                return tooManyAttempts(loginIpKey);
             }
 
             User user =
@@ -133,6 +170,7 @@ public class AuthController {
             if (user == null) {
 
                 rateLimitService.recordFailure(loginKey, LOCKOUT);
+                rateLimitService.recordFailure(loginIpKey, LOCKOUT);
 
                 return unauthorized(
                         "Invalid credentials"
@@ -146,20 +184,9 @@ public class AuthController {
             // CREATE SESSION
             // ----------------------------------------------------
 
-            HttpSession session =
-                    httpRequest.getSession(true);
-
-
-            session.setAttribute(
-                    "user",
-                    user
-            );
-
-
-            session.setAttribute(
-                    "userId",
-                    user.getId()
-            );
+            // Rotates the session ID (anti session-fixation) and keeps the password hash
+            // out of the stored session.
+            SessionSupport.establishAuthenticatedSession(httpRequest, user);
 
 
             // ----------------------------------------------------
@@ -189,8 +216,8 @@ public class AuthController {
 
 
             log.info(
-                    "Login successful for username: {}",
-                    user.getUsername()
+                    "Login successful for userId: {}",
+                    user.getId()
             );
 
 
@@ -235,6 +262,8 @@ public class AuthController {
                 if (loginKey != null &&
                         message.equalsIgnoreCase("Invalid credentials")) {
                     rateLimitService.recordFailure(loginKey, LOCKOUT);
+                    rateLimitService.recordFailure(
+                            "login-fail-ip:" + clientIp(httpRequest), LOCKOUT);
                 }
 
                 return unauthorized(
@@ -305,14 +334,15 @@ public class AuthController {
                     username.trim();
 
 
-            if (request.getPassword() == null ||
-                    request.getPassword().isEmpty()) {
-
-                return badRequest(
-                        "Password is required"
-                );
+            if (username.length() > 50) {
+                return badRequest("Username cannot exceed 50 characters");
             }
 
+            String passwordProblem =
+                    PasswordPolicy.validate(request.getPassword(), username, email);
+            if (passwordProblem != null) {
+                return badRequest(passwordProblem);
+            }
 
             if (username.contains("@")) {
 
@@ -348,6 +378,10 @@ public class AuthController {
 
             request.setEmail(email);
             request.setUsername(username);
+
+            if (mailBudgetExceeded(email)) {
+                return tooManyMails();
+            }
 
 
             // ----------------------------------------------------
@@ -496,6 +530,10 @@ public class AuthController {
 
             // Do NOT create the user here. A new email only becomes a row in
             // the users table after its OTP has been verified.
+            if (mailBudgetExceeded(email)) {
+                return tooManyMails();
+            }
+
             Optional<User> existingUser = userService.findByEmail(email);
             createdNewUser = existingUser.isEmpty();
 
@@ -527,14 +565,10 @@ public class AuthController {
             response.put("success", true);
             response.put("message", "Verification code sent successfully.");
             response.put("email", email);
-            response.put("isNewUser", createdNewUser);
-            response.put("verified", existingUser.map(User::isVerified).orElse(false));
+            // isNewUser / verified are intentionally NOT returned: they would tell anyone
+            // whether an email address has an account.
 
-            log.info(
-                    "OTP requested successfully for {} (newUser={})",
-                    email,
-                    createdNewUser
-            );
+            log.info("OTP requested (newUser={})", createdNewUser);
 
             return ResponseEntity.ok(response);
 
@@ -619,7 +653,7 @@ public class AuthController {
 
             Optional<User> userOptional = userService.findByEmail(email);
 
-            String otpKey = "otp-fail:" + email;
+            String otpKey = "otp-fail:" + email + "|" + clientIp(httpRequest);
 
             if (rateLimitService.isBlocked(otpKey, MAX_FAILED_ATTEMPTS)) {
                 return tooManyAttempts(otpKey);
@@ -662,19 +696,14 @@ public class AuthController {
                     ));
 
             clearPendingRegistration(session);
-
-            session.setAttribute("user", authenticatedUser);
-            session.setAttribute("userId", authenticatedUser.getId());
+            SessionSupport.establishAuthenticatedSession(httpRequest, authenticatedUser);
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
             response.put("message", "Email verified successfully");
             response.put("user", buildUserData(authenticatedUser));
 
-            log.info(
-                    "Email OTP authentication successful for {}",
-                    email
-            );
+            log.info("Email OTP authentication successful for userId {}", authenticatedUser.getId());
 
             return ResponseEntity.ok(response);
 
@@ -734,10 +763,18 @@ public class AuthController {
                         : (String) existingSession.getAttribute(PENDING_REGISTRATION_EMAIL);
 
                 if (pending == null || !email.equals(normalizeEmail(pending))) {
-                    return badRequest(
-                            "Account could not be found. Please request a new OTP."
-                    );
+                    // Same answer as a real resend so this endpoint cannot be used to
+                    // discover which emails have accounts. Nothing is sent.
+                    Map<String, Object> quiet = new HashMap<>();
+                    quiet.put("success", true);
+                    quiet.put("message", "Verification code resent successfully.");
+                    quiet.put("email", email);
+                    return ResponseEntity.ok(quiet);
                 }
+            }
+
+            if (mailBudgetExceeded(email)) {
+                return tooManyMails();
             }
 
             otpService.resendOtp(email);
@@ -1128,7 +1165,7 @@ public class AuthController {
                 }
 
                 User renamed = userService.updateFullName(((User) nameSessionUser).getId(), fullName);
-                nameSession.setAttribute("user", renamed);
+                nameSession.setAttribute("user", SessionSupport.sanitize(renamed));
 
                 Map<String, Object> nameResponse = new HashMap<>();
                 nameResponse.put("success", true);
@@ -1242,10 +1279,7 @@ public class AuthController {
             // ----------------------------------------------------
             // UPDATE SESSION
             // ----------------------------------------------------
-            session.setAttribute(
-                    "user",
-                    updatedUser
-            );
+            session.setAttribute("user", SessionSupport.sanitize(updatedUser));
 
             session.setAttribute(
                     "userId",
@@ -1340,288 +1374,117 @@ public class AuthController {
     public ResponseEntity<Map<String, Object>> forgotPassword(
             @RequestBody Map<String, String> request
     ) {
-
         try {
-
             if (request == null) {
-
-                return badRequest(
-                        "Request is required"
-                );
+                return badRequest("Request is required");
             }
 
-
-            String email =
-                    normalizeEmail(
-                            request.get("email")
-                    );
-
+            String email = normalizeEmail(request.get("email"));
 
             if (email.isEmpty()) {
-
-                return badRequest(
-                        "Email is required"
-                );
+                return badRequest("Email is required");
             }
 
-
-            // ----------------------------------------------------
-            // FIND USER
-            // ----------------------------------------------------
-
-            Optional<User> user =
-                    userService.findByEmail(
-                            email
-                    );
-
-
-            if (user.isEmpty()) {
-
-                return ResponseEntity
-                        .status(
-                                HttpStatus.NOT_FOUND
-                        )
-                        .body(
-                                errorResponse(
-                                        "Email not found"
-                                )
-                        );
+            if (!email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) {
+                return badRequest("Please enter a valid email address");
             }
 
+            // The answer is identical whether or not the account exists, and the e-mail is
+            // sent in the background, so neither the body nor the response time reveals
+            // which addresses are registered.
+            Optional<User> user = userService.findByEmail(email);
 
-            // ----------------------------------------------------
-            // SEND RESET OTP
-            // ----------------------------------------------------
+            if (user.isPresent() && !mailBudgetExceeded(email)) {
+                final String target = email;
+                java.util.concurrent.CompletableFuture.runAsync(() -> {
+                    try {
+                        otpService.generateAndSendPasswordResetOtp(target);
+                    } catch (Exception e) {
+                        log.error("Password reset OTP could not be sent: {}", e.getMessage());
+                    }
+                });
+            }
 
-            otpService
-                    .generateAndSendPasswordResetOtp(
-                            email
-                    );
-
-
-            // ----------------------------------------------------
-            // RESPONSE
-            // ----------------------------------------------------
-
-            Map<String, Object> response =
-                    new HashMap<>();
-
-
-            response.put(
-                    "success",
-                    true
-            );
-
-
-            response.put(
-                    "message",
-                    "Password reset OTP sent to your email"
-            );
-
-
-            response.put(
-                    "email",
-                    email
-            );
-
-
-            return ResponseEntity.ok(
-                    response
-            );
-
-
-        } catch (
-                OTPService.OTPDeliveryException e
-        ) {
-
-            log.error(
-                    "Password reset OTP delivery failed: {}",
-                    e.getMessage(),
-                    e
-            );
-
-
-            return ResponseEntity
-                    .status(
-                            HttpStatus.BAD_GATEWAY
-                    )
-                    .body(
-                            errorResponse(
-                                    "Unable to send password reset email. Please try again."
-                            )
-                    );
-
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", GENERIC_FORGOT_MESSAGE);
+            response.put("email", email);
+            return ResponseEntity.ok(response);
 
         } catch (Exception e) {
-
-            log.error(
-                    "Forgot password failed: {}",
-                    e.getMessage(),
-                    e
-            );
-
-
+            log.error("Forgot password failed: {}", e.getMessage());
             return ResponseEntity
-                    .status(
-                            HttpStatus.INTERNAL_SERVER_ERROR
-                    )
-                    .body(
-                            errorResponse(
-                                    "Unable to process password reset. Please try again."
-                            )
-                    );
+                    .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(errorResponse("Unable to process request. Please try again."));
         }
     }
 
-
-    // ============================================================
-    // RESET PASSWORD
     // ============================================================
 
     @PostMapping("/reset-password")
     public ResponseEntity<Map<String, Object>> resetPassword(
-            @RequestBody Map<String, String> request
+            @RequestBody Map<String, String> request,
+            HttpServletRequest httpRequest
     ) {
-
         try {
-
             if (request == null) {
-
-                return badRequest(
-                        "Request is required"
-                );
+                return badRequest("Request is required");
             }
 
-
-            String email =
-                    normalizeEmail(
-                            request.get("email")
-                    );
-
-
-            String otpCode =
-                    request.get("otpCode");
-
-
-            String newPassword =
-                    request.get("newPassword");
-
+            String email = normalizeEmail(request.get("email"));
+            String otpCode = request.get("otpCode");
+            String newPassword = request.get("newPassword");
 
             if (email.isEmpty()) {
-
-                return badRequest(
-                        "Email is required"
-                );
+                return badRequest("Email is required");
             }
 
-
-            if (otpCode == null ||
-                    otpCode.trim().isEmpty()) {
-
-                return badRequest(
-                        "OTP is required"
-                );
+            if (otpCode == null || otpCode.trim().isEmpty()) {
+                return badRequest("OTP is required");
             }
 
-
-            if (newPassword == null ||
-                    newPassword.isEmpty()) {
-
-                return badRequest(
-                        "New password is required"
-                );
+            // Check the password BEFORE the OTP: the code is single use and must not be
+            // burned by a password that is rejected afterwards.
+            String passwordProblem = PasswordPolicy.validate(newPassword, null, email);
+            if (passwordProblem != null) {
+                return badRequest(passwordProblem);
             }
 
+            otpCode = otpCode.trim();
 
-            otpCode =
-                    otpCode.trim();
-
-
-            // ----------------------------------------------------
-            // VALIDATE RESET OTP
-            // ----------------------------------------------------
-
-            String resetKey = "reset-fail:" + email;
+            String resetKey = "reset-fail:" + email + "|" + clientIp(httpRequest);
 
             if (rateLimitService.isBlocked(resetKey, MAX_FAILED_ATTEMPTS)) {
                 return tooManyAttempts(resetKey);
             }
 
-            boolean isValid =
-                    otpService.validatePasswordResetOtp(
-                            email,
-                            otpCode
-                    );
-
+            boolean isValid = otpService.validatePasswordResetOtp(email, otpCode);
 
             if (!isValid) {
-
                 rateLimitService.recordFailure(resetKey, LOCKOUT);
-
-                return badRequest(
-                        "Invalid or expired OTP"
-                );
+                return badRequest("Invalid or expired OTP");
             }
 
             rateLimitService.reset(resetKey);
 
+            userService.updatePassword(email, newPassword);
 
-            // ----------------------------------------------------
-            // UPDATE PASSWORD
-            // ----------------------------------------------------
+            // A password reset must kick out whoever may already be signed in
+            // (for example an attacker who had the old password).
+            userService.findByEmail(email).ifPresent(u -> accountService.revokeAllSessions(u.getId()));
 
-            userService.updatePassword(
-                    email,
-                    newPassword
-            );
-
-
-            // ----------------------------------------------------
-            // RESPONSE
-            // ----------------------------------------------------
-
-            Map<String, Object> response =
-                    new HashMap<>();
-
-
-            response.put(
-                    "success",
-                    true
-            );
-
-
-            response.put(
-                    "message",
-                    "Password reset successfully"
-            );
-
-
-            return ResponseEntity.ok(
-                    response
-            );
-
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "Password reset successfully");
+            return ResponseEntity.ok(response);
 
         } catch (Exception e) {
-
-            log.error(
-                    "Reset password failed: {}",
-                    e.getMessage(),
-                    e
-            );
-
-
+            log.error("Reset password failed: {}", e.getMessage());
             return ResponseEntity
-                    .status(
-                            HttpStatus.INTERNAL_SERVER_ERROR
-                    )
-                    .body(
-                            errorResponse(
-                                    "Unable to reset password. Please try again."
-                            )
-                    );
+                    .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(errorResponse("Unable to reset password. Please try again."));
         }
     }
-
 
     // ============================================================
     // BUILD USER DATA
