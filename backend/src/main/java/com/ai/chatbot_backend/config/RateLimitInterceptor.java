@@ -10,17 +10,16 @@ import org.springframework.web.servlet.HandlerInterceptor;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
-/**
- * Per-IP limits on the auth endpoints (stops OTP/email spam and password
- * guessing) and per-user limits on chat endpoints (protects the AI quota).
- */
+
 @Component
 public class RateLimitInterceptor implements HandlerInterceptor {
 
     private final RateLimitService rateLimitService;
+    private final ClientIpResolver clientIpResolver;
 
-    public RateLimitInterceptor(RateLimitService rateLimitService) {
+    public RateLimitInterceptor(RateLimitService rateLimitService, ClientIpResolver clientIpResolver) {
         this.rateLimitService = rateLimitService;
+        this.clientIpResolver = clientIpResolver;
     }
 
     @Override
@@ -33,42 +32,65 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         }
 
         String path = request.getRequestURI();
-        String ip = clientIp(request);
+        String ip = clientIpResolver.resolve(request);
 
-        String key;
-        int max;
-        Duration window;
+        HttpSession session = request.getSession(false);
+        Object userId = session == null ? null : session.getAttribute("userId");
+        String who = userId != null ? "u" + userId : "ip" + ip;
 
+        // Each rule: key, max, window. A request may hit more than one rule.
         if (path.endsWith("/api/auth/login")) {
-            key = "ip-login:" + ip;
-            max = 20;
-            window = Duration.ofMinutes(1);
+            if (!check(response, "ip-login:" + ip, 20, Duration.ofMinutes(1))) return false;
+
         } else if (path.endsWith("/api/auth/signup")
                 || path.endsWith("/api/auth/request-otp")
                 || path.endsWith("/api/auth/resend-otp")
                 || path.endsWith("/api/auth/forgot-password")) {
             // These send an email, so keep them tight.
-            key = "ip-mail:" + ip;
-            max = 8;
-            window = Duration.ofMinutes(10);
+            if (!check(response, "ip-mail:" + ip, 8, Duration.ofMinutes(10))) return false;
+
         } else if (path.endsWith("/api/auth/verify-otp") || path.endsWith("/api/auth/reset-password")) {
-            key = "ip-otp:" + ip;
-            max = 30;
-            window = Duration.ofMinutes(10);
+            if (!check(response, "ip-otp:" + ip, 30, Duration.ofMinutes(10))) return false;
+
         } else if (path.contains("/api/chat/")) {
-            HttpSession session = request.getSession(false);
-            Object userId = session == null ? null : session.getAttribute("userId");
-            key = "chat:" + (userId != null ? "u" + userId : "ip" + ip);
-            max = 60;
-            window = Duration.ofMinutes(1);
-        } else {
-            return true;
+            if (userId != null) {
+                if (!check(response, "chat:" + who, 60, Duration.ofMinutes(1))) return false;
+            } else {
+                // Anonymous: much tighter per IP, plus a global ceiling so rotating IPs
+                // cannot drain the AI quota.
+                if (!check(response, "chat-anon:" + ip, 10, Duration.ofMinutes(1))) return false;
+                if (!check(response, "chat-anon-global", 120, Duration.ofMinutes(1))) return false;
+            }
+
+        } else if (path.contains("/api/rag/")) {
+            // Uploads are expensive (parsing + embeddings), questions cost model calls.
+            if (path.endsWith("/api/rag/documents")) {
+                if (!check(response, "rag-upload:" + who, 10, Duration.ofMinutes(10))) return false;
+            } else if (path.endsWith("/api/rag/ask")) {
+                if (!check(response, "rag-ask:" + who, 30, Duration.ofMinutes(1))) return false;
+            } else {
+                if (!check(response, "rag:" + who, 60, Duration.ofMinutes(1))) return false;
+            }
+
+        } else if (path.contains("/api/live/")) {
+            // Each call mints a Gemini Live token.
+            if (!check(response, "live-token:" + who, 6, Duration.ofMinutes(10))) return false;
+
+        } else if (path.contains("/api/i18n/") || path.contains("/api/autocorrect")) {
+            if (!check(response, "aux:" + who, 60, Duration.ofMinutes(1))) return false;
+            if (userId == null && !check(response, "aux-anon-global", 300, Duration.ofMinutes(1))) return false;
+
+        } else if (path.contains("/api/memory/")) {
+            if (!check(response, "memory:" + who, 60, Duration.ofMinutes(1))) return false;
         }
 
+        return true;
+    }
+
+    private boolean check(HttpServletResponse response, String key, int max, Duration window) throws Exception {
         if (rateLimitService.allow(key, max, window)) {
             return true;
         }
-
         long retryAfter = rateLimitService.retryAfterSeconds(key);
         response.setStatus(429);
         response.setHeader("Retry-After", String.valueOf(retryAfter));
@@ -78,13 +100,5 @@ public class RateLimitInterceptor implements HandlerInterceptor {
                 "{\"success\":false,\"message\":\"Too many requests. Please wait a moment and try again.\"}"
         );
         return false;
-    }
-
-    private static String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
     }
 }
