@@ -252,10 +252,15 @@ public class CloudflareAiService {
                 try {
                     JsonNode content = objectMapper.readTree(data)
                             .path("choices").path(0).path("delta").path("content");
-                    if (content.isTextual() && !content.asText().isEmpty()) {
+                    // Cloudflare's Llama stream sends purely numeric tokens (for example
+                    // 29, 28, 2026) as JSON numbers instead of strings. Accept every
+                    // scalar value so temperatures, dates and times keep their digits.
+                    if (content.isValueNode() && !content.isNull()) {
                         String chunk = content.asText();
-                        full.append(chunk);
-                        onDelta.accept(chunk);
+                        if (!chunk.isEmpty()) {
+                            full.append(chunk);
+                            onDelta.accept(chunk);
+                        }
                     }
                 } catch (IOException parseError) {
                     log.debug("Ignoring malformed Cloudflare stream event.");
